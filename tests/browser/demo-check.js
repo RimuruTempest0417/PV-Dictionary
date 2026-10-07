@@ -485,7 +485,11 @@ async function main() {
         const cspViolations = await browser.evaluate(`return window.__cspViolations || [];`);
         check('沒有任何 CSP 違規（行內事件／樣式都會在這裡現形）', cspViolations.length === 0, JSON.stringify(cspViolations));
 
-        const consoleErrors = browser.consoleErrors.filter((line) => !/favicon|Failed to load resource/.test(line));
+        /* 忽略兩種「本機才會有」的訊息：
+         *  - favicon／Failed to load resource：本機沒有那顆圖或端點
+         *  - /_vercel/insights/script.js：Vercel Web Analytics 的腳本，本機沒有 Vercel 平台服務它
+         *    （本機會被 SPA fallback 回 HTML，Chrome 因此報 MIME 錯誤；正式站由 Vercel 提供，是正常的 JS） */
+        const consoleErrors = browser.consoleErrors.filter((line) => !/favicon|Failed to load resource|_vercel\/insights/.test(line));
         const pageErrors = browser.pageErrors;
         check('沒有前端例外', pageErrors.length === 0, pageErrors.join(' | '));
         check('沒有主控台錯誤', consoleErrors.length === 0, consoleErrors.join(' | '));
