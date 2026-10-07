@@ -3,9 +3,10 @@
 線上英文生字字典：學生**點書本封面 → 選單元 → 看生字表**（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.2.0（Demo）**
-- 規劃書：`docs/規劃書-v0.0.1.md`
+- 目前版本：**v0.3.0（本機 Demo ＋ 線上版骨架）**
+- 規劃書：`docs/規劃書-v0.0.1.md`｜部署說明：`docs/deploy-vercel.md`
 - 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie、介面預設英文可切中文
+- 線上：Vercel `pv-dictionary`＋Supabase（**待填入兩個環境變數後即完成**，見 `docs/deploy-vercel.md`）
 
 ---
 
@@ -80,15 +81,20 @@ grep SEED_ .env
 
 | 環境 | 資料層 | 狀態 |
 |---|---|---|
-| 本機 Demo | 本機 JSON（`data/store.json`，不進 Git） | 可用，內容清空由你手動加入 |
-| 線上（Vercel） | Supabase PostgreSQL | **專案已建好、schema 已套用**（見下），adapter 與部署待做 |
+| 本機 Demo | 本機 JSON（`data/store.json`，不進 Git） | 可用，內容由你手動加入 |
+| 線上（Vercel） | Supabase PostgreSQL | **adapter 已完成並實測通過**；Vercel 專案已建立，填好兩個環境變數即上線 |
 
 Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-southeast-1`，免費方案），
 7 張表 `dict_*` 已依 `migrations/2026-10-08-v0.0.1-init.sql` 建立，RLS 全開且不加 policy、
 已撤銷 anon／authenticated 權限（只有 service_role 進得去）。
 
-上線前要準備（**由你自己填，不要貼在對話裡**）：
-`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`JWT_SECRET`、`DATA_BACKEND=supabase`、`SITE_URL`。
+資料層怎麼運作（`lib/store/supabase.js` 開頭有完整說明）：**每個 /api 請求先抓下 7 張表 → 路由照舊同步讀寫 →
+回應送出「之前」把異動寫回**（寫回失敗回 500，不假裝成功）。這樣做是因為路由是同步風格，
+而且 serverless 在回應後會凍結實例、不能之後才寫資料庫。
+
+上線步驟與驗證指令：`docs/deploy-vercel.md`。要準備的環境變數：
+`DATA_BACKEND=supabase`、`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`JWT_SECRET`、`SITE_URL`
+（**後兩者請自己填，不要貼在對話裡**）。
 
 ---
 
@@ -101,6 +107,9 @@ Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-sout
 - **搜尋**：即時過濾生字、中文、英文解釋、音標、詞性。
 - **管理選單（老師以上）**：管理區分成 `⏳ 待審核｜➕ 新增生字｜📋 批次貼上｜🏗 新增單元｜📗 新增書本｜🖼 書本封面｜🧾 稽核紀錄｜👥 帳號管理｜🔑 授權管理`，
   **按哪個才顯示哪一塊**；沒有權限的分頁不會出現，待審核數量顯示在按鈕上。
+  從生字卡按「✏️ 編輯」時，管理區沒開會**自動打開並帶到那張表單**。
+- **修改自己的密碼**：標題列的 🔑（任何登入者都能用，要輸入目前的密碼）；管理員也可以在帳號管理面板替任何人重設。
+  自己**不能**改自己的角色或停用自己（那是提權／自鎖），後端會擋。
 - **帳號管理**：建立帳號、改角色、重設密碼、停用／啟用、刪除（兩段式確認）。
 - **單元級授權**：授權某人在某本書或某個單元編輯（可加「也可以發佈」）。
 - **審核流程**：科代表新增 → 「待審核」（學生看不到）→ 老師核准 → 學生才看得到。
@@ -168,8 +177,10 @@ guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin
 
 ```bash
 npm run check:syntax   # 所有 JS 語法檢查 + server.js 模組載入檢查
-npm test               # 50 項：角色權限矩陣、資料層、匯入解析、i18n 完整性、API 端到端（含帳號／授權／封面）、守門檢查
-npm run check:browser  # 四支真 Chrome 檢查（劇本 50 ＋ 空白起步 31 ＋ 語言切換 28 ＋ 帳號管理 44）
+npm test               # 56 項：角色權限矩陣、資料層（JSON 與 Supabase adapter）、匯入解析、i18n、API 端到端、守門檢查
+npm run check:browser  # 四支真 Chrome 檢查（劇本 54 ＋ 空白起步 31 ＋ 語言切換 28 ＋ 帳號管理 50）
+node scripts/supabase-smoke.js          # 線上資料庫：連線／schema／各表筆數
+node scripts/supabase-smoke.js --write  # 線上資料庫：寫入 → 新連線讀回 → 清理 → 確認乾淨
 ```
 
 瀏覽器驗收涵蓋：**書架（封面）→ 目錄 → 生字表的三層動線**、**上傳書本封面後書架換成封面圖**、

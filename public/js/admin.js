@@ -92,6 +92,19 @@
         if (openBtn && (openBtn.hidden || openBtn.disabled)) showPanel(null);
     }
 
+    /* 從生字卡按「編輯」時，管理區如果沒開就自動打開（使用者回報：沒開管理頁面就看不到表單） */
+    function ensureAdminOpen(tab) {
+        const section = document.getElementById('adminSection');
+        if (section.hidden) {
+            section.hidden = false;
+            const button = document.getElementById('adminToggleBtn');
+            if (button) button.textContent = t('nav.manageClose');
+        }
+        refreshAvailability();
+        showPanel(tab);
+        if (section.scrollIntoView) section.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+
     function requireUnit() {
         if (!window.PDState.currentUnitId) {
             window.PDUI.toast(window.PDState.currentBookId ? t('admin.needUnit') : t('admin.needBookUnit'), 'error');
@@ -121,7 +134,7 @@
             : t('entry.newTitle');
         document.getElementById('entryFormNote').textContent = entry ? t('entry.editNote') : t('entry.newNote');
         setFormMessage(document.getElementById('entryFormMsg'), '');
-        showPanel('entry');
+        ensureAdminOpen('entry');
         document.getElementById('fHeadword').focus();
     }
 
@@ -174,7 +187,7 @@
     function openImport() {
         if (!requireUnit()) return;
         setFormMessage(document.getElementById('importMsg'), '');
-        showPanel('import');
+        ensureAdminOpen('import');
         document.getElementById('importText').focus();
     }
 

@@ -101,5 +101,16 @@ test('批次匯入解析：空行不算錯誤，全空回 0 筆', () => {
 });
 
 test('未知的資料後端要明確報錯，不要靜默降級', () => {
-    assert.throws(() => createStore({ backend: 'supabase' }), /尚未實作/);
+    assert.throws(() => createStore({ backend: 'mysql' }), (err) => {
+        assert.match(String(err.message), /未知的 DATA_BACKEND/);
+        assert.equal(err.code, 'UNKNOWN_BACKEND');
+        return true;
+    });
+    /* supabase 已經實作（不再「尚未實作」）：佔位值要當場拒絕，不要用猜得到的金鑰跑起來 */
+    assert.throws(() => createStore({
+        backend: 'supabase', url: 'https://example.supabase.co', key: 'REPLACE_ME_WITH_REAL_KEY'
+    }), (err) => {
+        assert.equal(err.code, 'SUPABASE_CONFIG_PLACEHOLDER');
+        return true;
+    });
 });

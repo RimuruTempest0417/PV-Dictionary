@@ -848,6 +848,42 @@ code {
     margin-top: var(--space-2);
 }
 
+/* 錄音介面先前太擠：面板加寬、按鈕加大、狀態訊息自己一行（使用者：可以大一點） */
+#audioModal .modal-panel {
+    max-width: 36rem;
+    gap: var(--space-5);
+    padding: var(--space-5) var(--space-5) var(--space-6);
+}
+
+#audioModal .modal-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-3);
+    margin-top: 0;
+}
+
+#audioModal .modal-actions .btn {
+    min-height: 50px;
+    font-size: var(--fs-body);
+    justify-content: center;
+}
+
+#audioModal #audioMsg {
+    min-height: 1.5em;
+    font-size: var(--fs-small);
+    padding-top: var(--space-1);
+}
+
+#passwordModal .modal-panel {
+    max-width: 30rem;
+}
+
+@media (max-width: 480px) {
+    #audioModal .modal-actions {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* ---------------- 提示訊息 ---------------- */
 .toast {
     position: fixed;

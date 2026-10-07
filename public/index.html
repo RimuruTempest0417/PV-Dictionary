@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="PV_Dictionary — an online English vocabulary dictionary: browse words by book and unit, with pronunciation, part of speech, Chinese and English meanings.">
-    <title>PV_Dictionary v0.2.0</title>
+    <title>PV_Dictionary v0.3.0</title>
     <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/img/favicon.svg">
     <link rel="stylesheet" href="/css/tokens.css">
@@ -304,7 +304,7 @@
 </main>
 
 <footer class="footer">
-    <span>PV_Dictionary <span id="versionLabel">v0.2.0</span></span>
+    <span>PV_Dictionary <span id="versionLabel">v0.3.0</span></span>
     <span class="footer-sep">·</span>
     <span id="backendLabel" class="footer-muted"></span>
     <span class="footer-sep">·</span>
@@ -325,6 +325,24 @@
                 <button id="loginCancelBtn" class="btn btn-ghost" type="button" data-i18n="login.cancel">Cancel</button>
             </div>
             <p id="loginMsg" class="form-msg" role="status"></p>
+        </form>
+    </div>
+</div>
+
+<div id="passwordModal" class="modal" hidden>
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="passwordTitle">
+        <h2 id="passwordTitle" class="modal-title" data-i18n="password.title">🔑 Change my password</h2>
+        <p class="modal-note" data-i18n="password.note">Type your current password, then the new one (6–64 characters).</p>
+        <form id="passwordForm">
+            <label class="field"><span class="field-label" data-i18n="password.current">Current password</span>
+                <input id="currentPassword" type="password" autocomplete="current-password" required></label>
+            <label class="field"><span class="field-label" data-i18n="password.new">New password</span>
+                <input id="newPassword" type="password" autocomplete="new-password" maxlength="64" required></label>
+            <div class="modal-actions">
+                <button id="passwordSaveBtn" class="btn btn-primary" type="submit" data-i18n="password.save">Save</button>
+                <button id="passwordCancelBtn" class="btn btn-ghost" type="button" data-i18n="entry.cancel">Cancel</button>
+            </div>
+            <p id="passwordMsg" class="form-msg" role="status"></p>
         </form>
     </div>
 </div>

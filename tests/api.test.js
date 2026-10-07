@@ -443,7 +443,11 @@ test('帳號管理：不能管理自己、admin 不能動網站管理員、網�
     const self = await api(base, `/api/admin/users/${me.id}`, {
         method: 'PATCH', cookie: manager.cookie, body: { display_name: 'Renamed' }
     });
-    assert.equal(self.status, 403, '不能改自己的帳號');
+    assert.equal(self.status, 200, '改自己的顯示名稱可以（改密碼也走同一條）');
+    const selfRole = await api(base, `/api/admin/users/${me.id}`, {
+        method: 'PATCH', cookie: manager.cookie, body: { role: 'student' }
+    });
+    assert.equal(selfRole.status, 403, '但不能改自己的角色');
 
     const selfDelete = await api(base, `/api/admin/users/${me.id}`, { method: 'DELETE', cookie: manager.cookie });
     assert.equal(selfDelete.status, 400);
@@ -610,4 +614,58 @@ test('書本封面：老師上傳後誰都讀得到、格式與大小有擋、�
     const actions = store.listAuditLogs({ limit: 20 }).items.map((row) => row.action);
     assert.equal(actions.includes('COVER_UPLOAD'), true);
     assert.equal(actions.includes('COVER_DELETE'), true);
+});
+
+/* ================= v0.2.1 密碼自助 ================= */
+
+test('改自己的密碼：管理員面板可以改，任何登入者也能用 /api/auth/change-password', async (t) => {
+    const { base, store } = startServer(t);
+    const manager = await login(base, 'manager');
+    const me = store.findUserByUsername('manager');
+
+    /* 帳號管理面板：改自己的密碼（先前會回 403「你不能管理這個使用者」） */
+    const selfReset = await api(base, `/api/admin/users/${me.id}`, {
+        method: 'PATCH', cookie: manager.cookie, body: { password: 'selfpass123' }
+    });
+    assert.equal(selfReset.status, 200, '自己改自己的密碼不該被擋');
+    assert.equal((await login(base, 'manager', 'selfpass123')).status, 200);
+
+    /* 但不能改自己的角色或停用自己（提權／自鎖） */
+    const selfRole = await api(base, `/api/admin/users/${me.id}`, {
+        method: 'PATCH', cookie: manager.cookie, body: { role: 'student' }
+    });
+    assert.equal(selfRole.status, 403);
+    const selfOff = await api(base, `/api/admin/users/${me.id}`, {
+        method: 'PATCH', cookie: manager.cookie, body: { is_active: false }
+    });
+    assert.equal(selfOff.status, 403);
+
+    /* 改成「要知道目前密碼」的自助端點：老師也能用（老師不是 admin，進不了帳號管理面板） */
+    const teacher = await login(base, 'teacher');
+    const wrong = await api(base, '/api/auth/change-password', {
+        method: 'POST', cookie: teacher.cookie, body: { current_password: 'wrong-one', new_password: 'brandnew123' }
+    });
+    assert.equal(wrong.status, 400);
+    assert.equal(wrong.data.code, 'CURRENT_PASSWORD_WRONG');
+
+    const tooShort = await api(base, '/api/auth/change-password', {
+        method: 'POST', cookie: teacher.cookie, body: { current_password: PASSWORD, new_password: 'abc' }
+    });
+    assert.equal(tooShort.status, 400);
+    assert.equal(tooShort.data.code, 'PASSWORD_LENGTH');
+
+    const ok = await api(base, '/api/auth/change-password', {
+        method: 'POST', cookie: teacher.cookie, body: { current_password: PASSWORD, new_password: 'teacher456' }
+    });
+    assert.equal(ok.status, 200);
+    assert.equal((await login(base, 'teacher', 'teacher456')).status, 200);
+    assert.equal((await login(base, 'teacher', PASSWORD)).status, 401, '舊密碼應該失效');
+
+    const anon = await api(base, '/api/auth/change-password', {
+        method: 'POST', body: { current_password: 'x', new_password: 'yyyyyy' }
+    });
+    assert.equal(anon.status, 401);
+
+    const actions = store.listAuditLogs({ limit: 20 }).items.map((row) => row.action);
+    assert.equal(actions.includes('PASSWORD_CHANGE'), true, '改密碼要留稽核紀錄');
 });

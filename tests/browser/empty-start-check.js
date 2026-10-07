@@ -15,7 +15,7 @@ const { Browser, sleep } = require('./lib/cdp');
 const { STUBS, startApp, loginViaUi, logoutViaUi, visibleIds } = require('./lib/harness');
 
 const OVERLAY_IDS = ['loginModal', 'audioModal', 'adminSection', 'pendingBlock', 'auditBlock',
-    'entryForm', 'importForm', 'unitForm', 'bookForm', 'coverPanel', 'usersBlock', 'grantsBlock'];
+    'entryForm', 'importForm', 'unitForm', 'bookForm', 'coverPanel', 'usersBlock', 'grantsBlock', 'passwordModal'];
 /* 開站時「不該出現」的其他畫面（書架以外的兩層）。登出後留在生字表是正常的，所以只在開站檢查。 */
 const VIEW_IDS = ['unitsView', 'unitSection'];
 

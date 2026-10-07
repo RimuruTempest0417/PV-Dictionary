@@ -302,6 +302,12 @@
         ]));
         area.appendChild(el('button', {
             class: 'btn btn-ghost',
+            text: '🔑',
+            attrs: { type: 'button', id: 'passwordBtn', title: t('password.open'), 'aria-label': t('password.open') },
+            on: { click: openPasswordModal }
+        }));
+        area.appendChild(el('button', {
+            class: 'btn btn-ghost',
             text: t('nav.logout'),
             attrs: { type: 'button', id: 'logoutBtn' },
             on: { click: doLogout }
@@ -334,6 +340,40 @@
         document.getElementById('loginModal').hidden = false;
         setFormMessage(document.getElementById('loginMsg'), '');
         document.getElementById('loginUsername').focus();
+    }
+
+    /* 修改自己的密碼（任何登入者都能用；要輸入目前的密碼） */
+    function openPasswordModal() {
+        document.getElementById('passwordModal').hidden = false;
+        document.getElementById('currentPassword').value = '';
+        document.getElementById('newPassword').value = '';
+        setFormMessage(document.getElementById('passwordMsg'), '');
+        document.getElementById('currentPassword').focus();
+    }
+
+    function closePasswordModal() {
+        document.getElementById('passwordModal').hidden = true;
+        document.getElementById('currentPassword').value = '';
+        document.getElementById('newPassword').value = '';
+    }
+
+    async function submitPassword(event) {
+        event.preventDefault();
+        const msg = document.getElementById('passwordMsg');
+        const button = document.getElementById('passwordSaveBtn');
+        button.disabled = true;
+        try {
+            await api.post('/api/auth/change-password', {
+                current_password: document.getElementById('currentPassword').value,
+                new_password: document.getElementById('newPassword').value
+            });
+            closePasswordModal();
+            toast(t('password.saved'));
+        } catch (err) {
+            setFormMessage(msg, errText(err), 'error');
+        } finally {
+            button.disabled = false;
+        }
     }
 
     function closeLoginModal() {
@@ -428,6 +468,11 @@
         });
         document.getElementById('printBtn').addEventListener('click', () => window.print());
         document.getElementById('loginForm').addEventListener('submit', doLogin);
+        document.getElementById('passwordForm').addEventListener('submit', submitPassword);
+        document.getElementById('passwordCancelBtn').addEventListener('click', closePasswordModal);
+        document.getElementById('passwordModal').addEventListener('click', (event) => {
+            if (event.target.id === 'passwordModal') closePasswordModal();
+        });
         document.getElementById('loginCancelBtn').addEventListener('click', closeLoginModal);
         document.getElementById('loginModal').addEventListener('click', (event) => {
             if (event.target.id === 'loginModal') closeLoginModal();

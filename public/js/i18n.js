@@ -239,6 +239,14 @@
             'cover.saved': 'Cover updated',
             'cover.deleted': 'Cover removed',
 
+            'password.title': '🔑 Change my password',
+            'password.note': 'Type your current password, then the new one (6–64 characters).',
+            'password.current': 'Current password',
+            'password.new': 'New password',
+            'password.save': 'Save',
+            'password.saved': 'Password updated',
+            'password.open': 'Change my password',
+
             'login.title': 'Sign in',
             'login.note': 'Students can look words up without signing in. Teachers, class representatives and administrators sign in to edit.',
             'login.username': 'Account',
@@ -281,6 +289,7 @@
             'auditAction.GRANT_DELETE': 'Remove permission',
             'auditAction.COVER_UPLOAD': 'Upload cover',
             'auditAction.COVER_DELETE': 'Remove cover',
+            'auditAction.PASSWORD_CHANGE': 'Change own password',
 
             'errors.AUTH_REQUIRED': 'Please sign in first',
             'errors.FORBIDDEN': 'You do not have permission to do that',
@@ -329,11 +338,14 @@
             'errors.API_NOT_FOUND': 'No such API: {method} {path}',
             'errors.GRANT_EXISTS': 'This user already has this permission',
             'errors.CANNOT_DELETE_SELF': 'You cannot delete your own account',
+            'errors.CURRENT_PASSWORD_WRONG': 'Your current password is not correct',
             'errors.COVER_NOT_FOUND': 'This book has no cover yet',
             'errors.INVALID_COVER_TYPE': 'Cover images must be JPEG, PNG or WebP ({mime} was sent)',
             'errors.COVER_BAD_BASE64': 'The image data could not be read',
             'errors.COVER_EMPTY': 'The image file is empty',
-            'errors.COVER_TOO_LARGE': 'The image is too large ({kb}KB) — please use one under 2MB'
+            'errors.COVER_TOO_LARGE': 'The image is too large ({kb}KB) — please use one under 2MB',
+            'errors.DB_UNAVAILABLE': 'The database is not reachable right now ({message})',
+            'errors.DB_WRITE_FAILED': 'Your change could not be saved ({message}) — please try again'
         },
         zh: {
             'app.subtitle': '英文生字字典',
@@ -565,6 +577,14 @@
             'cover.saved': '已更新封面',
             'cover.deleted': '已移除封面',
 
+            'password.title': '🔑 修改我的密碼',
+            'password.note': '先輸入目前的密碼，再輸入新密碼（6–64 個字元）。',
+            'password.current': '目前的密碼',
+            'password.new': '新密碼',
+            'password.save': '儲存',
+            'password.saved': '密碼已更新',
+            'password.open': '修改我的密碼',
+
             'login.title': '登入',
             'login.note': '學生可以直接查生字，不需要登入。老師、科代表與管理員登入後才能編輯。',
             'login.username': '帳號',
@@ -607,6 +627,7 @@
             'auditAction.GRANT_DELETE': '移除授權',
             'auditAction.COVER_UPLOAD': '上傳書本封面',
             'auditAction.COVER_DELETE': '移除書本封面',
+            'auditAction.PASSWORD_CHANGE': '修改自己的密碼',
 
             'errors.AUTH_REQUIRED': '請先登入',
             'errors.FORBIDDEN': '權限不足',
@@ -655,11 +676,14 @@
             'errors.API_NOT_FOUND': '沒有這個 API：{method} {path}',
             'errors.GRANT_EXISTS': '這位使用者已經有這個授權',
             'errors.CANNOT_DELETE_SELF': '不能刪除自己的帳號',
+            'errors.CURRENT_PASSWORD_WRONG': '目前的密碼不正確',
             'errors.COVER_NOT_FOUND': '這本書還沒有封面',
             'errors.INVALID_COVER_TYPE': '封面只能是 JPEG、PNG 或 WebP（收到的是 {mime}）',
             'errors.COVER_BAD_BASE64': '圖片資料讀不出來',
             'errors.COVER_EMPTY': '圖片檔是空的',
-            'errors.COVER_TOO_LARGE': '圖片太大了（{kb}KB），請用 2MB 以下的'
+            'errors.COVER_TOO_LARGE': '圖片太大了（{kb}KB），請用 2MB 以下的',
+            'errors.DB_UNAVAILABLE': '資料庫現在連不上（{message}）',
+            'errors.DB_WRITE_FAILED': '這次的修改沒有存進資料庫（{message}），請再試一次'
         }
     };
 

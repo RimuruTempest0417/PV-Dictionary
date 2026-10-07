@@ -296,6 +296,48 @@ async function main() {
         await browser.setViewport(1360, 1000, false);
         await sleep(300);
 
+        console.log('\n【8b】修改自己的密碼（標題列 🔑，任何登入者都能用）');
+        /* 先切回英文：上面那一段把介面切成中文了 */
+        await browser.evaluate(`document.querySelector('#langSwitch [data-lang="en"]').click(); return true;`);
+        await sleep(300);
+        const selfRow = await browser.evaluate(`
+            const tr = window.__rowFor('manager');
+            return {
+                reset: tr.querySelector('[data-action="reset-password"]') !== null,
+                toggle: tr.querySelector('[data-action="toggle-active"]') !== null,
+                del: tr.querySelector('[data-action="delete-user"]') !== null
+            };
+        `);
+        check('自己的那一列可以改密碼，但不能停用／刪除自己',
+            selfRow.reset === true && selfRow.toggle === false && selfRow.del === false, JSON.stringify(selfRow));
+
+        await browser.evaluate(`document.getElementById('passwordBtn').click(); return true;`);
+        await browser.waitFor(`getComputedStyle(document.getElementById('passwordModal')).display !== 'none'`);
+        await browser.evaluate(`
+            document.getElementById('currentPassword').value = 'definitely-not-it';
+            document.getElementById('newPassword').value = 'newpass12345';
+            document.forms.passwordForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('passwordMsg').textContent.includes('not correct')`, { timeout: 8000 });
+        check('目前密碼打錯會明確提示（不是靜靜失敗）', true);
+        await browser.evaluate(`
+            document.getElementById('currentPassword').value = ${JSON.stringify(PASSWORD)};
+            document.getElementById('newPassword').value = 'newpass12345';
+            document.forms.passwordForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('passwordModal').hidden === true`, { timeout: 8000 });
+        check('改密碼成功後彈窗自動關閉', true);
+        check('新密碼可以登入', (await loginAs(app.base, 'manager', 'newpass12345')) === 200);
+        check('舊密碼失效', (await loginAs(app.base, 'manager', PASSWORD)) === 401);
+        /* 還原，避免影響後面的檢查 */
+        const restored = await browser.evaluate(`
+            return window.PDApi.post('/api/auth/change-password', { current_password: 'newpass12345', new_password: ${JSON.stringify(PASSWORD)} })
+                .then(() => 'OK').catch((err) => err.code || err.message);
+        `);
+        check('可以再改回原本的密碼', restored === 'OK', String(restored));
+
         console.log('\n【9】收尾：沒有 CSP 違規、例外、下載、截圖');
         const csp = await browser.evaluate(`return window.__cspViolations || [];`);
         check('沒有 CSP 違規', csp.length === 0, JSON.stringify(csp));

@@ -161,7 +161,10 @@ function publicUser(user) {
 function createApp(options = {}) {
     const store = options.store || createStore({
         backend: options.backend,
-        dataFile: options.dataFile
+        dataFile: options.dataFile,
+        /* 讓測試可以指定假 Supabase（沒帶就會落到 .env 的真實專案 —— 測試會變成打正式環境） */
+        url: options.url,
+        key: options.key
     });
 
     const app = express();
@@ -169,6 +172,33 @@ function createApp(options = {}) {
     app.use(Auth.securityHeaders);
     app.use(Auth.corsMiddleware);
     app.use(express.json({ limit: '4mb' }));
+
+    /* Supabase 版資料層：每個 /api 請求先 hydrate（抓下 7 張表）、回應送出「之前」flush（寫回異動）。
+     * 為什麼要這樣做，見 lib/store/supabase.js 開頭的說明；json 版沒有 hydrate()，直接放行。 */
+    if (typeof store.hydrate === 'function') {
+        app.use('/api', async (req, res, next) => {
+            try {
+                await store.hydrate();
+            } catch (err) {
+                console.error('[store] 讀取 Supabase 失敗：', err.message);
+                return res.status(503).json({ error: msg('DB_UNAVAILABLE', { message: err.message }), code: 'DB_UNAVAILABLE' });
+            }
+            const originalJson = res.json.bind(res);
+            res.json = (body) => {
+                store.flush()
+                    .then(() => originalJson(body))
+                    .catch((err) => {
+                        /* 寫回失敗不能假裝成功：改成 500 並說明，讓使用者知道要重做一次 */
+                        console.error('[store] 寫回 Supabase 失敗：', err.message);
+                        if (res.headersSent) return res;
+                        res.status(500);
+                        return originalJson({ error: msg('DB_WRITE_FAILED', { message: err.message }), code: 'DB_WRITE_FAILED' });
+                    });
+                return res;
+            };
+            return next();
+        });
+    }
 
     /* ---- 登入失敗計數（行程內；Demo 單機足夠，正式上線再改資料庫） ---- */
     const ipFailures = new Map();
@@ -410,6 +440,27 @@ function createApp(options = {}) {
             },
             grants: scoped
         });
+    });
+
+    /* 任何已登入的人都可以改「自己的」密碼（要知道目前的密碼）。
+     * 管理員在帳號管理面板改別人的密碼走 /api/admin/users/:id。 */
+    app.post('/api/auth/change-password', (req, res) => {
+        if (!req.user) return res.status(401).json({ error: msg('AUTH_REQUIRED'), code: 'AUTH_REQUIRED' });
+        const body = req.body || {};
+        const current = typeof body.current_password === 'string' ? body.current_password : '';
+        const next = typeof body.new_password === 'string' ? body.new_password : '';
+        if (!verifyPassword(req.user.password_hash, current)) {
+            return res.status(400).json({ error: msg('CURRENT_PASSWORD_WRONG'), code: 'CURRENT_PASSWORD_WRONG' });
+        }
+        if (next.length < 6 || next.length > 64) {
+            return res.status(400).json({ error: msg('PASSWORD_LENGTH'), code: 'PASSWORD_LENGTH' });
+        }
+        store.updateUser(req.user.id, { password_hash: hashPassword(next) });
+        logAudit(store, {
+            user: req.user, action: 'PASSWORD_CHANGE', targetId: req.user.id,
+            details: req.user.username, ip: req.ip
+        });
+        return res.json({ ok: true });
     });
 
     /* ================= 生字：新增／修改／刪除 ================= */
@@ -897,10 +948,16 @@ function createApp(options = {}) {
     app.patch('/api/admin/users/:id', requireRole('admin'), (req, res) => {
         const target = store.getUser(req.params.id);
         if (!target) return res.status(404).json({ error: msg('USER_NOT_FOUND'), code: 'USER_NOT_FOUND' });
-        if (!Roles.canManageUser(req.user, target)) {
+        /* 自己可以改自己的密碼／顯示名稱（使用者回報：改自己的密碼卻說「你不能管理這個使用者」），
+         * 但**不能改自己的角色或停用自己**（那是提權與自鎖）。 */
+        const isSelf = String(target.id) === String(req.user.id);
+        if (!isSelf && !Roles.canManageUser(req.user, target)) {
             return res.status(403).json({ error: msg('USER_MANAGE_FORBIDDEN'), code: 'USER_MANAGE_FORBIDDEN' });
         }
         const body = req.body || {};
+        if (isSelf && (body.role !== undefined || body.is_active !== undefined)) {
+            return res.status(403).json({ error: msg('USER_MANAGE_FORBIDDEN'), code: 'USER_MANAGE_FORBIDDEN' });
+        }
         const patch = {};
         if (body.display_name !== undefined) patch.display_name = str(body.display_name, LIMITS.display_name);
         if (body.is_active !== undefined) {

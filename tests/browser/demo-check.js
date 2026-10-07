@@ -196,6 +196,23 @@ async function main() {
         check('登入後顯示使用者與角色', (await browser.evaluate(`return document.getElementById('authArea').textContent;`)).includes('Web administrator'));
         check('登入後出現「✏️ 管理」按鈕', (await browser.evaluate(`return document.getElementById('adminToggleBtn').hidden === false;`)) === true);
 
+        console.log('\n【5b】從生字卡按「編輯」會自動打開管理區（使用者回報：沒開就看不到）');
+        await browser.evaluate(`
+            document.querySelector('.vocab-item [data-action="edit-entry"]').click();
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('adminSection').hidden === false`, { timeout: 6000 });
+        check('按「編輯」時管理區自動打開', true);
+        const editingValue = await browser.evaluate(`return document.getElementById('fHeadword').value;`);
+        check('表單直接載入該生字（不是空白表單）', editingValue === 'campus', editingValue);
+        check('一次只顯示一塊：其他表單都關著',
+            (await browser.evaluate(`return document.getElementById('bookForm').hidden === true && document.getElementById('unitForm').hidden === true;`)) === true);
+        await browser.evaluate(`document.getElementById('cancelEntryBtn').click(); return true;`);
+        /* 收起來，讓下面「管理員：登入 → 新增生字」的流程維持原本的按鈕語意 */
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('adminSection').hidden === true`);
+
+        console.log('\n【5-7】管理員：新增生字 → 批次貼上 → 刪除（管理區在編輯後已收起）');
         await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
         await browser.waitFor(`document.getElementById('adminSection').hidden === false`);
         await browser.evaluate(`document.getElementById('newEntryBtn').click(); return true;`);
@@ -266,6 +283,16 @@ async function main() {
         await browser.waitFor(`document.getElementById('audioModal').hidden === false`);
         const modalTitle = await browser.evaluate(`return document.getElementById('audioModalHeadword').textContent;`);
         check('錄音視窗顯示要錄的生字', modalTitle === 'campus', modalTitle);
+        const audioSize = await browser.evaluate(`return (() => {
+            const panel = document.querySelector('#audioModal .modal-panel');
+            return {
+                width: Math.round(panel.getBoundingClientRect().width),
+                pickBtn: Math.round(document.getElementById('audioPickFileBtn').getBoundingClientRect().height),
+                pickWidth: Math.round(document.getElementById('audioPickFileBtn').getBoundingClientRect().width)
+            };
+        })();`);
+        check('錄音視窗比從前寬（≥500px）且按鈕更大（≥44px 高）',
+            audioSize.width >= 500 && audioSize.pickBtn >= 44, JSON.stringify(audioSize));
 
         // 用真的檔案走真實路徑（選檔 → FileReader → 上傳 API → 畫面更新），不繞過 UI
         const audioFile = path.join(dir, 'teacher-sample.webm');
