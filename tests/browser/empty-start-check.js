@@ -15,7 +15,9 @@ const { Browser, sleep } = require('./lib/cdp');
 const { STUBS, startApp, loginViaUi, logoutViaUi, visibleIds } = require('./lib/harness');
 
 const OVERLAY_IDS = ['loginModal', 'audioModal', 'adminSection', 'pendingBlock', 'auditBlock',
-    'entryForm', 'importForm', 'unitForm', 'bookForm'];
+    'entryForm', 'importForm', 'unitForm', 'bookForm', 'coverPanel', 'usersBlock', 'grantsBlock'];
+/* 開站時「不該出現」的其他畫面（書架以外的兩層）。登出後留在生字表是正常的，所以只在開站檢查。 */
+const VIEW_IDS = ['unitsView', 'unitSection'];
 
 let passed = 0;
 let failed = 0;
@@ -40,11 +42,15 @@ async function main() {
         await browser.goto(`${app.base}/`);
         await browser.evaluate(STUBS);
         await browser.waitFor(`document.getElementById('emptyState').hidden === false
-            || document.getElementById('bookTabs').children.length > 0`);
+            || document.getElementById('bookShelf').children.length > 0`);
 
         console.log('\n【1】開站（未登入、資料全空）：學生視角');
-        const overlaysAtLoad = await visibleIds(browser, OVERLAY_IDS);
+        const overlaysAtLoad = await visibleIds(browser, OVERLAY_IDS.concat(VIEW_IDS));
         check('開站時沒有任何彈窗或管理面板蓋在畫面上', overlaysAtLoad.length === 0, overlaysAtLoad.join('、'));
+        check('開站停在書架（首頁），目錄與生字表都還沒出現',
+            (await browser.evaluate(`return document.getElementById('shelfView').hidden === false
+                && document.getElementById('unitsView').hidden === true
+                && document.getElementById('unitSection').hidden === true;`)) === true);
         const emptyText = await browser.evaluate(`return document.getElementById('emptyState').textContent;`);
         check('顯示「還沒有可以查的生字」的起始畫面', emptyText.includes('No words to look up yet'), emptyText.slice(0, 40));
         check('起始畫面告訴老師建立順序（書本→單元→生字）',
@@ -94,8 +100,8 @@ async function main() {
             document.forms.bookForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
             return true;
         `);
-        await browser.waitFor(`Array.from(document.getElementById('bookTabs').children).some(b => b.textContent.includes('Book 5A'))`, { timeout: 8000 });
-        check('新增書本後書本選單出現', true);
+        await browser.waitFor(`document.getElementById('unitsTitle').textContent.includes('Book 5A')`, { timeout: 8000 });
+        check('新增書本後直接進到它的目錄', true);
         const hint2 = await browser.evaluate(`return document.getElementById('adminHint').textContent;`);
         check('說明改成「這本書還沒有單元」', hint2.includes('has no units yet'), hint2);
 
@@ -107,8 +113,8 @@ async function main() {
             document.forms.unitForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
             return true;
         `);
-        await browser.waitFor(`Array.from(document.getElementById('unitTabs').children).some(b => b.textContent.includes('My New School'))`, { timeout: 8000 });
-        check('新增單元後單元選單出現', true);
+        await browser.waitFor(`document.getElementById('unitTitle').textContent.includes('My New School')`, { timeout: 8000 });
+        check('新增單元後直接進到該單元的生字表', true);
         check('有單元後「新增生字」變成可用',
             (await browser.evaluate(`return document.getElementById('newEntryBtn').disabled;`)) === false);
         check('管理提示消失',

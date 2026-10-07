@@ -134,13 +134,26 @@ async function main() {
     try {
         await browser.goto(`${base}/`);
         await browser.evaluate(STUBS);
-        await browser.waitFor(`document.getElementById('bookTabs').children.length > 0`, { timeout: 8000 });
+        await browser.waitFor(`document.getElementById('bookShelf').children.length > 0`, { timeout: 8000 });
 
-        console.log('\n【1-4】訪客：選書 → 選單元 → 生字表 → 聽讀音 → 搜尋');
-        const tabs = await browser.evaluate(`return Array.from(document.getElementById('bookTabs').children).map(b => b.textContent);`);
-        check('書本選單有 Book 5A（含單元數）', tabs.some((t) => t.includes('Book 5A')), tabs.join('/'));
-        const chips = await browser.evaluate(`return Array.from(document.getElementById('unitTabs').children).map(b => b.textContent);`);
-        check('單元 chips 顯示 Unit 1 與生字數', chips.some((t) => t.includes('Unit 1')), chips.join('/'));
+        console.log('\n【1-4】訪客：書架（封面）→ 目錄 → 單元 → 生字表 → 聽讀音 → 搜尋');
+        const shelf = await browser.evaluate(`return Array.from(document.getElementById('bookShelf').children).map(b => b.textContent);`);
+        check('書架顯示 Book 5A（含單元數與生字數）', shelf.some((t) => t.includes('Book 5A')), shelf.join('/'));
+        const coverCards = await browser.evaluate(`return document.querySelectorAll('#bookShelf [data-book-id]').length;`);
+        check('每個書本都是一個可點的封面卡片', coverCards >= 1, String(coverCards));
+        const shelfFirst = await browser.evaluate(`return document.getElementById('shelfView').hidden === false;`);
+        check('首頁是書架而不是生字表', shelfFirst === true);
+
+        await browser.evaluate(`document.querySelector('#bookShelf [data-book-id]').click(); return true;`);
+        await browser.waitFor(`document.getElementById('unitsView').hidden === false`);
+        const chips = await browser.evaluate(`return Array.from(document.getElementById('unitList').children).map(b => b.textContent);`);
+        check('目錄列出單元與生字數', chips.some((t) => t.includes('Unit 1')) && chips.some((t) => t.includes('words')), chips.join('/'));
+        check('進入目錄時生字表還不顯示（要再點單元）',
+            (await browser.evaluate(`return document.getElementById('unitSection').hidden === true;`)) === true);
+
+        await browser.evaluate(`document.querySelector('#unitList [data-unit-id]').click(); return true;`);
+        await browser.waitFor(`document.getElementById('unitSection').hidden === false`);
+        await browser.waitFor(`document.querySelectorAll('.vocab-item').length > 0`);
 
         const first = await browser.evaluate(`return (() => {
             const card = document.querySelector('.vocab-item');
@@ -293,8 +306,8 @@ async function main() {
             document.forms.unitForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
             return true;
         `);
-        await browser.waitFor(`Array.from(document.getElementById('unitTabs').children).some(b => b.textContent.includes('School Life'))`, { timeout: 6000 });
-        check('新增單元後 chips 立即出現', true);
+        await browser.waitFor(`document.getElementById('unitTitle').textContent.includes('School Life')`, { timeout: 6000 });
+        check('新增單元後直接進入新單元的生字表', true);
         const newUnitEmpty = await browser.evaluate(`return document.getElementById('vocabEmpty').hidden === false;`);
         check('新單元顯示「還沒有生字」而不是空白', newUnitEmpty === true);
 
@@ -306,8 +319,62 @@ async function main() {
             document.forms.bookForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
             return true;
         `);
-        await browser.waitFor(`Array.from(document.getElementById('bookTabs').children).some(b => b.textContent.includes('Book 5B'))`, { timeout: 6000 });
-        check('新增書本後選單立即出現且自動切換', true);
+        await browser.waitFor(`document.getElementById('unitsView').hidden === false && document.getElementById('unitsTitle').textContent.includes('Book 5B')`, { timeout: 6000 });
+        check('新增書本後直接進入它的目錄（接著就能新增單元）', true);
+        check('書架上也出現新書本', (await browser.evaluate(`return document.getElementById('bookShelf').textContent.includes('Book 5B');`)) === true);
+
+        console.log('\n【10b】書本封面：上傳照片 → 書架（首頁）用封面顯示');
+        await browser.evaluate(`document.getElementById('navCoverBtn').click(); return true;`);
+        await browser.waitFor(`getComputedStyle(document.getElementById('coverPanel')).display !== 'none'`);
+        const coverBefore = await browser.evaluate(`return {
+            none: document.getElementById('coverNone').hidden === false,
+            imgHidden: document.getElementById('coverPreview').hidden === true,
+            books: Array.from(document.getElementById('coverBook').options).map((o) => o.textContent)
+        };`);
+        check('封面面板列出所有書本，預設顯示「還沒有封面」',
+            coverBefore.none === true && coverBefore.imgHidden === true && coverBefore.books.some((t) => t.includes('Book 5A')),
+            JSON.stringify(coverBefore));
+
+        await browser.evaluate(`
+            const select = document.getElementById('coverBook');
+            select.value = String((window.PDState.books.find((b) => b.name === 'Book 5A') || {}).id);
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+        `);
+        /* 真的用它自己的檔案路徑走一次（選檔 → FileReader → 上傳 API），不繞過 UI */
+        const pngFile = path.join(dir, 'cover-sample.png');
+        fs.writeFileSync(pngFile, Buffer.from(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==', 'base64'));
+        const coverDoc = await browser.send('DOM.getDocument', { depth: -1 });
+        const coverNode = await browser.send('DOM.querySelector', { nodeId: coverDoc.root.nodeId, selector: '#coverFileInput' });
+        await browser.send('DOM.setFileInputFiles', { nodeId: coverNode.nodeId, files: [pngFile] });
+        let coverSaved = false;
+        try {
+            await browser.waitFor(`document.getElementById('coverMsg').textContent.includes('Cover updated')`, { timeout: 2500 });
+            coverSaved = true;
+        } catch (err) {
+            coverSaved = false;
+        }
+        if (!coverSaved) {
+            await browser.evaluate(`document.getElementById('coverFileInput').dispatchEvent(new Event('change', { bubbles: true })); return true;`);
+        }
+        await browser.waitFor(`document.getElementById('coverMsg').textContent.includes('Cover updated')`, { timeout: 8000 });
+        check('上傳封面成功', true);
+        check('面板立刻顯示封面預覽',
+            (await browser.evaluate(`return document.getElementById('coverPreview').hidden === false;`)) === true);
+
+        const shelfCover = await browser.evaluate(`return Array.from(document.querySelectorAll('#bookShelf .shelf-cover-img')).map((img) => img.getAttribute('src'));`);
+        check('書架卡片改用封面圖片（學生首頁看得到）',
+            shelfCover.length >= 1 && shelfCover[0].includes('/api/covers/'), JSON.stringify(shelfCover));
+        const coverFetch = await browser.evaluate(`return (async () => {
+            const res = await fetch(${JSON.stringify(shelfCover[0] || '/api/covers/0')}, { cache: 'no-store' });
+            const buf = await res.arrayBuffer();
+            return { status: res.status, type: res.headers.get('content-type'), bytes: buf.byteLength };
+        })();`);
+        check('封面由自家同源端點提供（不開外部網域）',
+            coverFetch.status === 200 && coverFetch.type === 'image/png' && coverFetch.bytes > 50, JSON.stringify(coverFetch));
+        const coverAudit = await browser.evaluate(`return document.getElementById('coverBook').value;`);
+        check('封面面板的書本選單仍可切換', Boolean(coverAudit), coverAudit);
 
         console.log('\n【11-12】科代表新增 → 老師核准');
         await browser.evaluate(`document.getElementById('logoutBtn').click(); return true;`);
@@ -315,14 +382,18 @@ async function main() {
         await browser.evaluate(STUBS);
         await openLogin(browser);
         await typeLogin(browser, 'classrep');
+        /* 等書架真的有 Book 5A 再點（登入後書架是非同步重畫的） */
+        await browser.waitFor(`Array.from(document.querySelectorAll('#bookShelf [data-book-id]')).some(b => b.textContent.includes('Book 5A'))`, { timeout: 8000 });
         await browser.evaluate(`
-            const tabs = Array.from(document.getElementById('bookTabs').children);
-            tabs.find(b => b.textContent.includes('Book 5A')).click();
+            Array.from(document.querySelectorAll('#bookShelf [data-book-id]'))
+                .find(b => b.textContent.includes('Book 5A')).click();
             return true;
         `);
-        await browser.waitFor(`Array.from(document.getElementById('unitTabs').children).some(b => b.textContent.includes('Unit 1'))`);
+        /* 這裡不能用「目錄畫面已顯示」當條件：切書時它本來就還開著，要等清單真的換成新書的單元 */
+        await browser.waitFor(`Array.from(document.querySelectorAll('#unitList [data-unit-id]')).some(b => b.textContent.includes('Unit 1'))`, { timeout: 8000 });
         await browser.evaluate(`
-            Array.from(document.getElementById('unitTabs').children).find(b => b.textContent.includes('Unit 1')).click();
+            const rows = Array.from(document.querySelectorAll('#unitList [data-unit-id]'));
+            rows.find(b => b.textContent.includes('Unit 1')).click();
             return true;
         `);
         await browser.waitFor(`document.querySelectorAll('.vocab-item').length > 0`);
@@ -339,12 +410,14 @@ async function main() {
         const pendingBadges = await browser.evaluate(`return Array.from(document.querySelectorAll('.tag-badge')).map(n => n.textContent);`);
         check('科代表新增的字顯示「待審核」標記', pendingBadges.some((t) => t.includes('Awaiting review')), pendingBadges.join('/'));
         const repView = await browser.evaluate(`return {
-            block: document.getElementById('pendingBlock').hidden === false,
+            items: Array.from(document.querySelectorAll('#pendingList .pending-item')).map((n) => n.textContent).join(' | '),
             note: document.getElementById('pendingNote').textContent,
-            hasApprove: document.querySelector('[data-action="approve-entry"]') !== null
+            hasApprove: document.querySelector('[data-action="approve-entry"]') !== null,
+            tabLabel: document.getElementById('navPendingBtn').textContent
         };`);
         check('科代表看得到自己送出的待審核清單（含說明文字）',
-            repView.block === true && repView.note.includes('waiting for a teacher'), JSON.stringify(repView));
+            repView.items.includes('diligent') && repView.note.includes('waiting for a teacher'), JSON.stringify(repView));
+        check('待審核數量顯示在管理選單上', repView.tabLabel.includes('(1)'), repView.tabLabel);
         check('科代表沒有核准按鈕（核准是老師的權限）', repView.hasApprove === false);
 
         await browser.evaluate(`document.getElementById('logoutBtn').click(); return true;`);
@@ -357,7 +430,7 @@ async function main() {
         const pendingText = await browser.evaluate(`return document.getElementById('pendingList').textContent;`);
         check('老師看到待審核清單含 diligent（附新增者）', pendingText.includes('diligent') && pendingText.includes('classrep'), pendingText.slice(0, 80));
         await browser.evaluate(`document.querySelector('[data-action="approve-entry"]').click(); return true;`);
-        await browser.waitFor(`document.getElementById('pendingBlock').hidden === true`, { timeout: 6000 });
+        await browser.waitFor(`document.querySelectorAll('#pendingList .pending-item').length === 0`, { timeout: 6000 });
         check('核准後待審核清單清空', true);
 
         await browser.evaluate(`document.getElementById('logoutBtn').click(); return true;`);
@@ -397,9 +470,11 @@ async function main() {
             document.getElementById('adminToggleBtn').click();
             return true;
         `);
+        /* 稽核紀錄現在是管理選單裡的一個分頁：要按「🧾」才會載入 */
+        await browser.evaluate(`document.getElementById('navAuditBtn').click(); return true;`);
         await browser.waitFor(`document.getElementById('auditList').children.length > 0`, { timeout: 6000 });
         const audit = await browser.evaluate(`return document.getElementById('auditList').textContent;`);
-        check('稽核紀錄看得到剛才的操作（含中文標籤）', /Approve word|Add word|Import words/.test(audit), audit.slice(0, 120));
+        check('稽核紀錄看得到剛才的操作（英文動作標籤）', /Approve word|Add word|Import words/.test(audit), audit.slice(0, 120));
 
         const downloads = await browser.evaluate(`return window.__downloads || [];`);
         check('檢查過程沒有觸發任何下載', downloads.length === 0, JSON.stringify(downloads));

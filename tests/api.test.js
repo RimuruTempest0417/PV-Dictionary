@@ -555,3 +555,59 @@ test('授權管理：授權某個單元後才能編輯；重複授權會擋；�
     assert.equal(actions.includes('GRANT_CREATE'), true, '授權要留稽核紀錄');
     assert.equal(actions.includes('GRANT_DELETE'), true, '移除授權也要留稽核紀錄');
 });
+
+/* ================= v0.2.0 書本封面 ================= */
+
+const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
+
+test('書本封面：老師上傳後誰都讀得到、格式與大小有擋、可以移除', async (t) => {
+    const { base, ids, store } = startServer(t);
+    const teacher = await login(base, 'teacher');
+
+    assert.equal((await api(base, `/api/covers/${ids.book.id}`)).status, 404, '還沒有封面時是 404');
+
+    const wrongType = await api(base, `/api/books/${ids.book.id}/cover`, {
+        method: 'POST', cookie: teacher.cookie, body: { data: `data:image/gif;base64,${PNG_1PX}` }
+    });
+    assert.equal(wrongType.status, 400);
+    assert.equal(wrongType.data.code, 'INVALID_COVER_TYPE');
+
+    const tooBig = await api(base, `/api/books/${ids.book.id}/cover`, {
+        method: 'POST', cookie: teacher.cookie,
+        body: { data: `data:image/png;base64,${Buffer.alloc(2 * 1024 * 1024 + 100, 7).toString('base64')}` }
+    });
+    assert.equal(tooBig.status, 413);
+    assert.equal(tooBig.data.code, 'COVER_TOO_LARGE');
+
+    const uploaded = await api(base, `/api/books/${ids.book.id}/cover`, {
+        method: 'POST', cookie: teacher.cookie, body: { data: `data:image/png;base64,${PNG_1PX}` }
+    });
+    assert.equal(uploaded.status, 201);
+    assert.equal(uploaded.data.book.has_cover, true);
+    assert.equal(uploaded.data.book.cover_data, undefined, '回應不得夾帶封面 base64');
+    assert.match(uploaded.data.book.cover_url, /^\/api\/covers\//);
+
+    const books = await api(base, '/api/books');
+    assert.equal(books.data.books[0].has_cover, true);
+    assert.equal(books.data.books[0].cover_data, undefined, '書本清單不得夾帶封面 base64（會變成幾十 MB）');
+
+    const served = await fetch(`${base}/api/covers/${ids.book.id}`);
+    assert.equal(served.status, 200);
+    assert.equal(served.headers.get('content-type'), 'image/png');
+    assert.equal((await served.arrayBuffer()).byteLength, Buffer.from(PNG_1PX, 'base64').length);
+
+    const student = await login(base, 'student');
+    const denied = await api(base, `/api/books/${ids.book.id}/cover`, {
+        method: 'POST', cookie: student.cookie, body: { data: `data:image/png;base64,${PNG_1PX}` }
+    });
+    assert.equal(denied.status, 403, '學生不能上傳封面');
+
+    const removed = await api(base, `/api/books/${ids.book.id}/cover`, { method: 'DELETE', cookie: teacher.cookie });
+    assert.equal(removed.status, 200);
+    assert.equal(removed.data.book.has_cover, false);
+    assert.equal((await api(base, `/api/covers/${ids.book.id}`)).status, 404);
+
+    const actions = store.listAuditLogs({ limit: 20 }).items.map((row) => row.action);
+    assert.equal(actions.includes('COVER_UPLOAD'), true);
+    assert.equal(actions.includes('COVER_DELETE'), true);
+});

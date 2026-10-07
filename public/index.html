@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="PV_Dictionary — an online English vocabulary dictionary: browse words by book and unit, with pronunciation, part of speech, Chinese and English meanings.">
-    <title>PV_Dictionary v0.0.3</title>
+    <title>PV_Dictionary v0.2.0</title>
     <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/img/favicon.svg">
     <link rel="stylesheet" href="/css/tokens.css">
@@ -22,10 +22,12 @@
             </span>
         </div>
         <div class="topbar-actions">
-            <label class="search" for="searchInput">
-                <span class="search-icon" aria-hidden="true">🔍</span>
-                <input id="searchInput" type="search" data-i18n-placeholder="app.search" placeholder="Search words, Chinese or English…" autocomplete="off">
-            </label>
+            <span id="searchWrap" class="search-wrap">
+                <label class="search" for="searchInput">
+                    <span class="search-icon" aria-hidden="true">🔍</span>
+                    <input id="searchInput" type="search" data-i18n-placeholder="app.search" placeholder="Search words, Chinese or English…" autocomplete="off">
+                </label>
+            </span>
             <div id="langSwitch" class="lang-switch" role="group" data-i18n-aria="lang.label">
                 <button type="button" data-lang="en" aria-pressed="true">EN</button>
                 <button type="button" data-lang="zh" aria-pressed="false">中文</button>
@@ -38,20 +40,32 @@
 </header>
 
 <main class="page">
-    <section class="picker">
-        <div class="picker-row">
-            <span class="picker-label" data-i18n="book.label">Book</span>
-            <div id="bookTabs" class="segmented" role="tablist"></div>
+    <section id="shelfView" class="view" aria-live="polite">
+        <div class="view-head">
+            <div class="view-heading">
+                <h1 class="view-title" data-i18n="shelf.title">Choose a book</h1>
+                <p class="view-note" data-i18n="shelf.note">Tap a book cover to open its unit list.</p>
+            </div>
         </div>
-        <div class="picker-row">
-            <span class="picker-label" data-i18n="unit.label">Unit</span>
-            <div id="unitTabs" class="chips" role="tablist"></div>
+        <ul id="bookShelf" class="shelf"></ul>
+    </section>
+
+    <section id="unitsView" class="view" hidden aria-live="polite">
+        <div class="view-head">
+            <button id="unitsBackBtn" class="btn btn-ghost btn-small" type="button" data-i18n="nav.backToBooks">← Books</button>
+            <div class="view-heading">
+                <h1 id="unitsTitle" class="view-title">—</h1>
+                <p id="unitsMeta" class="view-note"></p>
+            </div>
         </div>
+        <ul id="unitList" class="unit-list"></ul>
+        <p id="unitsEmpty" class="empty" hidden data-i18n="units.empty">This book has no units yet.</p>
     </section>
 
     <section id="unitSection" class="unit-card" hidden aria-live="polite">
         <div class="unit-head">
             <div class="unit-heading">
+                <button id="vocabBackBtn" class="btn btn-ghost btn-small" type="button" data-i18n="nav.backToUnits">← Units</button>
                 <h1 id="unitTitle" class="unit-title">—</h1>
                 <p id="unitMeta" class="unit-meta"></p>
             </div>
@@ -67,7 +81,7 @@
     <section id="emptyState" class="unit-card empty-state" hidden>
         <h1 class="unit-title" data-i18n="picker.noWordsTitle">No words to look up yet</h1>
         <p class="empty-state-text"></p>
-        <p class="empty-state-text" data-i18n="picker.stepsTitle">Teachers and administrators: sign in, then use “✏️ Manage” in the top right corner, in this order.</p>
+        <p class="empty-state-text empty-state-steps-title" data-i18n="picker.stepsTitle">Teachers and administrators: sign in, then use “✏️ Manage” in the top right corner, in this order.</p>
         <ol class="empty-state-steps">
             <li data-i18n="picker.step1">“📗 New book” → enter a code (e.g. B5A) and a name</li>
             <li data-i18n="picker.step2">“🏗 New unit” → enter a unit number and title (e.g. Unit 1 My New School)</li>
@@ -85,12 +99,17 @@
             <ul id="pendingList" class="pending-list"></ul>
         </div>
 
-        <div class="admin-toolbar">
-            <button id="newEntryBtn" class="btn btn-primary" type="button" data-i18n="admin.newEntry">➕ New word</button>
-            <button id="importToggleBtn" class="btn btn-secondary" type="button" data-i18n="admin.import">📋 Paste a list</button>
-            <button id="newUnitBtn" class="btn btn-secondary" type="button" data-i18n="admin.newUnit">🏗 New unit</button>
-            <button id="newBookBtn" class="btn btn-secondary" type="button" data-i18n="admin.newBook">📗 New book</button>
-        </div>
+        <nav id="adminNav" class="admin-nav" role="tablist" data-i18n-aria="admin.menu">
+            <button id="navPendingBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="pending" data-i18n="admin.tabPending">⏳ To review</button>
+            <button id="newEntryBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="entry" data-i18n="admin.newEntry">➕ New word</button>
+            <button id="importToggleBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="import" data-i18n="admin.import">📋 Paste a list</button>
+            <button id="newUnitBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="unit" data-i18n="admin.newUnit">🏗 New unit</button>
+            <button id="newBookBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="book" data-i18n="admin.newBook">📗 New book</button>
+            <button id="navCoverBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="cover" data-i18n="admin.cover">🖼 Book cover</button>
+            <button id="navAuditBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="audit" data-i18n="audit.title">🧾 Recent activity</button>
+            <button id="navUsersBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="users" data-i18n="users.title">👥 Accounts</button>
+            <button id="navGrantsBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="grants" data-i18n="grants.title">🔑 Permissions</button>
+        </nav>
         <p id="adminHint" class="hint" hidden></p>
 
         <form id="entryForm" class="panel form" hidden>
@@ -171,6 +190,25 @@
                 <span id="bookMsg" class="form-msg" role="status"></span>
             </div>
         </form>
+
+        <div id="coverPanel" class="panel" hidden>
+            <div class="panel-head">
+                <h2 class="panel-title" data-i18n="cover.title">🖼 Book cover</h2>
+                <p class="panel-note" data-i18n="cover.note">Take a photo of the book cover and upload it here. Students see it on the home screen.</p>
+            </div>
+            <label class="field"><span class="field-label" data-i18n="cover.book">Book</span>
+                <select id="coverBook"></select></label>
+            <div class="cover-preview">
+                <img id="coverPreview" alt="" hidden>
+                <p id="coverNone" class="cell-hint" data-i18n="cover.none">This book has no cover yet.</p>
+            </div>
+            <input id="coverFileInput" type="file" accept="image/*" hidden>
+            <div class="form-actions">
+                <button id="coverPickBtn" class="btn btn-secondary" type="button" data-i18n="cover.pick">📁 Choose a photo</button>
+                <button id="coverDeleteBtn" class="btn btn-danger btn-small" type="button" hidden data-i18n="cover.remove">🗑 Remove cover</button>
+            </div>
+            <p id="coverMsg" class="form-msg" role="status"></p>
+        </div>
 
         <div id="auditBlock" class="panel" hidden>
             <div class="panel-head">
@@ -266,7 +304,7 @@
 </main>
 
 <footer class="footer">
-    <span>PV_Dictionary <span id="versionLabel">v0.0.3</span></span>
+    <span>PV_Dictionary <span id="versionLabel">v0.2.0</span></span>
     <span class="footer-sep">·</span>
     <span id="backendLabel" class="footer-muted"></span>
     <span class="footer-sep">·</span>

@@ -1069,3 +1069,231 @@ code {
     color: var(--text-muted);
     font-size: var(--fs-small);
 }
+
+/* ---------------- 三個畫面：書架 → 目錄 → 生字表（v0.2.0） ---------------- */
+.view {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.view-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+}
+
+.view-heading {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.view-title {
+    font-size: var(--fs-display);
+    font-weight: 680;
+    letter-spacing: var(--tracking-display);
+    line-height: var(--lh-tight);
+}
+
+.view-note {
+    color: var(--text-muted);
+    font-size: var(--fs-small);
+}
+
+/* 搜尋只在生字表出現（其他畫面沒有東西可以搜） */
+.search-wrap[hidden] {
+    display: none !important;
+}
+
+/* 書架：封面上、書名在下（使用者指定：老師拍封面上傳，點封面進目錄） */
+.shelf {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: var(--space-4);
+}
+
+.shelf-card {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    text-align: left;
+    background-color: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: var(--space-3);
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.shelf-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-pop);
+}
+
+.shelf-card:active {
+    transform: scale(0.98);
+}
+
+.shelf-cover {
+    display: block;
+    aspect-ratio: 3 / 4;
+    border-radius: var(--radius);
+    overflow: hidden;
+    background-color: var(--accent-soft);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.shelf-cover-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.shelf-cover-fallback {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+}
+
+.shelf-name {
+    font-weight: 650;
+    font-size: var(--fs-body);
+}
+
+.shelf-meta {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+/* 目錄：一個單元一列 */
+.unit-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background-color: var(--card);
+    box-shadow: var(--shadow-card);
+}
+
+.unit-row + .unit-row {
+    border-top: 1px solid var(--line);
+}
+
+.unit-row-btn {
+    width: 100%;
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: none;
+    border: 0;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    min-height: 56px;
+}
+
+.unit-row-btn:hover {
+    background-color: var(--accent-soft);
+}
+
+.unit-row-btn:active {
+    background-color: var(--accent-soft);
+    transform: scale(0.995);
+}
+
+.unit-row-no {
+    font-weight: 650;
+    white-space: nowrap;
+}
+
+.unit-row-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.unit-row-count {
+    color: var(--text-muted);
+    font-size: var(--fs-small);
+    white-space: nowrap;
+}
+
+/* 管理選單：按哪個才顯示哪一塊（使用者：管理頁面太長了） */
+.admin-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--line);
+}
+
+.admin-nav-btn {
+    font: inherit;
+    font-size: var(--fs-small);
+    padding: 8px 14px;
+    min-height: 36px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--line-strong);
+    background-color: var(--card);
+    color: var(--text);
+    cursor: pointer;
+    transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.admin-nav-btn:hover {
+    background-color: var(--accent-soft);
+}
+
+.admin-nav-btn:active {
+    transform: scale(0.97);
+}
+
+.admin-nav-btn.is-active {
+    background-color: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+}
+
+.admin-nav-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* 書本封面預覽 */
+.cover-preview {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+}
+
+.cover-preview img {
+    width: 180px;
+    aspect-ratio: 3 / 4;
+    object-fit: cover;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    display: block;
+}

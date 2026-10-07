@@ -82,7 +82,7 @@ async function main() {
     try {
         await browser.goto(`${app.base}/`);
         await browser.evaluate(STUBS);
-        await browser.waitFor(`document.getElementById('bookTabs').children.length > 0`);
+        await browser.waitFor(`document.getElementById('bookShelf').children.length > 0`);
 
         console.log('\n【1】訪客與老師都看不到帳號管理');
         const guestVisible = await visibleIds(browser, ['usersBlock', 'grantsBlock']);
@@ -93,17 +93,33 @@ async function main() {
         await sleep(500);
         const teacherVisible = await visibleIds(browser, ['usersBlock', 'grantsBlock']);
         check('老師打開「管理」也看不到帳號管理', teacherVisible.length === 0, teacherVisible.join('、'));
+        const teacherNav = await browser.evaluate(`return {
+            users: document.querySelector('#adminNav [data-admin-tab="users"]').hidden,
+            grants: document.querySelector('#adminNav [data-admin-tab="grants"]').hidden,
+            audit: document.querySelector('#adminNav [data-admin-tab="audit"]').hidden
+        };`);
+        check('老師的管理選單裡沒有帳號／授權／稽核分頁', teacherNav.users === true && teacherNav.grants === true && teacherNav.audit === true, JSON.stringify(teacherNav));
         const teacherApi = await apiAs(app.base, 'teacher', PASSWORD, '/api/admin/users', {});
         check('老師直接打 API 也是 403（前端藏起來不算防護）', teacherApi === 403, String(teacherApi));
 
-        console.log('\n【2】管理員登入後看得到帳號管理');
+        console.log('\n【2】管理員：管理選單按了才顯示對應頁面');
         await logoutViaUi(browser);
         await loginViaUi(browser, { username: 'manager', expectText: 'Web administrator' });
         await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
         await browser.evaluate(ROW_HELPERS);
+        await browser.evaluate(`document.getElementById('navUsersBtn').click(); return true;`);
         await browser.waitFor(`document.querySelectorAll('#usersTableBody tr').length >= 5`, { timeout: 8000 });
-        const adminVisible = await visibleIds(browser, ['usersBlock', 'grantsBlock']);
-        check('管理員看得到帳號管理與授權管理', adminVisible.length === 2, adminVisible.join('、'));
+        const adminVisible = await visibleIds(browser, ['usersBlock']);
+        check('按「👥 帳號管理」才顯示帳號表', adminVisible.length === 1, adminVisible.join('、'));
+        check('一次只顯示一塊（授權與稽核還關著）',
+            (await browser.evaluate(`return document.getElementById('grantsBlock').hidden === true && document.getElementById('auditBlock').hidden === true;`)) === true);
+        await browser.evaluate(`document.getElementById('navGrantsBtn').click(); return true;`);
+        await sleep(300);
+        const grantsVisible = await visibleIds(browser, ['grantsBlock']);
+        check('按「🔑 授權管理」後換成授權面板（帳號表收起來）',
+            grantsVisible.length === 1 && (await browser.evaluate(`return document.getElementById('usersBlock').hidden === true;`)) === true);
+        await browser.evaluate(`document.getElementById('navUsersBtn').click(); return true;`);
+        await sleep(300);
         const tableInfo = await browser.evaluate(`
             return {
                 rows: [...document.querySelectorAll('#usersTableBody tr')].length,
@@ -192,6 +208,8 @@ async function main() {
         const beforeGrant = await apiAs(app.base, 'student', PASSWORD, `/api/units/${unit.id}/entries`, { headword: 'library', en_definition: 'a place with books' });
         check('授權前，學生對這個單元是 403', beforeGrant === 403, String(beforeGrant));
 
+        await browser.evaluate(`document.getElementById('navGrantsBtn').click(); return true;`);
+        await browser.waitFor(`getComputedStyle(document.getElementById('grantsBlock')).display !== 'none'`);
         await browser.evaluate(`document.getElementById('newGrantBtn').click(); return true;`);
         await browser.waitFor(`getComputedStyle(document.getElementById('grantForm')).display !== 'none'`);
         await browser.evaluate(`
@@ -227,6 +245,8 @@ async function main() {
         check('移除授權後又回到 403', afterRemove === 403, String(afterRemove));
 
         console.log('\n【7】稽核紀錄：新動作有紀錄、標籤跟著語言');
+        await browser.evaluate(`document.getElementById('navAuditBtn').click(); return true;`);
+        await browser.waitFor(`getComputedStyle(document.getElementById('auditBlock')).display !== 'none'`);
         await browser.evaluate(`document.getElementById('auditRefreshBtn').click(); return true;`);
         /* 重新整理是非同步的：要等「新的動作」真的出現在清單裡，不是等清單非空（舊資料也會非空） */
         await browser.waitFor(`document.getElementById('auditList').textContent.includes('Remove permission')`, { timeout: 8000 });
@@ -244,20 +264,25 @@ async function main() {
             JSON.stringify([auditInfo.labelUserCreate, auditInfo.labelUserDelete]));
 
         console.log('\n【8】切中文後新面板跟著翻譯 + 版面不溢出');
+        await browser.evaluate(`document.getElementById('navUsersBtn').click(); return true;`);
         await browser.evaluate(`document.querySelector('#langSwitch [data-lang="zh"]').click(); return true;`);
         await sleep(600);
         const zhPanels = await browser.evaluate(`return {
             usersTitle: document.querySelector('#usersBlock .panel-title').textContent,
             grantsTitle: document.querySelector('#grantsBlock .panel-title').textContent,
             header: document.querySelector('#usersBlock thead th').textContent,
-            newUserBtn: document.getElementById('newUserBtn').textContent,
-            audit: document.getElementById('auditList').textContent
+            newUserBtn: document.getElementById('newUserBtn').textContent
         };`);
         check('帳號管理標題變中文', zhPanels.usersTitle.includes('帳號管理'), zhPanels.usersTitle);
         check('授權管理標題變中文', zhPanels.grantsTitle.includes('授權管理'), zhPanels.grantsTitle);
         check('表頭變中文', zhPanels.header === '帳號', zhPanels.header);
         check('按鈕變中文', zhPanels.newUserBtn.includes('新增帳號'), zhPanels.newUserBtn);
-        check('稽核動作標籤也變中文', zhPanels.audit.includes('新增授權'), '');
+        /* 稽核清單是打開分頁時才載入的（一次只顯示一塊），所以要按進去看它的語言 */
+        await browser.evaluate(`document.getElementById('navAuditBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('auditList').textContent.includes('新增授權')`, { timeout: 8000 });
+        check('稽核動作標籤也變中文', true);
+        await browser.evaluate(`document.getElementById('navUsersBtn').click(); return true;`);
+        await sleep(300);
 
         await browser.setViewport(402, 874, true);
         await sleep(400);

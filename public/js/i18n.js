@@ -218,6 +218,27 @@
             'grants.colRights': 'Rights',
             'grants.colGrantedBy': 'Granted by',
 
+            'shelf.title': 'Choose a book',
+            'shelf.note': 'Tap a book cover to open its unit list.',
+            'shelf.empty': 'No books have been added yet.',
+            'units.empty': 'This book has no units yet.',
+            'count.units': '{n} units',
+            'nav.backToBooks': '← Books',
+            'nav.backToUnits': '← Units',
+
+            'admin.tabPending': 'To review',
+            'admin.cover': '🖼 Book cover',
+            'admin.menu': 'Manage menu',
+            'pending.empty': 'Nothing waiting for review.',
+            'cover.title': '🖼 Book cover',
+            'cover.note': 'Take a photo of the book cover and upload it here. Students see it on the home screen.',
+            'cover.book': 'Book',
+            'cover.none': 'This book has no cover yet.',
+            'cover.pick': '📁 Choose a photo',
+            'cover.remove': '🗑 Remove cover',
+            'cover.saved': 'Cover updated',
+            'cover.deleted': 'Cover removed',
+
             'login.title': 'Sign in',
             'login.note': 'Students can look words up without signing in. Teachers, class representatives and administrators sign in to edit.',
             'login.username': 'Account',
@@ -258,6 +279,8 @@
             'auditAction.USER_DELETE': 'Delete user',
             'auditAction.GRANT_CREATE': 'Grant permission',
             'auditAction.GRANT_DELETE': 'Remove permission',
+            'auditAction.COVER_UPLOAD': 'Upload cover',
+            'auditAction.COVER_DELETE': 'Remove cover',
 
             'errors.AUTH_REQUIRED': 'Please sign in first',
             'errors.FORBIDDEN': 'You do not have permission to do that',
@@ -305,7 +328,12 @@
             'errors.GRANT_NOT_FOUND': 'This permission entry does not exist',
             'errors.API_NOT_FOUND': 'No such API: {method} {path}',
             'errors.GRANT_EXISTS': 'This user already has this permission',
-            'errors.CANNOT_DELETE_SELF': 'You cannot delete your own account'
+            'errors.CANNOT_DELETE_SELF': 'You cannot delete your own account',
+            'errors.COVER_NOT_FOUND': 'This book has no cover yet',
+            'errors.INVALID_COVER_TYPE': 'Cover images must be JPEG, PNG or WebP ({mime} was sent)',
+            'errors.COVER_BAD_BASE64': 'The image data could not be read',
+            'errors.COVER_EMPTY': 'The image file is empty',
+            'errors.COVER_TOO_LARGE': 'The image is too large ({kb}KB) — please use one under 2MB'
         },
         zh: {
             'app.subtitle': '英文生字字典',
@@ -516,6 +544,27 @@
             'grants.colRights': '權限',
             'grants.colGrantedBy': '授權者',
 
+            'shelf.title': '選擇書本',
+            'shelf.note': '點擊書本封面進入單元目錄。',
+            'shelf.empty': '還沒有加入任何書本。',
+            'units.empty': '這本書還沒有任何單元。',
+            'count.units': '{n} 個單元',
+            'nav.backToBooks': '← 書本',
+            'nav.backToUnits': '← 單元',
+
+            'admin.tabPending': '待審核',
+            'admin.cover': '🖼 書本封面',
+            'admin.menu': '管理選單',
+            'pending.empty': '目前沒有待審核的生字。',
+            'cover.title': '🖼 書本封面',
+            'cover.note': '把書本封面拍下來上傳到這裡；學生會在首頁看到。',
+            'cover.book': '書本',
+            'cover.none': '這本書還沒有封面。',
+            'cover.pick': '📁 選擇圖片',
+            'cover.remove': '🗑 移除封面',
+            'cover.saved': '已更新封面',
+            'cover.deleted': '已移除封面',
+
             'login.title': '登入',
             'login.note': '學生可以直接查生字，不需要登入。老師、科代表與管理員登入後才能編輯。',
             'login.username': '帳號',
@@ -556,6 +605,8 @@
             'auditAction.USER_DELETE': '刪除使用者',
             'auditAction.GRANT_CREATE': '新增授權',
             'auditAction.GRANT_DELETE': '移除授權',
+            'auditAction.COVER_UPLOAD': '上傳書本封面',
+            'auditAction.COVER_DELETE': '移除書本封面',
 
             'errors.AUTH_REQUIRED': '請先登入',
             'errors.FORBIDDEN': '權限不足',
@@ -603,7 +654,12 @@
             'errors.GRANT_NOT_FOUND': '找不到這筆授權',
             'errors.API_NOT_FOUND': '沒有這個 API：{method} {path}',
             'errors.GRANT_EXISTS': '這位使用者已經有這個授權',
-            'errors.CANNOT_DELETE_SELF': '不能刪除自己的帳號'
+            'errors.CANNOT_DELETE_SELF': '不能刪除自己的帳號',
+            'errors.COVER_NOT_FOUND': '這本書還沒有封面',
+            'errors.INVALID_COVER_TYPE': '封面只能是 JPEG、PNG 或 WebP（收到的是 {mime}）',
+            'errors.COVER_BAD_BASE64': '圖片資料讀不出來',
+            'errors.COVER_EMPTY': '圖片檔是空的',
+            'errors.COVER_TOO_LARGE': '圖片太大了（{kb}KB），請用 2MB 以下的'
         }
     };
 

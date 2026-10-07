@@ -3,6 +3,7 @@
     const api = window.PDApi;
     const { el, clear, toast, setFormMessage } = window.PDUI;
     const t = (key, vars) => window.PDI18n.t(key, vars);
+    const errText = (err) => window.PDI18n.errorMessage(err);
 
     const state = {
         books: [],
@@ -13,7 +14,9 @@
         currentBookName: '',
         currentUnit: null,
         query: '',
-        health: null
+        health: null,
+        /* 三個畫面：shelf（書架）→ units（目錄）→ vocab（生字表） */
+        view: 'shelf'
     };
     window.PDState = state;
 
@@ -54,59 +57,101 @@
         }
     }
 
-    /* ---------------- 書本與單元 ---------------- */
-    function renderBookTabs() {
-        const box = document.getElementById('bookTabs');
-        clear(box);
-        for (const book of state.books) {
-            box.appendChild(el('button', {
-                text: `${book.name}（${book.unit_count}）`,
-                attrs: {
-                    type: 'button',
-                    role: 'tab',
-                    'aria-selected': String(String(book.id) === String(state.currentBookId)),
-                    'data-book-id': book.id
-                }
-            }));
-        }
+    /* ---------------- 三個畫面的切換 ---------------- */
+
+    /* 一次只顯示一個畫面：書架 → 目錄 → 生字表。
+     * ★ 可見性只在這裡決定（其他函式只負責填內容），否則兩邊互相覆蓋會出現「畫面空白」的鬼故事。 */
+    function showView(name) {
+        state.view = name;
+        document.getElementById('shelfView').hidden = name !== 'shelf';
+        document.getElementById('unitsView').hidden = name !== 'units';
+        document.getElementById('unitSection').hidden = name !== 'vocab';
+        /* 搜尋只對「目前單元的生字表」有意義 */
+        document.getElementById('searchWrap').hidden = name !== 'vocab';
+        updateEmptyState();
     }
 
-    function renderUnitTabs() {
-        const box = document.getElementById('unitTabs');
+    function updateEmptyState() {
+        const empty = document.getElementById('emptyState');
+        const noBooks = state.books.length === 0;
+        const firstText = empty.querySelector('.empty-state-text');
+        if (firstText) {
+            firstText.textContent = noBooks ? t('picker.noBooks') : t('picker.noUnits');
+        }
+        empty.hidden = !(state.view === 'shelf' && noBooks);
+        /* 「建立順序」那幾步只有能編輯的人才做得到，學生看到標題就好 */
+        const canEdit = window.PDAuth.can('can_edit');
+        const steps = empty.querySelector('.empty-state-steps');
+        const stepsTitle = empty.querySelector('.empty-state-steps-title');
+        if (steps) steps.hidden = !canEdit;
+        if (stepsTitle) stepsTitle.hidden = !canEdit;
+    }
+
+    /* ---------------- 書架（封面 + 書名） ---------------- */
+    function renderShelf() {
+        const box = document.getElementById('bookShelf');
         clear(box);
+        for (const book of state.books) {
+            const meta = [
+                book.grade,
+                t('count.units', { n: book.unit_count }),
+                t('unit.words', { n: book.entry_count })
+            ].filter(Boolean).join(' · ');
+            /* 封面網址帶 cover_updated_at 當版本號：換封面後學生不會看到舊圖（快取） */
+            const cover = book.has_cover
+                ? el('img', {
+                    class: 'shelf-cover-img',
+                    attrs: {
+                        src: `${book.cover_url}?v=${encodeURIComponent(book.cover_updated_at || '1')}`,
+                        alt: '',
+                        loading: 'lazy'
+                    }
+                })
+                : el('span', { class: 'shelf-cover-fallback', text: String(book.code || book.name || '?').slice(0, 6) });
+            box.appendChild(el('li', { class: 'shelf-item' }, [
+                el('button', {
+                    class: 'shelf-card',
+                    attrs: { type: 'button', 'data-book-id': book.id, 'aria-label': book.name },
+                    on: { click: () => selectBook(book.id).catch((err) => toast(errText(err), 'error')) }
+                }, [
+                    el('span', { class: 'shelf-cover' }, [cover]),
+                    el('span', { class: 'shelf-name', text: book.name }),
+                    el('span', { class: 'shelf-meta', text: meta })
+                ])
+            ]));
+        }
+        updateEmptyState();
+    }
+
+    /* ---------------- 目錄（單元列表） ---------------- */
+    function renderUnitList() {
+        const box = document.getElementById('unitList');
+        clear(box);
+        document.getElementById('unitsTitle').textContent = state.currentBookName || '—';
+        document.getElementById('unitsMeta').textContent = state.units.length
+            ? t('count.units', { n: state.units.length })
+            : '';
+        document.getElementById('unitsEmpty').hidden = state.units.length > 0;
         for (const unit of state.units) {
-            const label = `Unit ${unit.unit_no}${unit.title ? ` · ${unit.title}` : ''}`;
-            const chip = el('button', {
-                attrs: {
-                    type: 'button',
-                    role: 'tab',
-                    'aria-selected': String(String(unit.id) === String(state.currentUnitId)),
-                    'data-unit-id': unit.id
-                }
-            }, [
-                el('span', { text: label }),
-                el('span', { class: 'chip-count', text: `${unit.published_count}${unit.pending_count ? `+${unit.pending_count}⏳` : ''}` })
-            ]);
-            box.appendChild(chip);
+            const words = t('unit.words', { n: unit.published_count });
+            const pending = unit.pending_count ? ` · ${t('unit.pending', { n: unit.pending_count })}` : '';
+            box.appendChild(el('li', { class: 'unit-row' }, [
+                el('button', {
+                    class: 'unit-row-btn',
+                    attrs: { type: 'button', 'data-unit-id': unit.id },
+                    on: { click: () => selectUnit(unit.id).catch((err) => toast(errText(err), 'error')) }
+                }, [
+                    el('span', { class: 'unit-row-no', text: `Unit ${unit.unit_no}` }),
+                    el('span', { class: 'unit-row-title', text: unit.title || '' }),
+                    el('span', { class: 'unit-row-count', text: `${words}${pending}` })
+                ])
+            ]));
         }
     }
 
     function renderUnitHead() {
         const unit = state.currentUnit;
-        const section = document.getElementById('unitSection');
-        const empty = document.getElementById('emptyState');
-        if (!unit) {
-            section.hidden = true;
-            /* 沒有可選的單元時要給學生一個清楚的起始畫面，不能只留一片空白。 */
-            const firstText = empty.querySelector('.empty-state-text');
-            if (firstText) {
-                firstText.textContent = state.books.length === 0 ? t('picker.noBooks') : t('picker.noUnits');
-            }
-            empty.hidden = false;
-            return;
-        }
-        section.hidden = false;
-        empty.hidden = true;
+        if (!unit) return;
         document.getElementById('unitTitle').textContent
             = `Unit ${unit.unit_no}${unit.title ? ` · ${unit.title}` : ''}`;
         const published = state.entries.filter((entry) => entry.status === 'published').length;
@@ -145,14 +190,14 @@
     async function reloadBooks() {
         const data = await api.get('/api/books');
         state.books = data.books || [];
-        renderBookTabs();
+        renderShelf();
     }
 
     async function reloadUnits(bookId) {
         const data = await api.get(`/api/books/${bookId}/units`);
         state.units = data.units || [];
         state.currentBookName = data.book ? data.book.name : '';
-        renderUnitTabs();
+        renderUnitList();
     }
 
     async function reloadUnit(options) {
@@ -167,7 +212,7 @@
             state.units = list.units || [];
             state.currentBookName = list.book ? list.book.name : state.currentBookName;
         }
-        renderUnitTabs();
+        renderUnitList();
         renderUnitHead();
         renderVocab();
         window.PDAdmin.renderPending(state.entries);
@@ -179,29 +224,44 @@
         }
     }
 
+    /* 封面 → 目錄（不自動選第一個單元：使用者要自己選） */
     async function selectBook(bookId) {
         state.currentBookId = bookId;
-        renderBookTabs();
+        state.currentUnitId = null;
+        state.entries = [];
+        state.currentUnit = null;
         await reloadUnits(bookId);
-        if (state.units.length) {
-            await selectUnit(state.units[0].id);
-        } else {
-            state.currentUnitId = null;
-            state.entries = [];
-            state.currentUnit = null;
-            renderUnitTabs();
-            renderUnitHead();
-            renderVocab();
-            window.PDAdmin.refreshAvailability();
-        }
+        showView('units');
+        renderUnitHead();
+        renderVocab();
+        window.PDAdmin.refreshAvailability();
+        window.PDAdmin.renderPending([]);
         await window.PDAdmin.loadAudit();
     }
 
+    /* 目錄 → 生字表 */
     async function selectUnit(unitId) {
         state.currentUnitId = unitId;
-        renderUnitTabs();
+        showView('vocab');
         await reloadUnit();
         await window.PDAdmin.loadAudit();
+    }
+
+    function backToShelf() {
+        state.query = '';
+        document.getElementById('searchInput').value = '';
+        showView('shelf');
+    }
+
+    function backToUnits() {
+        state.query = '';
+        document.getElementById('searchInput').value = '';
+        state.currentUnitId = null;
+        state.entries = [];
+        state.currentUnit = null;
+        showView('units');
+        renderUnitList();
+        renderVocab();
     }
 
     /* ---------------- 登入狀態 ---------------- */
@@ -246,12 +306,9 @@
             attrs: { type: 'button', id: 'logoutBtn' },
             on: { click: doLogout }
         }));
-        const auditBlock = document.getElementById('auditBlock');
-        auditBlock.hidden = !window.PDAuth.can('can_view_audit');
-        /* 帳號管理與授權管理：只有 admin 以上看得到（後端一樣會再檢查） */
-        const manageUsers = window.PDAuth.can('can_manage_users');
-        document.getElementById('usersBlock').hidden = !manageUsers;
-        document.getElementById('grantsBlock').hidden = !manageUsers;
+        /* 帳號／授權／稽核都是管理選單裡的分頁：可見性交給 showPanel() 決定，
+         * 這裡只更新「哪些分頁按鈕該出現」（沒有權限的分頁按鈕會直接藏起來）。 */
+        window.PDAdmin.refreshAvailability();
     }
 
     async function toggleAdminSection() {
@@ -260,8 +317,11 @@
         section.hidden = !section.hidden;
         if (button) button.textContent = section.hidden ? t('nav.manage') : t('nav.manageClose');
         if (section.hidden) return;
+        /* 打開管理區時，預設停在最常用的分頁：有待審核就看待審核，否則直接新增生字 */
+        const pendingBtn = document.getElementById('navPendingBtn');
+        const entryBtn = document.getElementById('newEntryBtn');
+        window.PDAdmin.showPanel(pendingBtn && !pendingBtn.hidden && !pendingBtn.disabled ? 'pending' : 'entry');
         await window.PDAdmin.refreshAvailability();
-        await window.PDAdmin.loadAudit();
         await window.PDUsers.refresh();
     }
 
@@ -303,7 +363,7 @@
         await window.PDAuth.logout();
         renderAuth();
         document.getElementById('adminSection').hidden = true;
-        document.getElementById('entryForm').hidden = true;
+        window.PDAdmin.showPanel(null);
         toast(t('login.loggedOut'));
         await refreshAfterAuthChange();
     }
@@ -314,23 +374,31 @@
         await reloadUnit();
         const canEdit = window.PDAuth.can('can_edit');
         if (!canEdit) document.getElementById('adminSection').hidden = true;
-        if (window.PDAuth.user) {
-            document.getElementById('usersBlock').hidden = !window.PDAuth.can('can_manage_users');
-            document.getElementById('grantsBlock').hidden = !window.PDAuth.can('can_manage_users');
-        }
+        if (!canEdit) window.PDAdmin.showPanel(null);
+        /* 換人登入後，目前畫面可能已經不該顯示（例如學生看到一半被登出） */
+        if (state.view === 'vocab' && !state.currentUnit) showView('units');
+        renderShelf();
         renderUnitHead();
         renderVocab();
+        updateEmptyState();
     }
 
     /* ---------------- 事件綁定 ---------------- */
     function bindEvents() {
-        document.getElementById('bookTabs').addEventListener('click', (event) => {
+        document.getElementById('bookShelf').addEventListener('click', (event) => {
             const button = event.target.closest('[data-book-id]');
-            if (button) selectBook(button.dataset.bookId).catch((err) => toast(err.message, 'error'));
+            if (button) selectBook(button.dataset.bookId).catch((err) => toast(errText(err), 'error'));
         });
-        document.getElementById('unitTabs').addEventListener('click', (event) => {
+        document.getElementById('unitList').addEventListener('click', (event) => {
             const button = event.target.closest('[data-unit-id]');
-            if (button) selectUnit(button.dataset.unitId).catch((err) => toast(err.message, 'error'));
+            if (button) selectUnit(button.dataset.unitId).catch((err) => toast(errText(err), 'error'));
+        });
+        document.getElementById('unitsBackBtn').addEventListener('click', backToShelf);
+        document.getElementById('vocabBackBtn').addEventListener('click', backToUnits);
+        /* 管理區的選單：按哪個才顯示哪一塊（管理頁面太長了） */
+        document.getElementById('adminNav').addEventListener('click', (event) => {
+            const button = event.target.closest('[data-admin-tab]');
+            if (button) window.PDAdmin.showPanel(button.dataset.adminTab);
         });
         document.getElementById('searchInput').addEventListener('input', (event) => {
             state.query = event.target.value;
@@ -346,10 +414,14 @@
             const buttons = document.querySelectorAll('#langSwitch [data-lang]');
             buttons.forEach((btn) => btn.setAttribute('aria-pressed', String(btn.dataset.lang === event.detail.lang)));
             renderAuth();
+            renderShelf();
+            renderUnitList();
             renderUnitHead();
             renderVocab();
+            updateEmptyState();
             window.PDAdmin.renderPending(state.entries);
             window.PDAdmin.refreshAvailability();
+            window.PDAdmin.renderCoverPanel();
             if (!document.getElementById('auditBlock').hidden) window.PDAdmin.loadAudit();
             if (!document.getElementById('usersBlock').hidden) window.PDUsers.refresh();
             toast(event.detail.lang === 'zh' ? t('toast.langChanged') : 'Language: English');
@@ -381,15 +453,11 @@
         renderAuth();
         try {
             await reloadBooks();
-            if (state.books.length) {
-                await selectBook(state.books[0].id);
-            } else {
-                // 完全沒有資料：顯示起始畫面（寫清楚下一步），不要只丟一句提示訊息
-                renderUnitTabs();
-                renderUnitHead();
-                renderVocab();
-                window.PDAdmin.refreshAvailability();
-            }
+            /* 首頁是書架：學生要先看到書本封面，點進去才是目錄，再點單元才看到生字表 */
+            showView('shelf');
+            renderUnitHead();
+            renderVocab();
+            window.PDAdmin.refreshAvailability();
         } catch (err) {
             toast(t('toast.loadFailed', { message: err.message }), 'error');
         }
@@ -409,6 +477,12 @@
         reloadUnit,
         selectBook,
         selectUnit,
+        showView,
+        backToShelf,
+        backToUnits,
+        renderShelf,
+        renderUnitList,
+        updateEmptyState,
         refreshAfterAuthChange,
         renderVocab,
         renderUnitHead,

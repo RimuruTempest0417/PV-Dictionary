@@ -23,6 +23,11 @@ const RESET = process.argv.includes('--reset');
 /* 預設「只建立帳號、不建立任何生字」：使用者要用自己的真實內容從零開始填。
  * 要載入示範教材（2 本 × 3 單元 × 6 生字）給人看效果時，才加 --with-sample。 */
 const WITH_SAMPLE = process.argv.includes('--with-sample');
+/* 只留下網站管理員帳號（連授權一起清掉），資料完全不動 */
+const PRUNE_ACCOUNTS = process.argv.includes('--prune-accounts');
+/* 預設只建網站管理員；要其他示範帳號才加這兩個 */
+const WITH_ADMIN = process.argv.includes('--with-admin');
+const WITH_TEAM = process.argv.includes('--with-team');
 
 /* ---------------- .env 輔助 ---------------- */
 function readEnvFile() {
@@ -147,9 +152,15 @@ const BOOKS = [
     }
 ];
 
-const USERS = [
-    { key: 'SEED_MANAGER_PASSWORD', username: 'manager', display_name: '網頁管理員', role: 'admin' },
-    { key: 'SEED_WEB_MANAGER_PASSWORD', username: 'webmanager', display_name: '網站管理員', role: 'web_manager' },
+/* 種子帳號
+ * ★ 2026-10-07 使用者指定：只保留「網站管理員」一個帳號，帳號名 Gary（密碼由他自己登入後再改）。
+ *   其他帳號一律由他在「👥 帳號管理」介面上自己建立 —— 所以預設只建 Gary。
+ *   --with-admin  額外建立 admin（角色 admin，舊名 manager 已改名）
+ *   --with-team   額外建立 teacher / classrep（示範用）
+ */
+const WEB_MANAGER_USER = { key: 'SEED_WEB_MANAGER_PASSWORD', username: 'Gary', display_name: 'Gary', role: 'web_manager' };
+const ADMIN_USER = { key: 'SEED_ADMIN_PASSWORD', username: 'admin', display_name: '管理員', role: 'admin' };
+const TEAM_USERS = [
     { key: 'SEED_TEACHER_PASSWORD', username: 'teacher', display_name: '英文老師', role: 'teacher' },
     { key: 'SEED_CLASS_REP_PASSWORD', username: 'classrep', display_name: '英文科代表', role: 'class_rep' }
 ];
@@ -225,7 +236,48 @@ function main() {
     }
 
     const createdUsers = [];
-    for (const spec of USERS) {
+    /* 只保留網站管理員：把其他帳號（連同授權）刪掉，並確保 Gary 這個帳號存在且是網站管理員。
+     * 使用者的資料（書本／單元／生字）完全不會被動到。 */
+    if (PRUNE_ACCOUNTS) {
+        const removed = [];
+        for (const user of store.listUsers()) {
+            if (user.role === 'web_manager') continue;
+            for (const grant of store.listGrants({ userId: user.id })) store.deleteGrant(grant.id);
+            store.deleteUser(user.id);
+            removed.push(`${user.username}（${user.role}）`);
+        }
+        const managers = store.listUsers().filter((user) => user.role === 'web_manager');
+        /* 舊帳號名（webmanager）改名成 Gary：直接改 username，其他資料不動 */
+        for (const user of managers) {
+            if (user.username !== WEB_MANAGER_USER.username) {
+                store.updateUser(user.id, {
+                    username: WEB_MANAGER_USER.username,
+                    display_name: WEB_MANAGER_USER.display_name
+                });
+                console.log(`已把網站管理員帳號 ${user.username} 改名為 ${WEB_MANAGER_USER.username}`);
+            }
+        }
+        console.log(removed.length ? `已刪除帳號：${removed.join('、')}` : '沒有需要刪除的帳號');
+        const keptManagers = store.listUsers().filter((user) => user.role === 'web_manager');
+        if (keptManagers.length === 1) {
+            const password = ensureEnv(WEB_MANAGER_USER.key, randomPassword);
+            store.updateUser(keptManagers[0].id, { password_hash: hashPassword(password) });
+            console.log(`已重設 ${keptManagers[0].username} 的密碼（在 .env 的 ${WEB_MANAGER_USER.key}）`);
+        }
+    }
+
+    const userSpecs = [WEB_MANAGER_USER];
+    if (WITH_ADMIN) userSpecs.push(ADMIN_USER);
+    if (WITH_TEAM) userSpecs.push(...TEAM_USERS);
+    for (const spec of userSpecs) {
+        /* 舊名 manager 的帳號若還在，先改名成 admin（使用者指定：manager 改叫 admin） */
+        if (spec === ADMIN_USER) {
+            const legacy = store.findUserByUsername('manager');
+            if (legacy && !store.findUserByUsername('admin')) {
+                store.updateUser(legacy.id, { username: 'admin', display_name: ADMIN_USER.display_name });
+                console.log('已把舊帳號 manager 改名為 admin');
+            }
+        }
         if (store.findUserByUsername(spec.username)) continue;
         const password = ensureEnv(spec.key, randomPassword);
         store.createUser({
@@ -246,6 +298,7 @@ function main() {
     }
     console.log('--- 帳號 ---');
     console.log(createdUsers.length ? `新建立：${createdUsers.join('、')}` : '帳號已存在，未變更');
+    console.log(`目前帳號：${store.listUsers().map((u) => `${u.username}（${u.role}${u.is_active === false ? '，已停用' : ''}）`).join('、')}`);
     console.log(`資料檔：${DATA_FILE}`);
     console.log('密碼：已寫入 .env 的 SEED_*_PASSWORD（本檔不印出密碼）');
     console.log('查詢方式：grep SEED_ .env');

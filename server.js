@@ -39,6 +39,10 @@ function normalizeAudioMime(value) {
 const AUDIO_MAX_BYTES = 1024 * 1024;          // 單筆錄音上限 1MB（Vercel body 上限約 4.5MB）
 const AUDIO_MAX_DURATION_MS = 60 * 1000;
 
+/* 書本封面（老師用手機拍封面後上傳）：只收圖片，2MB 以內 */
+const COVER_MIME_WHITELIST = ['image/jpeg', 'image/png', 'image/webp'];
+const COVER_MAX_BYTES = 2 * 1024 * 1024;
+
 const LIMITS = {
     headword: 80,
     ipa: 80,
@@ -269,12 +273,25 @@ function createApp(options = {}) {
     });
 
     /* ================= 公開：書本／單元／生字 ================= */
+
+    /* 書本對外的樣子：**絕對不能把封面 base64 一起回傳**（一本書可能好幾 MB，
+     * 清單就會變成幾十 MB 的 JSON），只回有沒封面與網址。 */
+    function publicBook(book) {
+        if (!book) return book;
+        const copy = Object.assign({}, book);
+        const hasCover = Boolean(copy.cover_data);
+        delete copy.cover_data;
+        copy.has_cover = hasCover;
+        copy.cover_url = hasCover ? `/api/covers/${copy.id}` : null;
+        return copy;
+    }
+
     app.get('/api/books', (req, res) => {
         const includeHidden = canSeeUnpublished(req) && boolish(req.query.include_unpublished, false);
         const books = store.listBooks({ includeUnpublished: includeHidden }).map((book) => {
             const units = store.listUnits({ bookId: book.id, includeUnpublished: includeHidden });
             const counts = units.map((u) => store.countEntries(u.id, PUBLISHED_ONLY));
-            return Object.assign({}, book, {
+            return Object.assign(publicBook(book), {
                 unit_count: units.length,
                 entry_count: counts.reduce((sum, n) => sum + n, 0),
                 pending_count: units.reduce((sum, u) => sum + store.countEntries(u.id, ['pending']), 0)
@@ -299,7 +316,7 @@ function createApp(options = {}) {
             published_count: store.countEntries(unit.id, PUBLISHED_ONLY),
             pending_count: includeHidden ? store.countEntries(unit.id, ['pending']) : 0
         }));
-        res.json({ book, units });
+        res.json({ book: publicBook(book), units });
     });
 
     app.get('/api/units/:id', (req, res) => {
@@ -686,7 +703,7 @@ function createApp(options = {}) {
             is_published: boolish(body.is_published, true)
         });
         logAudit(store, { user: req.user, action: 'BOOK_CREATE', targetId: book.id, details: book.name, ip: req.ip });
-        return res.status(201).json({ book });
+        return res.status(201).json({ book: publicBook(book) });
     });
 
     app.patch('/api/books/:id', requireRole('teacher'), (req, res) => {
@@ -701,7 +718,71 @@ function createApp(options = {}) {
         if (body.is_published !== undefined) patch.is_published = boolish(body.is_published, true);
         const updated = store.updateBook(book.id, patch);
         logAudit(store, { user: req.user, action: 'BOOK_UPDATE', targetId: book.id, details: updated.name, ip: req.ip });
-        return res.json({ book: updated });
+        return res.json({ book: publicBook(updated) });
+    });
+
+    /* ================= 書本封面（老師用手機拍封面 → 上傳） ================= */
+    app.get('/api/covers/:id', (req, res) => {
+        const book = store.getBook(req.params.id);
+        if (!book || !book.cover_data) {
+            return res.status(404).json({ error: msg('COVER_NOT_FOUND'), code: 'COVER_NOT_FOUND' });
+        }
+        res.setHeader('Content-Type', book.cover_mime || 'image/jpeg');
+        /* 換封面會更新 cover_updated_at，前端用 ?v= 破快取，所以這裡可以久放 */
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        return res.send(Buffer.from(book.cover_data, 'base64'));
+    });
+
+    app.post('/api/books/:id/cover', requireRole('teacher'), (req, res) => {
+        const book = store.getBook(req.params.id);
+        if (!book) return res.status(404).json({ error: msg('BOOK_NOT_FOUND'), code: 'BOOK_NOT_FOUND' });
+        const body = req.body || {};
+        const raw = String(body.data || '');
+        /* 與錄音同一套寫法：純 base64 或 data:image/jpeg;base64,… 都吃 */
+        const match = /^data:([^;,]+)[^,]*;base64,([\s\S]*)$/.exec(raw);
+        const mime = String((match ? match[1] : body.mime) || '').toLowerCase().split(';')[0].trim();
+        const base64 = match ? match[2] : raw;
+        if (!COVER_MIME_WHITELIST.includes(mime)) {
+            return res.status(400).json({
+                error: msg('INVALID_COVER_TYPE', { mime: mime || '?' }), code: 'INVALID_COVER_TYPE',
+                details: { mime: mime || '?' }, allowed: COVER_MIME_WHITELIST
+            });
+        }
+        if (!/^[A-Za-z0-9+/=\s]+$/.test(base64)) {
+            return res.status(400).json({ error: msg('COVER_BAD_BASE64'), code: 'COVER_BAD_BASE64' });
+        }
+        const bytes = Buffer.from(base64, 'base64');
+        if (bytes.length === 0) return res.status(400).json({ error: msg('COVER_EMPTY'), code: 'COVER_EMPTY' });
+        if (bytes.length > COVER_MAX_BYTES) {
+            return res.status(413).json({
+                error: msg('COVER_TOO_LARGE', { kb: Math.round(bytes.length / 1024) }), code: 'COVER_TOO_LARGE',
+                details: { kb: Math.round(bytes.length / 1024) }
+            });
+        }
+        const updated = store.updateBook(book.id, {
+            cover_mime: mime,
+            cover_data: base64.replace(/\s+/g, ''),
+            cover_bytes: bytes.length,
+            cover_updated_at: new Date().toISOString(),
+            cover_by: req.user.username
+        });
+        logAudit(store, {
+            user: req.user, action: 'COVER_UPLOAD', targetId: book.id,
+            details: `${book.name}（${Math.round(bytes.length / 1024)}KB）`, ip: req.ip
+        });
+        return res.status(201).json({ ok: true, book: publicBook(updated) });
+    });
+
+    app.delete('/api/books/:id/cover', requireRole('teacher'), (req, res) => {
+        const book = store.getBook(req.params.id);
+        if (!book) return res.status(404).json({ error: msg('BOOK_NOT_FOUND'), code: 'BOOK_NOT_FOUND' });
+        if (!book.cover_data) return res.status(404).json({ error: msg('COVER_NOT_FOUND'), code: 'COVER_NOT_FOUND' });
+        const updated = store.updateBook(book.id, {
+            cover_mime: '', cover_data: '', cover_bytes: 0, cover_updated_at: null, cover_by: ''
+        });
+        logAudit(store, { user: req.user, action: 'COVER_DELETE', targetId: book.id, details: book.name, ip: req.ip });
+        return res.json({ ok: true, book: publicBook(updated) });
     });
 
     app.post('/api/books/:id/units', requireRole('teacher'), (req, res) => {

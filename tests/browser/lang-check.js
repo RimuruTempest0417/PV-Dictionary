@@ -45,7 +45,7 @@ async function main() {
     try {
         await browser.goto(`${app.base}/`);
         await browser.evaluate(STUBS);
-        await browser.waitFor(`document.getElementById('bookTabs').children.length > 0`);
+        await browser.waitFor(`document.getElementById('bookShelf').children.length > 0`);
 
         console.log('\n【1】第一次開站：英文');
         const initial = await browser.evaluate(`return {
@@ -54,7 +54,7 @@ async function main() {
             subtitle: document.getElementById('appSubtitle').textContent,
             searchPlaceholder: document.getElementById('searchInput').placeholder,
             loginBtn: document.getElementById('loginBtn').textContent,
-            bookLabel: document.querySelector('.picker-label').textContent,
+            bookLabel: document.querySelector('#shelfView .view-title').textContent,
             printBtn: document.getElementById('printBtn').textContent,
             emptyMsg: document.getElementById('vocabEmpty').textContent,
             footerNote: document.querySelector('.footer .footer-muted:last-child').textContent
@@ -62,8 +62,8 @@ async function main() {
         check('<html lang> 是 en', initial.lang === 'en', initial.lang);
         check('標題副標是英文', initial.subtitle.includes('English'), initial.subtitle);
         check('搜尋框提示文字是英文', initial.searchPlaceholder.includes('Search'), initial.searchPlaceholder);
-        check('按鈕是英文（Sign in / Book / Print）',
-            initial.loginBtn.includes('Sign in') && initial.bookLabel === 'Book' && initial.printBtn.includes('Print'),
+        check('按鈕是英文（Sign in / 書架標題 / Print）',
+            initial.loginBtn.includes('Sign in') && initial.bookLabel === 'Choose a book' && initial.printBtn.includes('Print'),
             JSON.stringify([initial.loginBtn, initial.bookLabel, initial.printBtn]));
         check('單元空訊息是英文', initial.emptyMsg.includes('No vocabulary'), initial.emptyMsg);
         check('頁腳說明是英文', initial.footerNote.includes('Pronunciations'), initial.footerNote);
@@ -78,7 +78,7 @@ async function main() {
             pressed: document.querySelector('#langSwitch [data-lang="zh"]').getAttribute('aria-pressed'),
             subtitle: document.getElementById('appSubtitle').textContent,
             loginBtn: document.getElementById('loginBtn').textContent,
-            bookLabel: document.querySelector('.picker-label').textContent,
+            bookLabel: document.querySelector('#shelfView .view-title').textContent,
             printBtn: document.getElementById('printBtn').textContent,
             emptyMsg: document.getElementById('vocabEmpty').textContent,
             unitMeta: document.getElementById('unitMeta').textContent
@@ -86,24 +86,34 @@ async function main() {
         check('<html lang> 變成 zh-Hant', zhState.lang === 'zh-Hant', zhState.lang);
         check('語言選擇寫進 localStorage', zhState.stored === 'zh', String(zhState.stored));
         check('中文按鈕標記為已選取', zhState.pressed === 'true');
-        check('靜態文字切成中文', zhState.subtitle.includes('英文生字字典') && zhState.bookLabel === '書本'
+        check('靜態文字切成中文', zhState.subtitle.includes('英文生字字典') && zhState.bookLabel === '選擇書本'
             && zhState.printBtn.includes('列印'), JSON.stringify([zhState.subtitle, zhState.bookLabel, zhState.printBtn]));
-        check('動態文字（單元生字數、空訊息）切成中文',
-            zhState.unitMeta.includes('個生字') && zhState.emptyMsg.includes('還沒有生字'), JSON.stringify([zhState.unitMeta, zhState.emptyMsg]));
+        check('動態文字（單元空訊息）切成中文', zhState.emptyMsg.includes('還沒有生字'), zhState.emptyMsg);
 
-        console.log('\n【3】中文介面下的動態內容（登入狀態）');
+        console.log('\n【3】中文介面下的動態內容（登入 + 三層導覽：封面 → 目錄 → 生字表）');
         await loginViaUi(browser, { username: 'classrep', expectText: '科代表' });
+        await browser.evaluate(`document.querySelector('#bookShelf [data-book-id]').click(); return true;`);
+        await browser.waitFor(`document.getElementById('unitsView').hidden === false`, { timeout: 8000 });
+        const unitListZh = await browser.evaluate(`return document.getElementById('unitList').textContent;`);
+        check('目錄列出單元（中文：個生字）', unitListZh.includes('Unit 1') && unitListZh.includes('個生字'), unitListZh);
+        await browser.evaluate(`document.querySelector('#unitList [data-unit-id]').click(); return true;`);
+        await browser.waitFor(`document.getElementById('unitSection').hidden === false`, { timeout: 8000 });
+        await sleep(200);
         const zhAuth = await browser.evaluate(`return {
             area: document.getElementById('authArea').textContent,
             logout: document.getElementById('logoutBtn').textContent,
-            manage: document.getElementById('adminToggleBtn') ? document.getElementById('adminToggleBtn').textContent : null
+            manage: document.getElementById('adminToggleBtn') ? document.getElementById('adminToggleBtn').textContent : null,
+            unitMeta: document.getElementById('unitMeta').textContent,
+            backBtn: document.getElementById('vocabBackBtn').textContent
         };`);
         check('角色標籤是中文', zhAuth.area.includes('科代表'), zhAuth.area);
+        check('生字表的動態數字是中文', zhAuth.unitMeta.includes('個生字'), zhAuth.unitMeta);
+        check('返回目錄的按鈕是中文', zhAuth.backBtn.includes('單元'), zhAuth.backBtn);
         check('登出／管理按鈕是中文', zhAuth.logout === '登出' && (zhAuth.manage || '').includes('管理'), JSON.stringify(zhAuth));
 
         console.log('\n【4】重新載入後記得選擇');
         await browser.goto(`${app.base}/`);
-        await browser.waitFor(`document.getElementById('bookTabs').children.length > 0`);
+        await browser.waitFor(`document.getElementById('bookShelf').children.length > 0`);
         const afterReload = await browser.evaluate(`return {
             lang: document.documentElement.lang,
             subtitle: document.getElementById('appSubtitle').textContent,
