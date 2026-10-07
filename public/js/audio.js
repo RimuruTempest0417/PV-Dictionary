@@ -20,6 +20,8 @@
             && typeof window.SpeechSynthesisUtterance !== 'undefined';
     }
 
+    const t = (key, vars) => window.PDI18n.t(key, vars);
+
     function availableVoices() {
         if (!ttsSupported()) return [];
         try {
@@ -43,7 +45,7 @@
     function speak(text, options) {
         const opts = options || {};
         if (!ttsSupported()) {
-            return Promise.reject(new Error('這個瀏覽器不支援語音合成，請改用老師錄音'));
+            return Promise.reject(new Error(t('speak.unsupported')));
         }
         return new Promise((resolve, reject) => {
             try {
@@ -55,7 +57,7 @@
                 utterance.rate = typeof opts.rate === 'number' ? opts.rate : 0.9;
                 utterance.pitch = 1;
                 utterance.onend = () => resolve(true);
-                utterance.onerror = () => reject(new Error('語音播放失敗'));
+                utterance.onerror = () => reject(new Error(t('speak.failed')));
                 // 檢查腳本（與未來的自動化）要能確認「真的呼叫了語音合成」
                 state.lastSpoken = { text: String(text), lang: utterance.lang, at: Date.now() };
                 window.speechSynthesis.speak(utterance);
@@ -81,14 +83,14 @@
         return new Promise((resolve, reject) => {
             const audio = new Audio(url);
             audio.onended = () => resolve(true);
-            audio.onerror = () => reject(new Error('音檔播放失敗'));
+            audio.onerror = () => reject(new Error(t('speak.failed')));
             audio.play().then(() => undefined).catch((err) => reject(err));
         });
     }
 
     /* entry：/api/units/:id 回傳的生字物件（has_audio / audio_id） */
     function playEntry(entry) {
-        if (!entry) return Promise.reject(new Error('找不到生字'));
+        if (!entry) return Promise.reject(new Error(t('errors.ENTRY_NOT_FOUND')));
         if (entry.has_audio && entry.audio_id) {
             return playUrl(`/api/audio/${entry.audio_id}`);
         }

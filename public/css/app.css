@@ -145,6 +145,39 @@ code {
     gap: var(--space-2);
 }
 
+/* 語言切換（EN / 中文）：小分段控制 */
+.lang-switch {
+    display: flex;
+    gap: 2px;
+    background-color: var(--accent-soft);
+    border-radius: var(--radius-pill);
+    padding: 3px;
+}
+
+.lang-switch button {
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 5px 11px;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: transform 100ms ease-out, background-color 140ms ease, color 140ms ease;
+}
+
+.lang-switch button:active {
+    transform: scale(0.95);
+}
+
+.lang-switch button[aria-pressed="true"] {
+    background-color: var(--surface-solid);
+    color: var(--accent);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
 .user-chip {
     display: flex;
     align-items: center;

@@ -12,7 +12,11 @@
             super(message);
             this.name = 'ApiError';
             this.status = status;
-            this.data = data;
+            this.data = data || null;
+            /* code 是跨語言溝通用的（前端用 errors.<code> 翻譯）；
+             * details 帶插值用的參數（例如重複生字的名稱）。 */
+            this.code = (data && data.code) || null;
+            this.details = (data && data.details) || null;
         }
     }
 
@@ -27,11 +31,16 @@
             init.headers['Content-Type'] = 'application/json';
             init.body = JSON.stringify(opts.body);
         }
-        const res = await fetch(path, init);
+        let res;
+        try {
+            res = await fetch(path, init);
+        } catch (err) {
+            throw new ApiError('Could not reach the server', 0, { code: 'NETWORK' });
+        }
         const type = res.headers.get('content-type') || '';
         const data = type.includes('application/json') ? await res.json().catch(() => null) : null;
         if (!res.ok) {
-            const message = (data && data.error) || `請求失敗（HTTP ${res.status}）`;
+            const message = (data && data.error) || `HTTP ${res.status}`;
             throw new ApiError(message, res.status, data);
         }
         return data;

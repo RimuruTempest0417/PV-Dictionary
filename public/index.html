@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="PV_Dictionary 線上英文生字字典：依書本與單元查詢生字、音標、詞性、中文與英文解釋，並可聽讀音。">
-    <title>PV_Dictionary v0.0.2</title>
+    <meta name="description" content="PV_Dictionary — an online English vocabulary dictionary: browse words by book and unit, with pronunciation, part of speech, Chinese and English meanings.">
+    <title>PV_Dictionary v0.0.3</title>
     <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/img/favicon.svg">
     <link rel="stylesheet" href="/css/tokens.css">
@@ -18,30 +18,34 @@
             <span class="brand-mark" aria-hidden="true">📚</span>
             <span class="brand-text">
                 <span class="brand-title">PV_Dictionary</span>
-                <span class="brand-sub" id="appSubtitle">英文生字字典</span>
+                <span class="brand-sub" id="appSubtitle" data-i18n="app.subtitle">English Vocabulary Dictionary</span>
             </span>
         </div>
         <div class="topbar-actions">
             <label class="search" for="searchInput">
                 <span class="search-icon" aria-hidden="true">🔍</span>
-                <input id="searchInput" type="search" placeholder="搜尋生字、中文或英文解釋…" autocomplete="off">
+                <input id="searchInput" type="search" data-i18n-placeholder="app.search" placeholder="Search words, Chinese or English…" autocomplete="off">
             </label>
+            <div id="langSwitch" class="lang-switch" role="group" data-i18n-aria="lang.label">
+                <button type="button" data-lang="en" aria-pressed="true">EN</button>
+                <button type="button" data-lang="zh" aria-pressed="false">中文</button>
+            </div>
             <div id="authArea" class="auth-area">
-                <button id="loginBtn" class="btn btn-primary" type="button">登入</button>
+                <button id="loginBtn" class="btn btn-primary" type="button" data-i18n="nav.login">Sign in</button>
             </div>
         </div>
     </div>
 </header>
 
 <main class="page">
-    <section class="picker" aria-label="選擇書本與單元">
+    <section class="picker">
         <div class="picker-row">
-            <span class="picker-label">書本</span>
-            <div id="bookTabs" class="segmented" role="tablist" aria-label="書本"></div>
+            <span class="picker-label" data-i18n="book.label">Book</span>
+            <div id="bookTabs" class="segmented" role="tablist"></div>
         </div>
         <div class="picker-row">
-            <span class="picker-label">單元</span>
-            <div id="unitTabs" class="chips" role="tablist" aria-label="單元"></div>
+            <span class="picker-label" data-i18n="unit.label">Unit</span>
+            <div id="unitTabs" class="chips" role="tablist"></div>
         </div>
     </section>
 
@@ -52,126 +56,126 @@
                 <p id="unitMeta" class="unit-meta"></p>
             </div>
             <div class="unit-head-actions">
-                <button id="printBtn" class="btn btn-ghost" type="button">🖨 列印</button>
+                <button id="printBtn" class="btn btn-ghost" type="button" data-i18n="unit.print">🖨 Print</button>
             </div>
         </div>
         <p id="unitHint" class="hint" hidden></p>
         <ul id="vocabList" class="vocab-list"></ul>
-        <p id="vocabEmpty" class="empty" hidden>這個單元還沒有生字。</p>
+        <p id="vocabEmpty" class="empty" hidden data-i18n="unit.empty">No vocabulary in this unit yet.</p>
     </section>
 
     <section id="emptyState" class="unit-card empty-state" hidden>
-        <h1 class="unit-title">還沒有可以查的生字</h1>
-        <p class="empty-state-text">這本字典目前沒有任何書本與單元。學生進來時會看到這個畫面。</p>
-        <p class="empty-state-text">老師或管理員：先登入，再按右上角的「✏️ 管理」照下面順序建立，學生立刻就能查。</p>
+        <h1 class="unit-title" data-i18n="picker.noWordsTitle">No words to look up yet</h1>
+        <p class="empty-state-text"></p>
+        <p class="empty-state-text" data-i18n="picker.stepsTitle">Teachers and administrators: sign in, then use “✏️ Manage” in the top right corner, in this order.</p>
         <ol class="empty-state-steps">
-            <li>「📗 新增書本」→ 填代號（例：B5A）與書名</li>
-            <li>「🏗 新增單元」→ 填單元編號與標題（例：Unit 1 My New School）</li>
-            <li>「➕ 新增生字」或「📋 批次貼上」→ 加入生字、讀音、詞性、中文與英文解釋</li>
-            <li>需要老師錄音時，在生字卡按「🎙 錄音 / 上傳」</li>
+            <li data-i18n="picker.step1">“📗 New book” → enter a code (e.g. B5A) and a name</li>
+            <li data-i18n="picker.step2">“🏗 New unit” → enter a unit number and title (e.g. Unit 1 My New School)</li>
+            <li data-i18n="picker.step3">“➕ New word” or “📋 Paste a list” → add the word, pronunciation, part of speech, Chinese and English meaning</li>
+            <li data-i18n="picker.step4">To add a teacher recording, press “🎙 Record / upload” on the word card</li>
         </ol>
     </section>
 
-    <section id="adminSection" class="admin" hidden aria-label="生字管理">
+    <section id="adminSection" class="admin" hidden>
         <div id="pendingBlock" class="panel panel-pending" hidden>
             <div class="panel-head">
-                <h2 class="panel-title">⏳ 待審核生字 <span id="pendingCount" class="badge">0</span></h2>
-                <p class="panel-note" id="pendingNote">科代表新增的生字，需要老師核准才會出現在學生的生字表。</p>
+                <h2 class="panel-title"><span data-i18n="pending.title">⏳ Words awaiting review</span> <span id="pendingCount" class="badge">0</span></h2>
+                <p class="panel-note" id="pendingNote"></p>
             </div>
             <ul id="pendingList" class="pending-list"></ul>
         </div>
 
         <div class="admin-toolbar">
-            <button id="newEntryBtn" class="btn btn-primary" type="button">➕ 新增生字</button>
-            <button id="importToggleBtn" class="btn btn-secondary" type="button">📋 批次貼上</button>
-            <button id="newUnitBtn" class="btn btn-secondary" type="button">🏗 新增單元</button>
-            <button id="newBookBtn" class="btn btn-secondary" type="button">📗 新增書本</button>
+            <button id="newEntryBtn" class="btn btn-primary" type="button" data-i18n="admin.newEntry">➕ New word</button>
+            <button id="importToggleBtn" class="btn btn-secondary" type="button" data-i18n="admin.import">📋 Paste a list</button>
+            <button id="newUnitBtn" class="btn btn-secondary" type="button" data-i18n="admin.newUnit">🏗 New unit</button>
+            <button id="newBookBtn" class="btn btn-secondary" type="button" data-i18n="admin.newBook">📗 New book</button>
         </div>
         <p id="adminHint" class="hint" hidden></p>
 
         <form id="entryForm" class="panel form" hidden>
             <div class="panel-head">
-                <h2 class="panel-title" id="entryFormTitle">➕ 新增生字</h2>
-                <p class="panel-note" id="entryFormNote">填好後按「儲存」，會立即加到這個單元。</p>
+                <h2 class="panel-title" id="entryFormTitle"></h2>
+                <p class="panel-note" id="entryFormNote"></p>
             </div>
             <input type="hidden" id="entryId">
             <div class="field-grid">
-                <label class="field"><span class="field-label">生字 *</span>
+                <label class="field"><span class="field-label" data-i18n="entry.headword">Word *</span>
                     <input id="fHeadword" type="text" maxlength="80" placeholder="atmosphere" required></label>
-                <label class="field"><span class="field-label">詞性</span>
+                <label class="field"><span class="field-label" data-i18n="entry.pos">Part of speech</span>
                     <input id="fPos" type="text" maxlength="40" placeholder="n. / v. / adj."></label>
-                <label class="field"><span class="field-label">讀音（美式 IPA）</span>
+                <label class="field"><span class="field-label" data-i18n="entry.ipaUs">Pronunciation (US IPA)</span>
                     <input id="fIpaUs" type="text" maxlength="80" placeholder="/ˈæt.mə.sfɪər/"></label>
-                <label class="field"><span class="field-label">讀音（英式 IPA）</span>
-                    <input id="fIpaUk" type="text" maxlength="80" placeholder="可留空"></label>
+                <label class="field"><span class="field-label" data-i18n="entry.ipaUk">Pronunciation (UK IPA)</span>
+                    <input id="fIpaUk" type="text" maxlength="80" placeholder="optional"></label>
             </div>
-            <label class="field"><span class="field-label">中文解釋</span>
+            <label class="field"><span class="field-label" data-i18n="entry.zh">Chinese meaning</span>
                 <input id="fZh" type="text" maxlength="300" placeholder="氣氛；大氣"></label>
-            <label class="field"><span class="field-label">英文解釋</span>
+            <label class="field"><span class="field-label" data-i18n="entry.en">English meaning</span>
                 <input id="fEn" type="text" maxlength="600" placeholder="the feeling of a place"></label>
-            <label class="field"><span class="field-label">英文例句</span>
+            <label class="field"><span class="field-label" data-i18n="entry.exampleEn">English example</span>
                 <input id="fExampleEn" type="text" maxlength="600" placeholder="The classroom has a friendly atmosphere."></label>
-            <label class="field"><span class="field-label">中文例句</span>
+            <label class="field"><span class="field-label" data-i18n="entry.exampleZh">Chinese example</span>
                 <input id="fExampleZh" type="text" maxlength="600" placeholder="這間課室氣氛友善。"></label>
             <div class="form-actions">
-                <button id="saveEntryBtn" class="btn btn-primary" type="submit">儲存</button>
-                <button id="cancelEntryBtn" class="btn btn-ghost" type="button">取消</button>
+                <button id="saveEntryBtn" class="btn btn-primary" type="submit" data-i18n="entry.save">Save</button>
+                <button id="cancelEntryBtn" class="btn btn-ghost" type="button" data-i18n="entry.cancel">Cancel</button>
                 <span id="entryFormMsg" class="form-msg" role="status"></span>
             </div>
         </form>
 
         <form id="importForm" class="panel form" hidden>
             <div class="panel-head">
-                <h2 class="panel-title">📋 批次貼上生字</h2>
-                <p class="panel-note">一行一個生字，欄位用 Tab 分隔：<code>生字 ⇥ 讀音 ⇥ 詞性 ⇥ 中文解釋 ⇥ 英文解釋</code>（中文與英文解釋至少要有一個；已在同一單元的生字會自動略過）。</p>
+                <h2 class="panel-title" data-i18n="import.title">📋 Paste a list of words</h2>
+                <p class="panel-note" data-i18n-html="import.note"></p>
             </div>
-            <label class="field"><span class="field-label">貼上內容</span>
-                <textarea id="importText" rows="8" spellcheck="false" placeholder="atmosphere&#9;/ˈæt.mə.sfɪər/&#9;n.&#9;氣氛&#9;the feeling of a place"></textarea></label>
+            <label class="field"><span class="field-label" data-i18n="import.textarea">Paste here</span>
+                <textarea id="importText" rows="8" spellcheck="false" data-i18n-placeholder="import.placeholder"></textarea></label>
             <div class="form-actions">
-                <button id="importBtn" class="btn btn-primary" type="submit">匯入</button>
-                <button id="importCancelBtn" class="btn btn-ghost" type="button">取消</button>
+                <button id="importBtn" class="btn btn-primary" type="submit" data-i18n="import.run">Import</button>
+                <button id="importCancelBtn" class="btn btn-ghost" type="button" data-i18n="entry.cancel">Cancel</button>
                 <span id="importMsg" class="form-msg" role="status"></span>
             </div>
         </form>
 
         <form id="unitForm" class="panel form" hidden>
-            <div class="panel-head"><h2 class="panel-title">🏗 新增單元</h2>
-                <p class="panel-note">加到目前的書本：<span id="unitFormBook">—</span></p></div>
+            <div class="panel-head"><h2 class="panel-title" data-i18n="unitForm.title">🏗 New unit</h2>
+                <p class="panel-note" id="unitFormNote"></p></div>
             <div class="field-grid">
-                <label class="field"><span class="field-label">單元編號 *</span>
-                    <input id="fUnitNo" type="number" min="1" max="99" value="4" required></label>
-                <label class="field"><span class="field-label">單元標題</span>
-                    <input id="fUnitTitle" type="text" maxlength="120" placeholder="Unit 4 My Community"></label>
+                <label class="field"><span class="field-label" data-i18n="unitForm.no">Unit number *</span>
+                    <input id="fUnitNo" type="number" min="1" max="99" value="1" required></label>
+                <label class="field"><span class="field-label" data-i18n="unitForm.titleField">Unit title</span>
+                    <input id="fUnitTitle" type="text" maxlength="120" placeholder="Unit 1 My Community"></label>
             </div>
             <div class="form-actions">
-                <button class="btn btn-primary" type="submit">建立單元</button>
-                <button id="unitCancelBtn" class="btn btn-ghost" type="button">取消</button>
+                <button class="btn btn-primary" type="submit" data-i18n="unitForm.create">Create unit</button>
+                <button id="unitCancelBtn" class="btn btn-ghost" type="button" data-i18n="entry.cancel">Cancel</button>
                 <span id="unitMsg" class="form-msg" role="status"></span>
             </div>
         </form>
 
         <form id="bookForm" class="panel form" hidden>
-            <div class="panel-head"><h2 class="panel-title">📗 新增書本</h2>
-                <p class="panel-note">建立後會出現在最上方的書本選單。</p></div>
+            <div class="panel-head"><h2 class="panel-title" data-i18n="bookForm.title">📗 New book</h2>
+                <p class="panel-note" data-i18n="bookForm.note">It will appear in the book picker at the top.</p></div>
             <div class="field-grid">
-                <label class="field"><span class="field-label">代號 *</span>
-                    <input id="fBookCode" type="text" maxlength="20" placeholder="B6A" required></label>
-                <label class="field"><span class="field-label">書名 *</span>
-                    <input id="fBookName" type="text" maxlength="80" placeholder="Book 6A" required></label>
-                <label class="field"><span class="field-label">年級</span>
-                    <input id="fBookGrade" type="text" maxlength="20" placeholder="S2"></label>
+                <label class="field"><span class="field-label" data-i18n="bookForm.code">Code *</span>
+                    <input id="fBookCode" type="text" maxlength="20" placeholder="B5A" required></label>
+                <label class="field"><span class="field-label" data-i18n="bookForm.name">Book name *</span>
+                    <input id="fBookName" type="text" maxlength="80" placeholder="Book 5A" required></label>
+                <label class="field"><span class="field-label" data-i18n="bookForm.grade">Grade</span>
+                    <input id="fBookGrade" type="text" maxlength="20" placeholder="S1"></label>
             </div>
             <div class="form-actions">
-                <button class="btn btn-primary" type="submit">建立書本</button>
-                <button id="bookCancelBtn" class="btn btn-ghost" type="button">取消</button>
+                <button class="btn btn-primary" type="submit" data-i18n="bookForm.create">Create book</button>
+                <button id="bookCancelBtn" class="btn btn-ghost" type="button" data-i18n="entry.cancel">Cancel</button>
                 <span id="bookMsg" class="form-msg" role="status"></span>
             </div>
         </form>
 
         <div id="auditBlock" class="panel" hidden>
             <div class="panel-head">
-                <h2 class="panel-title">🧾 最近的操作紀錄</h2>
-                <button id="auditRefreshBtn" class="btn btn-ghost" type="button">重新載入</button>
+                <h2 class="panel-title" data-i18n="audit.title">🧾 Recent activity</h2>
+                <button id="auditRefreshBtn" class="btn btn-ghost" type="button" data-i18n="audit.reload">Reload</button>
             </div>
             <ul id="auditList" class="audit-list"></ul>
         </div>
@@ -179,25 +183,25 @@
 </main>
 
 <footer class="footer">
-    <span>PV_Dictionary <span id="versionLabel">v0.0.1</span></span>
+    <span>PV_Dictionary <span id="versionLabel">v0.0.3</span></span>
     <span class="footer-sep">·</span>
     <span id="backendLabel" class="footer-muted"></span>
     <span class="footer-sep">·</span>
-    <span class="footer-muted">讀音優先使用老師錄音，沒有錄音時使用瀏覽器語音合成</span>
+    <span class="footer-muted" data-i18n="app.footerTts">Pronunciations play the teacher recording when available, otherwise the browser voice</span>
 </footer>
 
 <div id="loginModal" class="modal" hidden>
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
-        <h2 id="loginTitle" class="modal-title">登入</h2>
-        <p class="modal-note">學生可以直接查生字，不需要登入。老師、科代表與管理員登入後才能編輯。</p>
+        <h2 id="loginTitle" class="modal-title" data-i18n="login.title">Sign in</h2>
+        <p class="modal-note" data-i18n="login.note">Students can look words up without signing in. Teachers, class representatives and administrators sign in to edit.</p>
         <form id="loginForm">
-            <label class="field"><span class="field-label">帳號</span>
+            <label class="field"><span class="field-label" data-i18n="login.username">Account</span>
                 <input id="loginUsername" type="text" autocomplete="username" required></label>
-            <label class="field"><span class="field-label">密碼</span>
+            <label class="field"><span class="field-label" data-i18n="login.password">Password</span>
                 <input id="loginPassword" type="password" autocomplete="current-password" required></label>
             <div class="modal-actions">
-                <button class="btn btn-primary" type="submit">登入</button>
-                <button id="loginCancelBtn" class="btn btn-ghost" type="button">取消</button>
+                <button class="btn btn-primary" type="submit" data-i18n="login.submit">Sign in</button>
+                <button id="loginCancelBtn" class="btn btn-ghost" type="button" data-i18n="login.cancel">Cancel</button>
             </div>
             <p id="loginMsg" class="form-msg" role="status"></p>
         </form>
@@ -206,17 +210,17 @@
 
 <div id="audioModal" class="modal" hidden>
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="audioModalTitle">
-        <h2 id="audioModalTitle" class="modal-title">🎙 老師錄音：<span id="audioModalHeadword">—</span></h2>
-        <p class="modal-note">上傳現成的音檔，或直接用麥克風錄一段（建議 30 秒內，上限 1MB）。學生按下 🔊 時會優先播放老師錄音。</p>
+        <h2 id="audioModalTitle" class="modal-title"><span data-i18n="audio.titlePrefix">🎙 Teacher recording</span>: <span id="audioModalHeadword">—</span></h2>
+        <p class="modal-note" data-i18n="audio.note">Upload an audio file, or record with the microphone (30 seconds or less, max 1MB). Students hear the teacher recording first when they press 🔊.</p>
         <input id="audioFileInput" type="file" accept="audio/*" hidden>
         <div class="modal-actions">
-            <button id="audioPickFileBtn" class="btn btn-secondary" type="button">📁 選擇檔案</button>
-            <button id="audioRecordBtn" class="btn btn-secondary" type="button">🎙 開始錄音</button>
-            <button id="audioStopBtn" class="btn btn-primary" type="button" hidden>⏹ 停止並儲存</button>
+            <button id="audioPickFileBtn" class="btn btn-secondary" type="button" data-i18n="audio.pick">📁 Choose a file</button>
+            <button id="audioRecordBtn" class="btn btn-secondary" type="button" data-i18n="audio.record">🎙 Start recording</button>
+            <button id="audioStopBtn" class="btn btn-primary" type="button" hidden data-i18n="audio.stop">⏹ Stop and save</button>
         </div>
         <div class="modal-actions">
-            <button id="audioDeleteBtn" class="btn btn-danger" type="button" hidden>🗑 刪除現有錄音</button>
-            <button id="audioCancelBtn" class="btn btn-ghost" type="button">關閉</button>
+            <button id="audioDeleteBtn" class="btn btn-danger" type="button" hidden data-i18n="audio.delete">🗑 Delete current recording</button>
+            <button id="audioCancelBtn" class="btn btn-ghost" type="button" data-i18n="audio.close">Close</button>
         </div>
         <p id="audioMsg" class="form-msg" role="status"></p>
     </div>
@@ -224,6 +228,7 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
+<script src="/js/i18n.js"></script>
 <script src="/js/api.js"></script>
 <script src="/js/ui.js"></script>
 <script src="/js/audio.js"></script>

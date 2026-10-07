@@ -46,9 +46,9 @@ async function main() {
         const overlaysAtLoad = await visibleIds(browser, OVERLAY_IDS);
         check('開站時沒有任何彈窗或管理面板蓋在畫面上', overlaysAtLoad.length === 0, overlaysAtLoad.join('、'));
         const emptyText = await browser.evaluate(`return document.getElementById('emptyState').textContent;`);
-        check('顯示「還沒有可以查的生字」的起始畫面', emptyText.includes('還沒有可以查的生字'), emptyText.slice(0, 40));
+        check('顯示「還沒有可以查的生字」的起始畫面', emptyText.includes('No words to look up yet'), emptyText.slice(0, 40));
         check('起始畫面告訴老師建立順序（書本→單元→生字）',
-            emptyText.includes('新增書本') && emptyText.includes('新增單元') && emptyText.includes('新增生字'));
+            emptyText.includes('New book') && emptyText.includes('New unit') && emptyText.includes('New word'));
         check('未登入看不到「✏️ 管理」按鈕',
             (await browser.evaluate(`return document.getElementById('adminToggleBtn') === null;`)) === true);
         check('未登入看得到「登入」按鈕',
@@ -57,7 +57,7 @@ async function main() {
         check('畫面沒有橫向溢出', overflow <= 1, `溢出 ${overflow}px`);
 
         console.log('\n【2】登入視窗可以開也可以關（使用者：關不掉）');
-        await loginViaUi(browser, { username: 'manager', expectText: '網頁管理員' });
+        await loginViaUi(browser, { username: 'manager', expectText: 'Web administrator' });
         check('登入成功，標題列顯示角色', true);
         let shown = await visibleIds(browser, ['loginModal']);
         check('登入完成後登入視窗真的消失（算出來的 display 是 none）', shown.length === 0, shown.join('、'));
@@ -76,7 +76,7 @@ async function main() {
         await browser.waitFor(`getComputedStyle(document.getElementById('adminSection')).display !== 'none'`);
         check('按「✏️ 管理」後管理區塊真的出現', true);
         const hint = await browser.evaluate(`return document.getElementById('adminHint').textContent;`);
-        check('管理區塊說明「還沒有任何書本」', hint.includes('還沒有任何書本'), hint);
+        check('管理區塊說明「還沒有任何書本」', hint.includes('no books yet'), hint);
         const state0 = await browser.evaluate(`return {
             unit: document.getElementById('newUnitBtn').disabled,
             entry: document.getElementById('newEntryBtn').disabled,
@@ -97,7 +97,7 @@ async function main() {
         await browser.waitFor(`Array.from(document.getElementById('bookTabs').children).some(b => b.textContent.includes('Book 5A'))`, { timeout: 8000 });
         check('新增書本後書本選單出現', true);
         const hint2 = await browser.evaluate(`return document.getElementById('adminHint').textContent;`);
-        check('說明改成「這本書還沒有單元」', hint2.includes('這本書還沒有單元'), hint2);
+        check('說明改成「這本書還沒有單元」', hint2.includes('has no units yet'), hint2);
 
         await browser.evaluate(`document.getElementById('newUnitBtn').click(); return true;`);
         await browser.waitFor(`getComputedStyle(document.getElementById('unitForm')).display !== 'none'`);

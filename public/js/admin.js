@@ -4,6 +4,7 @@
 (function () {
     const { el, clear, toast, setFormMessage, formatDateTime } = window.PDUI;
     const api = window.PDApi;
+    const t = (key, vars) => window.PDI18n.t(key, vars);
 
     const state = {
         editingId: null,
@@ -39,16 +40,14 @@
         unitBtn.disabled = !hasBook;
         entryBtn.disabled = !hasUnit;
         importBtn.disabled = !hasUnit;
-        bookBtn.title = '建立一本新的書本';
-        unitBtn.title = hasBook ? `加到 ${state.currentBookName || '目前的書本'}` : '請先建立一本書';
-        entryBtn.title = hasUnit ? '' : '請先選擇或建立單元';
+        bookBtn.title = t('admin.titleNewBook');
+        unitBtn.title = hasBook ? t('admin.titleUnitFor', { book: state.currentBookName || '—' }) : t('admin.titleNeedBook');
+        entryBtn.title = hasUnit ? '' : t('admin.titleNeedUnit');
         importBtn.title = entryBtn.title;
 
         hint.hidden = hasUnit;
         if (!hasUnit) {
-            hint.textContent = !hasBook
-                ? '目前還沒有任何書本：請先按「📗 新增書本」，再建立單元，然後就可以加入生字。'
-                : '這本書還沒有單元：請按「🏗 新增單元」建立第一個單元，之後就能加入生字。';
+            hint.textContent = !hasBook ? t('admin.hintNoBook') : t('admin.hintNoUnit');
             // 沒有單元時不該停在一個送不出去的表單上
             showPanel('entryForm', false);
             showPanel('importForm', false);
@@ -57,7 +56,7 @@
 
     function requireUnit() {
         if (!window.PDState.currentUnitId) {
-            window.PDUI.toast(window.PDState.currentBookId ? '請先建立或選擇一個單元' : '請先建立一本書與單元', 'error');
+            window.PDUI.toast(window.PDState.currentBookId ? t('admin.needUnit') : t('admin.needBookUnit'), 'error');
             return false;
         }
         return true;
@@ -79,10 +78,10 @@
         if (!entry && !requireUnit()) return;
         state.editingId = entry ? entry.id : null;
         fillEntryForm(entry || null);
-        document.getElementById('entryFormTitle').textContent = entry ? `✏️ 修改生字：${entry.headword}` : '➕ 新增生字';
-        document.getElementById('entryFormNote').textContent = entry
-            ? '修改後按「儲存」立即生效。'
-            : '填好後按「儲存」，會立即加到這個單元。';
+        document.getElementById('entryFormTitle').textContent = entry
+            ? t('entry.editTitle', { word: entry.headword })
+            : t('entry.newTitle');
+        document.getElementById('entryFormNote').textContent = entry ? t('entry.editNote') : t('entry.newNote');
         setFormMessage(document.getElementById('entryFormMsg'), '');
         showPanel('entryForm', true);
         showPanel('importForm', false);
@@ -102,7 +101,7 @@
         const msg = document.getElementById('entryFormMsg');
         const unitId = window.PDState.currentUnitId;
         if (!unitId) {
-            setFormMessage(msg, '請先建立或選擇一個單元', 'error');
+            setFormMessage(msg, t('admin.needUnit'), 'error');
             return;
         }
         const payload = {
@@ -120,19 +119,17 @@
         try {
             if (state.editingId) {
                 await api.patch(`/api/entries/${state.editingId}`, payload);
-                setFormMessage(msg, '已儲存修改。', 'ok');
-                toast('已更新生字');
+                setFormMessage(msg, t('entry.saved'), 'ok');
+                toast(t('entry.toastUpdated'));
             } else {
                 const result = await api.post(`/api/units/${unitId}/entries`, payload);
-                setFormMessage(msg, result.status === 'pending'
-                    ? '已送出，等老師核准後學生才看得到。'
-                    : '已新增到這個單元。', 'ok');
-                toast(result.status === 'pending' ? '已送出待審核' : '已新增生字');
+                setFormMessage(msg, result.status === 'pending' ? t('entry.createdPending') : t('entry.created'), 'ok');
+                toast(result.status === 'pending' ? t('entry.toastPending') : t('entry.toastCreated'));
             }
             await window.PDApp.reloadUnit({ keepForm: true });
             if (!state.editingId) fillEntryForm(null);
         } catch (err) {
-            setFormMessage(msg, err.message, 'error');
+            setFormMessage(msg, window.PDI18n.errorMessage(err), 'error');
         } finally {
             button.disabled = false;
         }
@@ -162,15 +159,15 @@
         button.disabled = true;
         try {
             const result = await api.post(`/api/units/${unitId}/entries/import`, { text });
-            const parts = [`新增 ${result.created} 筆`];
-            if (result.skipped) parts.push(`略過 ${result.skipped} 筆（重複或空白）`);
-            if (result.errors && result.errors.length) parts.push(`${result.errors.length} 行格式有問題`);
-            if (result.status === 'pending') parts.push('狀態：待審核');
-            setFormMessage(msg, parts.join('，'), result.created ? 'ok' : 'error');
+            let parts = t('import.result', { created: result.created });
+            if (result.skipped) parts += t('import.skipped', { skipped: result.skipped });
+            if (result.errors && result.errors.length) parts += t('import.errors', { n: result.errors.length });
+            if (result.status === 'pending') parts += t('import.pendingNote');
+            setFormMessage(msg, parts, result.created ? 'ok' : 'error');
             document.getElementById('importText').value = '';
             await window.PDApp.reloadUnit({ keepForm: true });
         } catch (err) {
-            setFormMessage(msg, err.message, 'error');
+            setFormMessage(msg, window.PDI18n.errorMessage(err), 'error');
         } finally {
             button.disabled = false;
         }
@@ -186,14 +183,14 @@
             const unitNo = Number(document.getElementById('fUnitNo').value);
             const title = document.getElementById('fUnitTitle').value;
             const result = await api.post(`/api/books/${bookId}/units`, { unit_no: unitNo, title });
-            setFormMessage(msg, `已建立 Unit ${result.unit.unit_no}`, 'ok');
-            toast('已建立單元');
+            setFormMessage(msg, t('unitForm.done', { n: result.unit.unit_no }), 'ok');
+            toast(t('unitForm.toast'));
             document.getElementById('fUnitTitle').value = '';
             showPanel('unitForm', false);
             await window.PDApp.reloadBooks();
             await window.PDApp.selectUnit(result.unit.id);
         } catch (err) {
-            setFormMessage(msg, err.message, 'error');
+            setFormMessage(msg, window.PDI18n.errorMessage(err), 'error');
         }
     }
 
@@ -206,8 +203,8 @@
                 name: document.getElementById('fBookName').value,
                 grade: document.getElementById('fBookGrade').value
             });
-            setFormMessage(msg, `已建立 ${result.book.name}`, 'ok');
-            toast('已建立書本');
+            setFormMessage(msg, t('bookForm.done', { name: result.book.name }), 'ok');
+            toast(t('bookForm.toast'));
             document.getElementById('fBookCode').value = '';
             document.getElementById('fBookName').value = '';
             document.getElementById('fBookGrade').value = '';
@@ -215,7 +212,7 @@
             await window.PDApp.reloadBooks();
             await window.PDApp.selectBook(result.book.id);
         } catch (err) {
-            setFormMessage(msg, err.message, 'error');
+            setFormMessage(msg, window.PDI18n.errorMessage(err), 'error');
         }
     }
 
@@ -225,19 +222,19 @@
         if (!entry) return;
         if (button && button.dataset.confirm !== '1') {
             button.dataset.confirm = '1';
-            button.textContent = '🗑 再按一次確認';
+            button.textContent = t('action.deleteConfirm');
             window.setTimeout(() => {
                 button.dataset.confirm = '';
-                button.textContent = '🗑 刪除';
+                button.textContent = t('action.delete');
             }, 4000);
             return;
         }
         try {
             await api.del(`/api/entries/${entryId}`);
-            toast(`已刪除 ${entry.headword}`);
+            toast(`${t('auditAction.ENTRY_DELETE')}：${entry.headword}`);
             await window.PDApp.reloadUnit();
         } catch (err) {
-            toast(err.message, 'error');
+            toast(window.PDI18n.errorMessage(err), 'error');
         }
     }
 
@@ -254,24 +251,25 @@
         count.textContent = String(pending.length);
         // 老師看得到整份待審核清單；科代表要看得到自己剛送出的字（不然介面等於在騙人）
         block.hidden = !(canEdit && pending.length > 0);
-        note.textContent = canReview
-            ? '科代表新增的生字，需要老師核准才會出現在學生的生字表。'
-            : '你送出的生字正在等老師核准；核准後學生才看得到。';
+        note.textContent = canReview ? t('pending.noteTeacher') : t('pending.noteRep');
         for (const entry of pending) {
             const info = el('div', { class: 'pending-item-info' }, [
                 el('strong', { text: entry.headword }),
                 el('span', { text: [entry.ipa_us, entry.part_of_speech, entry.zh_meaning].filter(Boolean).join(' · ') }),
-                el('span', { class: 'unit-meta', text: `由 ${entry.created_by || '未知'} 新增於 ${formatDateTime(entry.created_at)}` })
+                el('span', {
+                    class: 'unit-meta',
+                    text: t('pending.by', { user: entry.created_by || '—', date: formatDateTime(entry.created_at) })
+                })
             ]);
             const actions = canReview ? el('div', { class: 'pending-item-actions' }, [
                 el('button', {
                     class: 'btn btn-primary btn-small',
-                    text: '✅ 核准',
+                    text: t('pending.approve'),
                     attrs: { type: 'button', 'data-action': 'approve-entry', 'data-entry-id': entry.id }
                 }),
                 el('button', {
                     class: 'btn btn-ghost btn-small',
-                    text: '↩️ 退回',
+                    text: t('pending.reject'),
                     attrs: { type: 'button', 'data-action': 'reject-entry', 'data-entry-id': entry.id }
                 })
             ]) : null;
@@ -282,11 +280,11 @@
     async function review(entryId, action) {
         try {
             await api.post(`/api/entries/${entryId}/review`, { action });
-            toast(action === 'approve' ? '已核准，學生現在看得到了' : '已退回');
+            toast(action === 'approve' ? t('pending.approved') : t('pending.rejected'));
             await window.PDApp.reloadUnit();
             await PDAdmin.loadAudit();
         } catch (err) {
-            toast(err.message, 'error');
+            toast(window.PDI18n.errorMessage(err), 'error');
         }
     }
 
@@ -299,19 +297,19 @@
             const data = await api.get('/api/admin/audit-logs?limit=12');
             clear(list);
             if (!data.logs.length) {
-                list.appendChild(el('li', { class: 'audit-item', text: '目前沒有紀錄。' }));
+                list.appendChild(el('li', { class: 'audit-item', text: t('audit.empty') }));
                 return;
             }
             for (const row of data.logs) {
                 list.appendChild(el('li', { class: 'audit-item' }, [
                     el('span', { class: 'audit-when', text: formatDateTime(row.created_at) }),
-                    el('span', { text: `${row.action_label}｜${row.details || row.target_id || ''}` }),
+                    el('span', { text: `${window.PDI18n.auditActionLabel(row.action, row.action_label)}｜${row.details || row.target_id || ''}` }),
                     el('span', { class: 'audit-who', text: row.display_name || row.user_id || '' })
                 ]));
             }
         } catch (err) {
             clear(list);
-            list.appendChild(el('li', { class: 'audit-item', text: `讀取失敗：${err.message}` }));
+            list.appendChild(el('li', { class: 'audit-item', text: t('audit.failed', { message: window.PDI18n.errorMessage(err) }) }));
         }
     }
 
@@ -322,8 +320,8 @@
         state.audioEntryId = entry.id;
         document.getElementById('audioModalHeadword').textContent = entry.headword;
         setFormMessage(document.getElementById('audioMsg'), entry.has_audio
-            ? '這個生字已經有老師錄音，重新上傳會取代舊的。'
-            : '可以上傳現成的音檔，或直接用麥克風錄一段（建議 30 秒內）。');
+            ? t('audio.existing')
+            : t('audio.note'));
         const del = document.getElementById('audioDeleteBtn');
         del.hidden = !entry.has_audio;
         document.getElementById('audioStopBtn').hidden = true;
@@ -341,19 +339,19 @@
     async function uploadAudio(dataUrl, mime, durationMs) {
         const entryId = state.audioEntryId;
         if (!entryId) return;
-        setFormMessage(document.getElementById('audioMsg'), '上傳中…');
+        setFormMessage(document.getElementById('audioMsg'), t('audio.uploading'));
         try {
             await api.post(`/api/entries/${entryId}/audio`, {
                 data: dataUrl,
                 mime,
                 duration_ms: durationMs || 0
             });
-            setFormMessage(document.getElementById('audioMsg'), '已儲存，現在 🔊 會播放這段錄音。', 'ok');
-            toast('已儲存老師錄音');
+            setFormMessage(document.getElementById('audioMsg'), t('audio.saved'), 'ok');
+            toast(t('audio.toastSaved'));
             await window.PDApp.reloadUnit();
             window.setTimeout(closeAudioModal, 900);
         } catch (err) {
-            setFormMessage(document.getElementById('audioMsg'), err.message, 'error');
+            setFormMessage(document.getElementById('audioMsg'), window.PDI18n.errorMessage(err), 'error');
         }
     }
 
@@ -364,12 +362,12 @@
         const file = input.files && input.files[0];
         if (!file) return;
         if (file.size > 1024 * 1024) {
-            setFormMessage(document.getElementById('audioMsg'), `檔案太大（${Math.round(file.size / 1024)}KB），上限 1MB`, 'error');
+            setFormMessage(document.getElementById('audioMsg'), t('audio.tooBig', { kb: Math.round(file.size / 1024) }), 'error');
             return;
         }
         const reader = new FileReader();
         reader.onload = () => uploadAudio(String(reader.result), file.type || 'audio/mpeg', 0);
-        reader.onerror = () => setFormMessage(document.getElementById('audioMsg'), '讀取檔案失敗', 'error');
+        reader.onerror = () => setFormMessage(document.getElementById('audioMsg'), t('audio.readFailed'), 'error');
         reader.readAsDataURL(file);
     }
 
@@ -397,7 +395,7 @@
     async function startRecording() {
         const msg = document.getElementById('audioMsg');
         if (!navigator.mediaDevices || !window.MediaRecorder) {
-            setFormMessage(msg, '這個瀏覽器不支援錄音，請改用「選擇檔案」。', 'error');
+            setFormMessage(msg, t('audio.noMic'), 'error');
             return;
         }
         try {
@@ -419,7 +417,7 @@
                 stream.getTracks().forEach((track) => track.stop());
                 const blob = new Blob(state.recordedChunks, { type: recorder.mimeType || 'audio/webm' });
                 if (!blob.size) {
-                    setFormMessage(msg, '沒有錄到聲音，再試一次。', 'error');
+                    setFormMessage(msg, t('audio.emptyRecording'), 'error');
                     return;
                 }
                 const reader = new FileReader();
@@ -430,14 +428,14 @@
             recorder.start();
             document.getElementById('audioRecordBtn').disabled = true;
             document.getElementById('audioStopBtn').hidden = false;
-            setFormMessage(msg, '錄音中…按「停止並儲存」結束。');
+            setFormMessage(msg, t('audio.recording'));
             state.recordTimer = window.setInterval(() => {
                 const seconds = Math.round((Date.now() - startedAt) / 1000);
-                setFormMessage(msg, `錄音中… ${seconds} 秒（上限 60 秒）`);
+                setFormMessage(msg, t('audio.recordingSeconds', { seconds }));
                 if (seconds >= 60) stopRecording();
             }, 500);
         } catch (err) {
-            setFormMessage(msg, `無法使用麥克風：${err.message}`, 'error');
+            setFormMessage(msg, t('audio.micFailed', { message: err.message }), 'error');
         }
     }
 
@@ -447,11 +445,11 @@
         if (!entry || !entry.audio_id) return;
         try {
             await api.del(`/api/audio/${entry.audio_id}`);
-            toast('已刪除老師錄音，之後會用語音合成');
+            toast(t('audio.deleted'));
             await window.PDApp.reloadUnit();
             closeAudioModal();
         } catch (err) {
-            setFormMessage(document.getElementById('audioMsg'), err.message, 'error');
+            setFormMessage(document.getElementById('audioMsg'), window.PDI18n.errorMessage(err), 'error');
         }
     }
 
@@ -466,7 +464,8 @@
         document.getElementById('bookForm').addEventListener('submit', submitBook);
         document.getElementById('newEntryBtn').addEventListener('click', () => openEntryForm(null));
         document.getElementById('newUnitBtn').addEventListener('click', () => {
-            document.getElementById('unitFormBook').textContent = window.PDState.currentBookName || '—';
+            const note = document.getElementById('unitFormNote');
+            if (note) note.textContent = t('unitForm.note', { book: window.PDState.currentBookName || '—' });
             showPanel('unitForm', true);
             showPanel('entryForm', false);
             showPanel('importForm', false);

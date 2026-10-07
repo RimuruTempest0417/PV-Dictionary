@@ -110,7 +110,8 @@ async function typeLogin(browser, username) {
         document.forms.loginForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
         return true;
     `);
-    await browser.waitFor(`localStorage.getItem('never') === null && document.getElementById('authArea').textContent.includes(${JSON.stringify(username === 'manager' ? '網頁管理員' : username === 'teacher' ? '英文老師' : '英文科代表')})`, { timeout: 6000 });
+    // 登入完成的訊號用「登出」按鈕（不依賴顯示名稱，介面已改成以英文為主）
+    await browser.waitFor(`document.getElementById('logoutBtn') !== null`, { timeout: 8000 });
 }
 
 async function openLogin(browser) {
@@ -179,7 +180,7 @@ async function main() {
         console.log('\n【5-7】管理員：登入 → 新增生字 → 批次貼上 → 刪除');
         await openLogin(browser);
         await typeLogin(browser, 'manager');
-        check('登入後顯示使用者與角色', (await browser.evaluate(`return document.getElementById('authArea').textContent;`)).includes('網頁管理員'));
+        check('登入後顯示使用者與角色', (await browser.evaluate(`return document.getElementById('authArea').textContent;`)).includes('Web administrator'));
         check('登入後出現「✏️ 管理」按鈕', (await browser.evaluate(`return document.getElementById('adminToggleBtn').hidden === false;`)) === true);
 
         await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
@@ -209,7 +210,7 @@ async function main() {
             document.forms.entryForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
             return new Promise((resolve) => setTimeout(() => resolve(document.getElementById('entryFormMsg').textContent), 700));
         `);
-        check('重複生字（大小寫不同）被擋下並說明原因', duplicate.includes('已經有'), duplicate);
+        check('重複生字（大小寫不同）被擋下並說明原因', duplicate.includes('already has'), duplicate);
 
         await browser.evaluate(`document.getElementById('cancelEntryBtn').click(); return true;`);
         await browser.evaluate(`document.getElementById('importToggleBtn').click(); return true;`);
@@ -225,7 +226,7 @@ async function main() {
         `);
         await browser.waitFor(`Array.from(document.querySelectorAll('.headword')).some(n => n.textContent === 'uniform')`, { timeout: 6000 });
         const importMsg = await browser.evaluate(`return document.getElementById('importMsg').textContent;`);
-        check('批次匯入新增 2 筆、略過 1 筆', importMsg.includes('新增 2 筆') && importMsg.includes('略過 1 筆'), importMsg);
+        check('批次匯入新增 2 筆、略過 1 筆', importMsg.includes('Added 2') && importMsg.includes('skipped 1'), importMsg);
         await browser.evaluate(`document.getElementById('importCancelBtn').click(); return true;`);
 
         const deleted = await browser.evaluate(`return (async () => {
@@ -237,7 +238,7 @@ async function main() {
             await new Promise(r => setTimeout(r, 900));
             return { label, stillThere: Array.from(document.querySelectorAll('.headword')).some(n => n.textContent === 'uniform') };
         })();`);
-        check('刪除採「再按一次確認」，第二次才真的刪除', deleted.label.includes('再按一次') && deleted.stillThere === false, JSON.stringify(deleted));
+        check('刪除採「再按一次確認」，第二次才真的刪除', deleted.label.includes('Press again') && deleted.stillThere === false, JSON.stringify(deleted));
 
         console.log('\n【8】老師錄音：上傳檔案 → 徽章 → 播放來源');
         const entryId = await browser.evaluate(`
@@ -262,7 +263,7 @@ async function main() {
         // CDP 設定檔案後「不一定」會自動送出 change：先等自動路徑，沒有反應才自己補一次
         let uploaded = false;
         try {
-            await browser.waitFor(`document.getElementById('audioMsg').textContent.includes('已儲存')`, { timeout: 2500 });
+            await browser.waitFor(`document.getElementById('audioMsg').textContent.includes('Saved')`, { timeout: 2500 });
             uploaded = true;
         } catch (err) {
             uploaded = false;
@@ -270,11 +271,11 @@ async function main() {
         if (!uploaded) {
             await browser.evaluate(`document.getElementById('audioFileInput').dispatchEvent(new Event('change', { bubbles: true })); return true;`);
         }
-        await browser.waitFor(`document.getElementById('audioMsg').textContent.includes('已儲存')`, { timeout: 8000 });
+        await browser.waitFor(`document.getElementById('audioMsg').textContent.includes('Saved')`, { timeout: 8000 });
         check('選檔後上傳成功並提示已儲存', true);
         await browser.waitFor(`document.getElementById('audioModal').hidden === true`, { timeout: 6000 });
         const badge = await browser.evaluate(`return Array.from(document.querySelectorAll('.tag-badge')).map(n => n.textContent);`);
-        check('生字卡出現「👩‍🏫 老師錄音」徽章', badge.some((t) => t.includes('老師錄音')), badge.join('/'));
+        check('生字卡出現「👩‍🏫 老師錄音」徽章', badge.some((t) => t.includes('Teacher recording')), badge.join('/'));
 
         await browser.evaluate(`window.__audioSrcs = []; window.__spoken = []; document.querySelector('.speak-btn').click(); return true;`);
         await sleep(500);
@@ -336,14 +337,14 @@ async function main() {
         `);
         await browser.waitFor(`Array.from(document.querySelectorAll('.headword')).some(n => n.textContent === 'diligent')`, { timeout: 6000 });
         const pendingBadges = await browser.evaluate(`return Array.from(document.querySelectorAll('.tag-badge')).map(n => n.textContent);`);
-        check('科代表新增的字顯示「待審核」標記', pendingBadges.some((t) => t.includes('待審核')), pendingBadges.join('/'));
+        check('科代表新增的字顯示「待審核」標記', pendingBadges.some((t) => t.includes('Awaiting review')), pendingBadges.join('/'));
         const repView = await browser.evaluate(`return {
             block: document.getElementById('pendingBlock').hidden === false,
             note: document.getElementById('pendingNote').textContent,
             hasApprove: document.querySelector('[data-action="approve-entry"]') !== null
         };`);
         check('科代表看得到自己送出的待審核清單（含說明文字）',
-            repView.block === true && repView.note.includes('等老師核准'), JSON.stringify(repView));
+            repView.block === true && repView.note.includes('waiting for a teacher'), JSON.stringify(repView));
         check('科代表沒有核准按鈕（核准是老師的權限）', repView.hasApprove === false);
 
         await browser.evaluate(`document.getElementById('logoutBtn').click(); return true;`);
@@ -398,7 +399,7 @@ async function main() {
         `);
         await browser.waitFor(`document.getElementById('auditList').children.length > 0`, { timeout: 6000 });
         const audit = await browser.evaluate(`return document.getElementById('auditList').textContent;`);
-        check('稽核紀錄看得到剛才的操作（含中文標籤）', /核准生字|新增生字|批次匯入生字/.test(audit), audit.slice(0, 100));
+        check('稽核紀錄看得到剛才的操作（含中文標籤）', /Approve word|Add word|Import words/.test(audit), audit.slice(0, 120));
 
         const downloads = await browser.evaluate(`return window.__downloads || [];`);
         check('檢查過程沒有觸發任何下載', downloads.length === 0, JSON.stringify(downloads));

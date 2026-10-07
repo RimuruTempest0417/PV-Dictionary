@@ -24,16 +24,26 @@ function walk(dir, out = []) {
 }
 
 test('稽核動作：宣告的標籤與程式實際寫入的動作完全一致', () => {
-    const sources = ['server.js'].concat(
+    const files = ['server.js'].concat(
         walk(path.join(ROOT, 'routes')).filter((f) => f.endsWith('.js')).map((f) => path.relative(ROOT, f))
     );
+    /* ★ 只掃「logAudit 呼叫裡面」的動作文；整檔掃引號大寫字串會被誤判——
+     *   錯誤回應現在也帶 code（例如 code: 'ORIGIN_NOT_ALLOWED'），那些不是稽核動作。 */
     const used = new Set();
-    for (const file of sources) {
+    for (const file of files) {
         const full = path.join(ROOT, file);
         if (!fs.existsSync(full)) continue;
         const text = fs.readFileSync(full, 'utf8');
-        for (const match of text.matchAll(/'([A-Z][A-Z0-9_]{2,})'/g)) used.add(match[1]);
+        let index = text.indexOf('logAudit(store,');
+        while (index !== -1) {
+            const window = text.slice(index, index + 700);
+            const end = window.search(/\n\s*\}\);|\}\);/);
+            const call = end === -1 ? window : window.slice(0, end);
+            for (const match of call.matchAll(/'([A-Z][A-Z0-9_]{2,})'/g)) used.add(match[1]);
+            index = text.indexOf('logAudit(store,', index + 1);
+        }
     }
+    assert.equal(used.size > 5, true, '應該抓到多個稽核動作');
     const declared = new Set(Object.keys(AUDIT_ACTION_LABELS));
     const missingLabel = [...used].filter((action) => !declared.has(action));
     const unusedLabel = [...declared].filter((action) => !used.has(action));
@@ -54,6 +64,24 @@ test('前端沒有行內事件屬性與行內 style（CSP 會把它們擋成啞�
         }
     }
     assert.deepEqual(offenders, []);
+});
+
+test('前端用到的元素 id 真的存在（getElementById 找不到就會靜默不做事）', () => {
+    const html = fs.readFileSync(path.join(ROOT, 'public/index.html'), 'utf8');
+    const htmlIds = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
+    /* 這幾個是 JS 動態產生的（標題列按鈕），HTML 裡沒有是正常的 */
+    const createdByJs = new Set(['loginBtn', 'logoutBtn', 'adminToggleBtn']);
+    const files = fs.readdirSync(path.join(ROOT, 'public/js')).filter((f) => f.endsWith('.js'));
+    const missing = [];
+    for (const file of files) {
+        const code = fs.readFileSync(path.join(ROOT, 'public/js', file), 'utf8');
+        for (const match of code.matchAll(/getElementById\('([^']+)'\)/g)) {
+            const id = match[1];
+            if (htmlIds.has(id) || createdByJs.has(id)) continue;
+            missing.push(`${file} → ${id}`);
+        }
+    }
+    assert.deepEqual(missing, [], `index.html 裡找不到這些 id：${missing.join('、')}`);
 });
 
 test('伺服器端不含寫死的密碼或 Supabase 金鑰', () => {

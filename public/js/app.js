@@ -2,6 +2,7 @@
 (function () {
     const api = window.PDApi;
     const { el, clear, toast, setFormMessage } = window.PDUI;
+    const t = (key, vars) => window.PDI18n.t(key, vars);
 
     const state = {
         books: [],
@@ -45,10 +46,11 @@
         try {
             const info = await api.get('/api/health');
             state.health = info;
-            document.getElementById('backendLabel').textContent
-                = `資料來源：${info.backend_label || info.backend}`;
+            const key = `backend.${info.backend}`;
+            const label = window.PDI18n.has(key) ? t(key) : (info.backend_label || info.backend);
+            document.getElementById('backendLabel').textContent = t('app.footerSource', { name: label });
         } catch (err) {
-            document.getElementById('backendLabel').textContent = '資料來源：無法讀取';
+            document.getElementById('backendLabel').textContent = t('toast.loadFailed', { message: err.message });
         }
     }
 
@@ -98,9 +100,7 @@
             /* 沒有可選的單元時要給學生一個清楚的起始畫面，不能只留一片空白。 */
             const firstText = empty.querySelector('.empty-state-text');
             if (firstText) {
-                firstText.textContent = state.books.length === 0
-                    ? '這本字典目前沒有任何書本與單元。學生進來時會看到這個畫面。'
-                    : '目前的書本還沒有任何單元。學生進來時會看到這個畫面。';
+                firstText.textContent = state.books.length === 0 ? t('picker.noBooks') : t('picker.noUnits');
             }
             empty.hidden = false;
             return;
@@ -111,14 +111,14 @@
             = `Unit ${unit.unit_no}${unit.title ? ` · ${unit.title}` : ''}`;
         const published = state.entries.filter((entry) => entry.status === 'published').length;
         const pending = state.entries.filter((entry) => entry.status === 'pending').length;
-        const parts = [`${unit.book_name || state.currentBookName}`, `共 ${published} 個生字`];
-        if (pending) parts.push(`待審核 ${pending} 個`);
-        document.getElementById('unitMeta').textContent = parts.join(' · ');
+        const parts = [unit.book_name || state.currentBookName, t('unit.words', { n: published })];
+        if (pending) parts.push(t('unit.pending', { n: pending }));
+        document.getElementById('unitMeta').textContent = parts.filter(Boolean).join(' · ');
         document.getElementById('printBtn').hidden = false;
         const hint = document.getElementById('unitHint');
         if (!window.PDAudio.ttsSupported()) {
             hint.hidden = false;
-            hint.textContent = '這個瀏覽器不支援語音合成：沒有老師錄音的生字無法播放讀音（建議用 Chrome / Safari / Edge）。';
+            hint.textContent = t('unit.noTts');
         } else {
             hint.hidden = true;
         }
@@ -135,7 +135,7 @@
             const meta = document.getElementById('unitMeta');
             const base = meta.dataset.base || meta.textContent;
             meta.dataset.base = base;
-            meta.textContent = `${base} · 搜尋到 ${result.shown} 個`;
+            meta.textContent = `${base} · ${t('unit.found', { n: result.shown })}`;
         } else if (state.query === '') {
             const meta = document.getElementById('unitMeta');
             if (meta.dataset.base) meta.textContent = meta.dataset.base;
@@ -212,7 +212,7 @@
         if (!user) {
             area.appendChild(el('button', {
                 class: 'btn btn-primary',
-                text: '登入',
+                text: t('nav.login'),
                 attrs: { type: 'button', id: 'loginBtn' },
                 on: { click: openLoginModal }
             }));
@@ -221,21 +221,28 @@
         /* 「✏️ 管理」放在這裡（而不是單元卡片裡）：完全沒有書本與單元時也要進得去，
          * 否則第一次使用時永遠建立不了第一本書。 */
         if (window.PDAuth.can('can_edit')) {
+            const adminOpen = !document.getElementById('adminSection').hidden;
             area.appendChild(el('button', {
                 class: 'btn btn-secondary',
-                text: '✏️ 管理',
+                text: adminOpen ? t('nav.manageClose') : t('nav.manage'),
                 attrs: { type: 'button', id: 'adminToggleBtn' },
                 on: { click: toggleAdminSection }
             }));
         }
         area.appendChild(el('span', { class: 'user-chip' }, [
-            // 顯示名稱若與角色標籤相同（例如 manager 的顯示名稱就叫「網頁管理員」），改顯示帳號
-            el('strong', { text: user.display_name && user.display_name !== user.role_label ? user.display_name : user.username }),
-            el('span', { text: user.role_label })
+            /* 顯示名稱若與角色名稱相同（manager 的顯示名稱就叫「網頁管理員」），改顯示帳號，
+             * 免得標題列出現「網頁管理員 網頁管理員」。兩種語言的標籤都比對一次，
+             * 這樣切換語言時顯示不會跳動。 */
+            el('strong', {
+                text: user.display_name && ![user.role_label, window.PDI18n.roleLabel(user.role)].includes(user.display_name)
+                    ? user.display_name
+                    : user.username
+            }),
+            el('span', { text: window.PDI18n.roleLabel(user.role) })
         ]));
         area.appendChild(el('button', {
             class: 'btn btn-ghost',
-            text: '登出',
+            text: t('nav.logout'),
             attrs: { type: 'button', id: 'logoutBtn' },
             on: { click: doLogout }
         }));
@@ -247,13 +254,15 @@
         const section = document.getElementById('adminSection');
         const button = document.getElementById('adminToggleBtn');
         section.hidden = !section.hidden;
-        if (section.hidden) {
-            if (button) button.textContent = '✏️ 管理';
-            return;
-        }
-        if (button) button.textContent = '✏️ 收起管理';
+        if (button) button.textContent = section.hidden ? t('nav.manage') : t('nav.manageClose');
+        if (section.hidden) return;
         await window.PDAdmin.refreshAvailability();
         await window.PDAdmin.loadAudit();
+    }
+
+    /* 切換語言：靜態文字由 i18n 掃描更新，動態內容靠 pd:langchange 事件重畫 */
+    function setLanguage(lang) {
+        window.PDI18n.setLang(lang);
     }
 
     function openLoginModal() {
@@ -278,10 +287,10 @@
             setFormMessage(msg, '');
             closeLoginModal();
             renderAuth();
-            toast(`已登入：${window.PDAuth.user.display_name}（${window.PDAuth.user.role_label}）`);
+            toast(t('login.welcome', { name: window.PDAuth.user.display_name, role: window.PDI18n.roleLabel(window.PDAuth.user.role) }));
             await refreshAfterAuthChange();
         } catch (err) {
-            setFormMessage(msg, err.message, 'error');
+            setFormMessage(msg, window.PDI18n.errorMessage(err), 'error');
         }
     }
 
@@ -290,7 +299,7 @@
         renderAuth();
         document.getElementById('adminSection').hidden = true;
         document.getElementById('entryForm').hidden = true;
-        toast('已登出');
+        toast(t('login.loggedOut'));
         await refreshAfterAuthChange();
     }
 
@@ -318,6 +327,23 @@
             state.query = event.target.value;
             renderVocab();
         });
+        document.getElementById('langSwitch').addEventListener('click', (event) => {
+            const button = event.target.closest('[data-lang]');
+            if (!button) return;
+            setLanguage(button.dataset.lang);
+        });
+        /* 換語言：靜態文字由 i18n 掃過，動態產生的內容（清單、待審核、角色標籤）要在這裡重畫 */
+        document.addEventListener('pd:langchange', (event) => {
+            const buttons = document.querySelectorAll('#langSwitch [data-lang]');
+            buttons.forEach((btn) => btn.setAttribute('aria-pressed', String(btn.dataset.lang === event.detail.lang)));
+            renderAuth();
+            renderUnitHead();
+            renderVocab();
+            window.PDAdmin.renderPending(state.entries);
+            window.PDAdmin.refreshAvailability();
+            if (!document.getElementById('auditBlock').hidden) window.PDAdmin.loadAudit();
+            toast(event.detail.lang === 'zh' ? t('toast.langChanged') : 'Language: English');
+        });
         document.getElementById('printBtn').addEventListener('click', () => window.print());
         document.getElementById('loginForm').addEventListener('submit', doLogin);
         document.getElementById('loginCancelBtn').addEventListener('click', closeLoginModal);
@@ -328,6 +354,10 @@
 
     /* ---------------- 啟動 ---------------- */
     async function boot() {
+        const lang = window.PDI18n.init();
+        document.querySelectorAll('#langSwitch [data-lang]').forEach((btn) => {
+            btn.setAttribute('aria-pressed', String(btn.dataset.lang === lang));
+        });
         installCspRecorder();
         await Promise.all([loadVersion(), loadHealth()]);
         try {
@@ -350,7 +380,7 @@
                 window.PDAdmin.refreshAvailability();
             }
         } catch (err) {
-            toast(`載入失敗：${err.message}`, 'error');
+            toast(t('toast.loadFailed', { message: err.message }), 'error');
         }
     }
 
@@ -370,6 +400,7 @@
         selectUnit,
         refreshAfterAuthChange,
         renderVocab,
-        renderUnitHead
+        renderUnitHead,
+        setLanguage
     };
 })();

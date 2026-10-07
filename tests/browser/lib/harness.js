@@ -80,7 +80,7 @@ async function openLoginModal(browser) {
     await browser.waitFor(`getComputedStyle(document.getElementById('loginModal')).display !== 'none'`);
 }
 
-/* 真的在畫面上填帳密並送出，然後等角色標籤出現（不是直接呼叫 API） */
+/* 真的在畫面上填帳密並送出，然後等「登出」按鈕出現（語言無關的登入完成訊號） */
 async function loginViaUi(browser, { username, password = PASSWORD, expectText }) {
     await openLoginModal(browser);
     await browser.evaluate(`
@@ -89,6 +89,7 @@ async function loginViaUi(browser, { username, password = PASSWORD, expectText }
         document.forms.loginForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
         return true;
     `);
+    await browser.waitFor(`document.getElementById('logoutBtn') !== null`, { timeout: 8000 });
     if (expectText) {
         await browser.waitFor(`document.getElementById('authArea').textContent.includes(${JSON.stringify(expectText)})`, { timeout: 8000 });
     }

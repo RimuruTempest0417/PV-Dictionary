@@ -3,9 +3,9 @@
 線上英文生字字典：學生點書本 → 點單元 → 看生字表（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.0.2（Demo）**
+- 目前版本：**v0.0.3（Demo）**
 - 規劃書：`docs/規劃書-v0.0.1.md`
-- 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie
+- 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie、介面預設英文可切中文
 
 ---
 
@@ -36,6 +36,19 @@ grep SEED_ .env
 
 - 只想看示範效果：`npm run seed -- --with-sample`（示範課本 2 本 × 3 單元 × 6 生字）
 - 全部重新來過：`npm run seed -- --reset`（會清空 `data/store.json` 再建立帳號）
+
+---
+
+## 介面語言
+
+**預設是英文**（2026-10-07 使用者指定）。右上角的 `EN / 中文` 可以即時切換，選擇記在 `localStorage`（純 UI 偏好，
+**不涉及任何授權判斷**），重新載入後仍保留。
+
+- 所有介面文字的唯一來源是 `public/js/i18n.js`；靜態 HTML 用 `data-i18n` 標記，動態字串用 `t('key')`。
+- 後端回應一律是**英文訊息 + `code`**（`lib/messages.js`），前端用 `errors.<code>` 對應成中文；
+  所以「同一個錯誤」在兩種語言下都會是對的語言，而 API 對外（curl／腳本）也維持英文。
+- `tests/i18n.test.js` 會擋住「翻譯漏了某個鍵」「程式用了不存在的鍵」「兩邊插值變數不一致」
+  「新的 error code 沒有翻譯」這四種靜默錯誤。
 
 ---
 
@@ -110,13 +123,14 @@ guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin
 
 ```bash
 npm run check:syntax   # 所有 JS 語法檢查 + server.js 模組載入檢查
-npm test               # 36 項：角色權限矩陣、資料層、匯入解析、API 端到端、守門檢查
-npm run check:browser  # 69 項：真 Chrome 走完 12 步 Demo 劇本（39）＋ 空白起步與彈窗開關（30）
+npm test               # 45 項：角色權限矩陣、資料層、匯入解析、i18n 完整性、API 端到端、守門檢查
+npm run check:browser  # 94 項：真 Chrome 三支檢查（劇本 39 ＋ 空白起步 30 ＋ 語言切換 25）
 ```
 
 瀏覽器驗收涵蓋：訪客瀏覽與 TTS 播放、搜尋、管理員新增／批次匯入／刪除（兩段式確認）、
 老師錄音上傳與播放來源切換、新增單元與書本、科代表待審核 → 老師核准 → 訪客可見、
 **資料全空時「開站就是學生視角、彈窗可以開也可以關、管理員能建立第一本書」**、
+**預設英文／切換中文／重新載入記得選擇／後端錯誤訊息跟著語言走**、
 版面不溢出（含 402px 手機）、無 CSP 違規、無前端例外、無下載、不寫截圖。
 
 ---
@@ -126,9 +140,12 @@ npm run check:browser  # 69 項：真 Chrome 走完 12 步 Demo 劇本（39）�
 ```
 api/index.js                # Vercel serverless 入口（= require('../server')）
 lib/roles.js                # 角色與權限（唯一權威）
+lib/messages.js             # 後端錯誤訊息（英文，唯一來源）與 error code
 lib/auth.js                 # JWT、cookie、CSRF 來源檢查、CORS、安全標頭
 lib/audit.js                # 稽核動作與中文標籤
 lib/store/{index,json}.js   # 資料層介面與本機 JSON 實作（Supabase adapter 待實作）
+public/index.html           # 版面（文字用 data-i18n 標記，不寫死語言）
+public/js/i18n.js           # 所有介面文字的英中對照與 t()／語言切換
 public/                     # 前端（index.html + css/ + js/，零行內樣式與行內事件）
 scripts/seed.js             # 種子帳號（預設不填任何生字；--with-sample 才載入示範教材）
 scripts/check-syntax.js     # 語法 + 模組載入檢查

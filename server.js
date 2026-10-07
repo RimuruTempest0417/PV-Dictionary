@@ -16,6 +16,7 @@ const { createStore, normalizeHeadword, DATA_BACKEND_LABEL } = require('./lib/st
 const Roles = require('./lib/roles');
 const Auth = require('./lib/auth');
 const { logAudit, AUDIT_ACTION_LABELS, actionLabel } = require('./lib/audit');
+const { msg } = require('./lib/messages');
 const { verifyPassword, hashPassword, needsPasswordUpgrade } = require('./lib/passwords');
 
 const PACKAGE = require('./package.json');
@@ -200,13 +201,13 @@ function createApp(options = {}) {
         const now = Date.now();
         const byIp = ipFailures.get(ip || 'unknown');
         if (byIp && now - byIp.firstAt <= LOGIN_WINDOW_MS && byIp.count >= LOGIN_MAX_FAILURES) {
-            return '來自這個網路的登入失敗次數過多，請 15 分鐘後再試';
+            return 'LOGIN_LOCKED_IP';
         }
         if (username) {
             const byUser = userFailures.get(username.toLowerCase());
             if (byUser && now - byUser.firstAt <= LOGIN_WINDOW_MS
                 && byUser.count >= LOGIN_MAX_FAILURES && byUser.ips.size >= 2) {
-                return '這個帳號的登入失敗次數過多，請 15 分鐘後再試';
+                return 'LOGIN_LOCKED_USER';
             }
         }
         return null;
@@ -214,7 +215,7 @@ function createApp(options = {}) {
 
     /* ---- 來源檢查（帶著 cookie 的寫入請求必須來自自家網站） ---- */
     app.use('/api', (req, res, next) => {
-        if (Auth.csrfViolation(req)) return res.status(403).json({ error: '來源不被允許' });
+        if (Auth.csrfViolation(req)) return res.status(403).json({ error: msg('ORIGIN_NOT_ALLOWED'), code: 'ORIGIN_NOT_ALLOWED' });
         return next();
     });
 
@@ -233,15 +234,15 @@ function createApp(options = {}) {
     });
 
     function requireAuth(req, res, next) {
-        if (!req.user) return res.status(401).json({ error: '請先登入' });
+        if (!req.user) return res.status(401).json({ error: msg('AUTH_REQUIRED'), code: 'AUTH_REQUIRED' });
         return next();
     }
 
     function requireRole(minRole) {
         return (req, res, next) => {
-            if (!req.user) return res.status(401).json({ error: '請先登入' });
+            if (!req.user) return res.status(401).json({ error: msg('AUTH_REQUIRED'), code: 'AUTH_REQUIRED' });
             if (!Roles.atLeast(req.user.role, minRole)) {
-                return res.status(403).json({ error: '權限不足' });
+                return res.status(403).json({ error: msg('FORBIDDEN'), code: 'FORBIDDEN' });
             }
             return next();
         };
@@ -284,7 +285,7 @@ function createApp(options = {}) {
 
     app.get('/api/books/:id/units', (req, res) => {
         const book = store.getBook(req.params.id);
-        if (!book) return res.status(404).json({ error: '找不到這本書' });
+        if (!book) return res.status(404).json({ error: msg('BOOK_NOT_FOUND'), code: 'BOOK_NOT_FOUND' });
         const includeHidden = canSeeUnpublished(req);
         const units = store.listUnits({ bookId: book.id, includeUnpublished: includeHidden }).map((unit) => ({
             id: unit.id,
@@ -303,10 +304,10 @@ function createApp(options = {}) {
 
     app.get('/api/units/:id', (req, res) => {
         const unit = store.getUnit(req.params.id);
-        if (!unit) return res.status(404).json({ error: '找不到這個單元' });
+        if (!unit) return res.status(404).json({ error: msg('UNIT_NOT_FOUND'), code: 'UNIT_NOT_FOUND' });
         const includeHidden = canSeeUnpublished(req);
         if (unit.is_published === false && !includeHidden) {
-            return res.status(404).json({ error: '這個單元尚未發佈' });
+            return res.status(404).json({ error: msg('UNIT_NOT_PUBLISHED'), code: 'UNIT_NOT_PUBLISHED' });
         }
         const scoped = grants();
         const viewerCanEdit = Boolean(req.user && Roles.canEditUnit(req.user, unit, scoped));
@@ -337,7 +338,7 @@ function createApp(options = {}) {
 
     app.get('/api/audio/:id', (req, res) => {
         const audio = store.getAudio(req.params.id);
-        if (!audio) return res.status(404).json({ error: '找不到音檔' });
+        if (!audio) return res.status(404).json({ error: msg('AUDIO_NOT_FOUND'), code: 'AUDIO_NOT_FOUND' });
         res.setHeader('Content-Type', audio.mime || 'audio/mpeg');
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
         res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -349,15 +350,15 @@ function createApp(options = {}) {
         const username = str(req.body && req.body.username, LIMITS.username);
         const password = typeof (req.body && req.body.password) === 'string' ? req.body.password : '';
         const ip = req.ip || 'unknown';
-        if (!username || !password) return res.status(400).json({ error: '請輸入帳號與密碼' });
+        if (!username || !password) return res.status(400).json({ error: msg('LOGIN_REQUIRED_FIELDS'), code: 'LOGIN_REQUIRED_FIELDS' });
 
         const locked = lockedReason(ip, username);
-        if (locked) return res.status(429).json({ error: locked });
+        if (locked) return res.status(429).json({ error: msg(locked), code: locked });
 
         const user = store.findUserByUsername(username);
         if (!user || user.is_active === false || !verifyPassword(user.password_hash, password)) {
             noteFailure(ip, username);
-            return res.status(401).json({ error: '帳號或密碼錯誤' });
+            return res.status(401).json({ error: msg('LOGIN_FAILED'), code: 'LOGIN_FAILED' });
         }
 
         // 舊格式（明碼）登入成功時順手升級成 scrypt
@@ -379,7 +380,7 @@ function createApp(options = {}) {
     });
 
     app.get('/api/auth/me', (req, res) => {
-        if (!req.user) return res.status(401).json({ error: '尚未登入' });
+        if (!req.user) return res.status(401).json({ error: msg('AUTH_REQUIRED'), code: 'AUTH_REQUIRED' });
         const scoped = Roles.grantsFor(req.user, grants());
         return res.json({
             user: publicUser(req.user),
@@ -398,7 +399,7 @@ function createApp(options = {}) {
     function resolveUnit(req, res) {
         const unit = store.getUnit(req.params.id || req.params.unitId);
         if (!unit) {
-            res.status(404).json({ error: '找不到這個單元' });
+            res.status(404).json({ error: msg('UNIT_NOT_FOUND'), code: 'UNIT_NOT_FOUND' });
             return null;
         }
         return unit;
@@ -422,17 +423,17 @@ function createApp(options = {}) {
         if (!unit) return undefined;
         const scoped = grants();
         if (!Roles.canEditUnit(req.user, unit, scoped)) {
-            return res.status(403).json({ error: '你沒有編輯這個單元的權限' });
+            return res.status(403).json({ error: msg('NO_EDIT_PERMISSION'), code: 'NO_EDIT_PERMISSION' });
         }
         const input = applyEntryInput(req.body || {});
-        if (!input.headword) return res.status(400).json({ error: '請輸入生字' });
+        if (!input.headword) return res.status(400).json({ error: msg('HEADWORD_REQUIRED'), code: 'HEADWORD_REQUIRED' });
         if (!input.zh_meaning && !input.en_definition) {
-            return res.status(400).json({ error: '中文解釋與英文解釋至少要填一個' });
+            return res.status(400).json({ error: msg('MEANING_REQUIRED'), code: 'MEANING_REQUIRED' });
         }
         const norm = normalizeHeadword(input.headword);
         const existing = store.findEntryByHeadword(unit.id, norm);
         if (existing) {
-            return res.status(409).json({ error: `這個單元已經有「${existing.headword}」了`, entry_id: existing.id });
+            return res.status(409).json({ error: msg('DUPLICATE_ENTRY', { word: existing.headword }), code: 'DUPLICATE_ENTRY', details: { word: existing.headword }, entry_id: existing.id });
         }
         const status = Roles.needsReview(req.user, unit, scoped) ? 'pending' : 'published';
         const entry = store.createEntry(Object.assign({}, input, {
@@ -455,22 +456,22 @@ function createApp(options = {}) {
 
     app.patch('/api/entries/:id', requireAuth, (req, res) => {
         const entry = store.getEntry(req.params.id);
-        if (!entry) return res.status(404).json({ error: '找不到這個生字' });
+        if (!entry) return res.status(404).json({ error: msg('ENTRY_NOT_FOUND'), code: 'ENTRY_NOT_FOUND' });
         const unit = store.getUnit(entry.unit_id);
         const scoped = grants();
         if (!Roles.canEditUnit(req.user, unit, scoped)) {
-            return res.status(403).json({ error: '你沒有編輯這個單元的權限' });
+            return res.status(403).json({ error: msg('NO_EDIT_PERMISSION'), code: 'NO_EDIT_PERMISSION' });
         }
         if (entry.status === 'published' && !Roles.canPublishUnit(req.user, unit, scoped)) {
-            return res.status(403).json({ error: '已發佈的生字需要老師以上才能修改' });
+            return res.status(403).json({ error: msg('PUBLISHED_NEEDS_TEACHER'), code: 'PUBLISHED_NEEDS_TEACHER' });
         }
         const body = req.body || {};
         const patch = applyEntryInput(Object.assign({}, entry, body));
-        if (!patch.headword) return res.status(400).json({ error: '請輸入生字' });
+        if (!patch.headword) return res.status(400).json({ error: msg('HEADWORD_REQUIRED'), code: 'HEADWORD_REQUIRED' });
         const norm = normalizeHeadword(patch.headword);
         const clash = store.findEntryByHeadword(unit.id, norm);
         if (clash && String(clash.id) !== String(entry.id)) {
-            return res.status(409).json({ error: `這個單元已經有「${clash.headword}」了` });
+            return res.status(409).json({ error: msg('DUPLICATE_ENTRY', { word: clash.headword }), code: 'DUPLICATE_ENTRY', details: { word: clash.headword } });
         }
         const updated = store.updateEntry(entry.id, Object.assign({}, patch, {
             headword_norm: norm,
@@ -490,14 +491,14 @@ function createApp(options = {}) {
 
     app.delete('/api/entries/:id', requireAuth, (req, res) => {
         const entry = store.getEntry(req.params.id);
-        if (!entry) return res.status(404).json({ error: '找不到這個生字' });
+        if (!entry) return res.status(404).json({ error: msg('ENTRY_NOT_FOUND'), code: 'ENTRY_NOT_FOUND' });
         const unit = store.getUnit(entry.unit_id);
         const scoped = grants();
         if (!Roles.canEditUnit(req.user, unit, scoped)) {
-            return res.status(403).json({ error: '你沒有編輯這個單元的權限' });
+            return res.status(403).json({ error: msg('NO_EDIT_PERMISSION'), code: 'NO_EDIT_PERMISSION' });
         }
         if (entry.status === 'published' && !Roles.canPublishUnit(req.user, unit, scoped)) {
-            return res.status(403).json({ error: '已發佈的生字需要老師以上才能刪除' });
+            return res.status(403).json({ error: msg('PUBLISHED_NEEDS_TEACHER'), code: 'PUBLISHED_NEEDS_TEACHER' });
         }
         store.deleteEntry(entry.id);
         logAudit(store, {
@@ -513,13 +514,13 @@ function createApp(options = {}) {
     /* ================= 生字：審核（老師以上） ================= */
     app.post('/api/entries/:id/review', requireRole('teacher'), (req, res) => {
         const entry = store.getEntry(req.params.id);
-        if (!entry) return res.status(404).json({ error: '找不到這個生字' });
+        if (!entry) return res.status(404).json({ error: msg('ENTRY_NOT_FOUND'), code: 'ENTRY_NOT_FOUND' });
         if (entry.status !== 'pending') {
-            return res.status(400).json({ error: '這個生字不是待審核狀態' });
+            return res.status(400).json({ error: msg('NOT_PENDING'), code: 'NOT_PENDING' });
         }
         const action = str(req.body && req.body.action, 20);
         if (!['approve', 'reject'].includes(action)) {
-            return res.status(400).json({ error: 'action 必須是 approve 或 reject' });
+            return res.status(400).json({ error: msg('REVIEW_ACTION'), code: 'REVIEW_ACTION' });
         }
         const note = str(req.body && req.body.note, LIMITS.note);
         const updated = store.updateEntry(entry.id, {
@@ -546,11 +547,11 @@ function createApp(options = {}) {
         if (!unit) return undefined;
         const scoped = grants();
         if (!Roles.canEditUnit(req.user, unit, scoped)) {
-            return res.status(403).json({ error: '你沒有編輯這個單元的權限' });
+            return res.status(403).json({ error: msg('NO_EDIT_PERMISSION'), code: 'NO_EDIT_PERMISSION' });
         }
         const parsed = parseImportText(req.body && req.body.text);
         if (parsed.rows.length === 0) {
-            return res.status(400).json({ error: '沒有可以匯入的內容', errors: parsed.errors });
+            return res.status(400).json({ error: msg('IMPORT_EMPTY'), code: 'IMPORT_EMPTY', errors: parsed.errors });
         }
         const status = Roles.needsReview(req.user, unit, scoped) ? 'pending' : 'published';
         const created = [];
@@ -599,7 +600,7 @@ function createApp(options = {}) {
     /* ================= 老師錄音 ================= */
     app.post('/api/entries/:id/audio', requireRole('teacher'), (req, res) => {
         const entry = store.getEntry(req.params.id);
-        if (!entry) return res.status(404).json({ error: '找不到這個生字' });
+        if (!entry) return res.status(404).json({ error: msg('ENTRY_NOT_FOUND'), code: 'ENTRY_NOT_FOUND' });
         const body = req.body || {};
         const raw = String(body.data || '');
         /* 接受三種寫法：純 base64、data:audio/webm;base64,…、
@@ -610,21 +611,21 @@ function createApp(options = {}) {
         const base64 = match ? match[2] : raw;
         if (!AUDIO_MIME_WHITELIST.includes(mime)) {
             return res.status(400).json({
-                error: `不接受的音檔格式（${mime || '未知'}）`,
+                error: msg('INVALID_AUDIO_TYPE', { mime: mime || '?' }), code: 'INVALID_AUDIO_TYPE', details: { mime: mime || '?' },
                 allowed: AUDIO_MIME_WHITELIST
             });
         }
         if (!/^[A-Za-z0-9+/=\s]+$/.test(base64)) {
-            return res.status(400).json({ error: '音檔內容不是合法的 base64' });
+            return res.status(400).json({ error: msg('AUDIO_BAD_BASE64'), code: 'AUDIO_BAD_BASE64' });
         }
         const bytes = Buffer.from(base64, 'base64');
-        if (bytes.length === 0) return res.status(400).json({ error: '音檔是空的' });
+        if (bytes.length === 0) return res.status(400).json({ error: msg('AUDIO_EMPTY'), code: 'AUDIO_EMPTY' });
         if (bytes.length > AUDIO_MAX_BYTES) {
-            return res.status(413).json({ error: `錄音檔太大（${Math.round(bytes.length / 1024)}KB），上限 1MB` });
+            return res.status(413).json({ error: msg('AUDIO_TOO_LARGE', { kb: Math.round(bytes.length / 1024) }), code: 'AUDIO_TOO_LARGE', details: { kb: Math.round(bytes.length / 1024) } });
         }
         const duration = num(body.duration_ms, 0);
         if (duration > AUDIO_MAX_DURATION_MS) {
-            return res.status(400).json({ error: '錄音太長（上限 60 秒）' });
+            return res.status(400).json({ error: msg('AUDIO_TOO_LONG'), code: 'AUDIO_TOO_LONG' });
         }
         // 一個生字只保留一段老師錄音：換新的就把舊的刪掉
         const old = store.findTeacherAudio(entry.id);
@@ -654,7 +655,7 @@ function createApp(options = {}) {
 
     app.delete('/api/audio/:id', requireRole('teacher'), (req, res) => {
         const audio = store.getAudio(req.params.id);
-        if (!audio) return res.status(404).json({ error: '找不到音檔' });
+        if (!audio) return res.status(404).json({ error: msg('AUDIO_NOT_FOUND'), code: 'AUDIO_NOT_FOUND' });
         const entry = store.getEntry(audio.entry_id);
         store.deleteAudio(audio.id);
         logAudit(store, {
@@ -672,9 +673,9 @@ function createApp(options = {}) {
         const body = req.body || {};
         const name = str(body.name, LIMITS.book_name);
         const code = str(body.code, LIMITS.book_code) || name;
-        if (!name) return res.status(400).json({ error: '請輸入書本名稱' });
+        if (!name) return res.status(400).json({ error: msg('BOOK_NAME_REQUIRED'), code: 'BOOK_NAME_REQUIRED' });
         if (store.listBooks({ includeUnpublished: true }).some((b) => b.code === code)) {
-            return res.status(409).json({ error: `代號「${code}」已經有人用了` });
+            return res.status(409).json({ error: msg('DUPLICATE_CODE', { code }), code: 'DUPLICATE_CODE', details: { code } });
         }
         const book = store.createBook({
             code,
@@ -690,7 +691,7 @@ function createApp(options = {}) {
 
     app.patch('/api/books/:id', requireRole('teacher'), (req, res) => {
         const book = store.getBook(req.params.id);
-        if (!book) return res.status(404).json({ error: '找不到這本書' });
+        if (!book) return res.status(404).json({ error: msg('BOOK_NOT_FOUND'), code: 'BOOK_NOT_FOUND' });
         const body = req.body || {};
         const patch = {};
         if (body.name !== undefined) patch.name = str(body.name, LIMITS.book_name) || book.name;
@@ -705,14 +706,14 @@ function createApp(options = {}) {
 
     app.post('/api/books/:id/units', requireRole('teacher'), (req, res) => {
         const book = store.getBook(req.params.id);
-        if (!book) return res.status(404).json({ error: '找不到這本書' });
+        if (!book) return res.status(404).json({ error: msg('BOOK_NOT_FOUND'), code: 'BOOK_NOT_FOUND' });
         const body = req.body || {};
         const unitNo = Number(body.unit_no);
         if (!Number.isFinite(unitNo) || unitNo < 1 || unitNo > 99) {
-            return res.status(400).json({ error: '單元編號必須是 1–99 的數字' });
+            return res.status(400).json({ error: msg('UNIT_NUMBER'), code: 'UNIT_NUMBER' });
         }
         if (store.findUnitByNo(book.id, unitNo)) {
-            return res.status(409).json({ error: `${book.name} 已經有 Unit ${unitNo} 了` });
+            return res.status(409).json({ error: msg('DUPLICATE_UNIT', { book: book.name, n: unitNo }), code: 'DUPLICATE_UNIT', details: { book: book.name, n: unitNo } });
         }
         const unit = store.createUnit({
             book_id: book.id,
@@ -733,7 +734,7 @@ function createApp(options = {}) {
 
     app.patch('/api/units/:id', requireRole('teacher'), (req, res) => {
         const unit = store.getUnit(req.params.id);
-        if (!unit) return res.status(404).json({ error: '找不到這個單元' });
+        if (!unit) return res.status(404).json({ error: msg('UNIT_NOT_FOUND'), code: 'UNIT_NOT_FOUND' });
         const body = req.body || {};
         const patch = {};
         if (body.title !== undefined) patch.title = str(body.title, LIMITS.title);
@@ -747,7 +748,7 @@ function createApp(options = {}) {
 
     function setUnitPublished(req, res, published) {
         const unit = store.getUnit(req.params.id);
-        if (!unit) return res.status(404).json({ error: '找不到這個單元' });
+        if (!unit) return res.status(404).json({ error: msg('UNIT_NOT_FOUND'), code: 'UNIT_NOT_FOUND' });
         const updated = store.updateUnit(unit.id, { is_published: published });
         logAudit(store, {
             user: req.user,
@@ -781,16 +782,16 @@ function createApp(options = {}) {
         const password = typeof body.password === 'string' ? body.password : '';
         const role = str(body.role, 20) || 'student';
         if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) {
-            return res.status(400).json({ error: '帳號只能是 3–32 個英文字母、數字或底線' });
+            return res.status(400).json({ error: msg('USERNAME_FORMAT'), code: 'USERNAME_FORMAT' });
         }
         if (password.length < 6 || password.length > 64) {
-            return res.status(400).json({ error: '密碼長度必須是 6–64 個字元' });
+            return res.status(400).json({ error: msg('PASSWORD_LENGTH'), code: 'PASSWORD_LENGTH' });
         }
         if (!Roles.canCreateRole(req.user, role)) {
-            return res.status(403).json({ error: '你不能建立這個角色' });
+            return res.status(403).json({ error: msg('ROLE_CREATE_FORBIDDEN'), code: 'ROLE_CREATE_FORBIDDEN' });
         }
         if (store.findUserByUsername(username)) {
-            return res.status(409).json({ error: '這個帳號已經存在' });
+            return res.status(409).json({ error: msg('USERNAME_TAKEN'), code: 'USERNAME_TAKEN' });
         }
         const user = store.createUser({
             username,
@@ -805,9 +806,9 @@ function createApp(options = {}) {
 
     app.patch('/api/admin/users/:id', requireRole('admin'), (req, res) => {
         const target = store.getUser(req.params.id);
-        if (!target) return res.status(404).json({ error: '找不到這個使用者' });
+        if (!target) return res.status(404).json({ error: msg('USER_NOT_FOUND'), code: 'USER_NOT_FOUND' });
         if (!Roles.canManageUser(req.user, target)) {
-            return res.status(403).json({ error: '你不能管理這個使用者' });
+            return res.status(403).json({ error: msg('USER_MANAGE_FORBIDDEN'), code: 'USER_MANAGE_FORBIDDEN' });
         }
         const body = req.body || {};
         const patch = {};
@@ -815,20 +816,20 @@ function createApp(options = {}) {
         if (body.is_active !== undefined) {
             const next = boolish(body.is_active, true);
             if (!next && store.countUsersByRole('web_manager') <= (target.role === 'web_manager' ? 1 : 0)) {
-                return res.status(400).json({ error: '至少要保留一位網站管理員' });
+                return res.status(400).json({ error: msg('LAST_WEB_MANAGER'), code: 'LAST_WEB_MANAGER' });
             }
             patch.is_active = next;
         }
         if (body.password !== undefined) {
             const password = String(body.password);
             if (password.length < 6 || password.length > 64) {
-                return res.status(400).json({ error: '密碼長度必須是 6–64 個字元' });
+                return res.status(400).json({ error: msg('PASSWORD_LENGTH'), code: 'PASSWORD_LENGTH' });
             }
             patch.password_hash = hashPassword(password);
         }
         if (body.role !== undefined) {
             if (!Roles.canCreateRole(req.user, body.role)) {
-                return res.status(403).json({ error: '你不能指派這個角色' });
+                return res.status(403).json({ error: msg('ROLE_ASSIGN_FORBIDDEN'), code: 'ROLE_ASSIGN_FORBIDDEN' });
             }
             patch.role = body.role;
         }
@@ -861,13 +862,13 @@ function createApp(options = {}) {
     app.post('/api/admin/grants', requireRole('admin'), (req, res) => {
         const body = req.body || {};
         const user = store.getUser(body.user_id);
-        if (!user) return res.status(404).json({ error: '找不到這個使用者' });
+        if (!user) return res.status(404).json({ error: msg('USER_NOT_FOUND'), code: 'USER_NOT_FOUND' });
         const bookId = body.book_id === undefined || body.book_id === null || body.book_id === '' ? null : Number(body.book_id);
         const unitId = body.unit_id === undefined || body.unit_id === null || body.unit_id === '' ? null : Number(body.unit_id);
         if ((bookId && !store.getBook(bookId)) || (unitId && !store.getUnit(unitId))) {
-            return res.status(400).json({ error: '書本或單元不存在' });
+            return res.status(400).json({ error: msg('TARGET_NOT_FOUND'), code: 'TARGET_NOT_FOUND' });
         }
-        if (!bookId && !unitId) return res.status(400).json({ error: '請指定書本或單元' });
+        if (!bookId && !unitId) return res.status(400).json({ error: msg('GRANT_TARGET_REQUIRED'), code: 'GRANT_TARGET_REQUIRED' });
         const grant = store.createGrant({
             user_id: user.id,
             book_id: bookId,
@@ -888,7 +889,7 @@ function createApp(options = {}) {
 
     app.delete('/api/admin/grants/:id', requireRole('admin'), (req, res) => {
         const ok = store.deleteGrant(req.params.id);
-        if (!ok) return res.status(404).json({ error: '找不到這筆授權' });
+        if (!ok) return res.status(404).json({ error: msg('GRANT_NOT_FOUND'), code: 'GRANT_NOT_FOUND' });
         return res.json({ ok: true });
     });
 
@@ -916,19 +917,19 @@ function createApp(options = {}) {
     }));
 
     app.use('/api', (req, res) => {
-        res.status(404).json({ error: `沒有這個 API：${req.method} ${req.path}` });
+        res.status(404).json({ error: msg('API_NOT_FOUND', { method: req.method, path: req.path }), code: 'API_NOT_FOUND', details: { method: req.method, path: req.path } });
     });
 
     // eslint-disable-next-line no-unused-vars
     app.use((err, req, res, next) => {
         if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError)) {
-            return res.status(400).json({ error: '送出的資料不是合法的 JSON' });
+            return res.status(400).json({ error: msg('BAD_JSON'), code: 'BAD_JSON' });
         }
         if (err && err.type === 'entity.too.large') {
-            return res.status(413).json({ error: '送出的內容太大' });
+            return res.status(413).json({ error: msg('TOO_LARGE'), code: 'TOO_LARGE' });
         }
         console.error('[pv-dictionary] 未預期錯誤：', err);
-        return res.status(500).json({ error: '伺服器發生錯誤' });
+        return res.status(500).json({ error: msg('SERVER'), code: 'SERVER' });
     });
 
     app.locals.store = store;
