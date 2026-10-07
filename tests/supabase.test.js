@@ -173,6 +173,31 @@ test('Supabase 資料層：寫回失敗要 throw（而且不會偷偷把異動�
     assert.equal(store.listBooks({ includeUnpublished: true }).some((b) => b.name === 'Boom'), false);
 });
 
+test('Supabase 資料層：每次請求都重新抓（別人剛寫進去的東西下一個請求就看得到）', async (t) => {
+    const fake = withFake(t);
+    const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k' });
+    await store.hydrate();
+    assert.equal(store.listBooks().length, 0);
+
+    /* 模擬「另一個實例（另一個 Vercel lambda）剛寫了一本書」 */
+    fake.db.dict_books.push({ id: 1, code: 'B1', name: '別的實例寫的', sort_order: 1, is_published: true });
+
+    await store.hydrate();
+    assert.equal(store.listBooks().length, 1, 'ttl 預設 0：下一個請求就要看到資料庫的最新狀態');
+});
+
+test('Supabase 資料層：還有沒寫回的異動時不重抓（避免把寫入弄丟）', async (t) => {
+    const fake = withFake(t);
+    const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k' });
+    await store.hydrate();
+    store.createBook({ code: 'B1', name: 'Book 1', sort_order: 1, is_published: true });
+    assert.equal(store.pendingOps(), 1);
+
+    await store.hydrate();
+    assert.equal(store.pendingOps(), 1, '重抓會把還沒寫回的異動丟掉，所以寧可先不重抓');
+    assert.equal(store.listBooks().length, 1, '剛建立的書還在');
+});
+
 test('Supabase 後端跑起整個 app：API 寫入的資料真的進資料庫（hydrate → 同步路由 → flush）', async (t) => {
     const fake = withFake(t);
     fake.seedUsers([

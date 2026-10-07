@@ -15,13 +15,20 @@
 | `DATA_BACKEND` | `supabase` | 已設好 |
 | `SUPABASE_URL` | `https://hckozqluooeobvyltcyf.supabase.co` | 已設好 |
 | `SITE_URL` | `https://pv-dictionary-mylearning.vercel.app` | 已設好（production） |
-| `JWT_SECRET` | **要自己填**：填 `.env` 裡 `JWT_SECRET` 的值（或 `openssl rand -hex 32` 產生一組新的） | ⚠️ 目前是 `REPLACE_ME…` 佔位值 |
-| `SUPABASE_SERVICE_ROLE_KEY` | **要自己填**：填 `.env` 裡 `SUPABASE_SERVICE_ROLE_KEY` 的值（Supabase → Settings → API → service_role） | ⚠️ 目前是 `REPLACE_ME…` 佔位值 |
+| `JWT_SECRET` | `.env` 的 `JWT_SECRET` | ✅ 已推上去（用 `node scripts/vercel-env.js --push --deploy`） |
+| `SUPABASE_SERVICE_ROLE_KEY` | `.env` 的 `SUPABASE_SERVICE_ROLE_KEY` | ✅ 已推上去 |
 
-> 佔位值是**故意**的：程式會偵測到 `REPLACE_ME` 就當場拒絕啟動（回 500），
-> 不會用「猜得到的密鑰」跑起來害你以為已經好了。填好兩個值 → Redeploy 就會通。
+> 這兩個機密值是寫成 Vercel 的 `sensitive` 類型（介面上看不到、也讀不回來，只能覆寫）。
+> 要換值就改 `.env` 再跑一次 `node scripts/vercel-env.js --push --deploy`：
+> 值只在「.env → Vercel API」之間流動，不會出現在對話或任何文件裡。
+> 程式有守門：看到 `REPLACE_ME` 開頭的值會**當場拒絕啟動**（回 500），不會用猜得到的密鑰跑起來。
 
-**這兩個值是機密**：不要貼在對話、訊息或任何文件裡，直接從 `.env` 複製到 Vercel 介面。
+**這兩個值是機密**：不要貼在對話、訊息或任何文件裡。用腳本推（值不會經過對話）：
+
+```bash
+node scripts/vercel-env.js --push --deploy   # 從 .env 推到 Vercel，順便重新部署並驗證
+node scripts/vercel-env.js --check           # 只看看哪些變數設好了（不印值）
+```
 
 ## 二、部署
 

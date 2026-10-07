@@ -51,7 +51,7 @@ async function main() {
     const home = await fetch(`${BASE}/`);
     const html = await home.text();
     check('首頁 HTTP 200', home.status === 200);
-    check('標題是 v0.3.0', /PV_Dictionary v0\.3\.0/.test(html));
+    check('標題是 v0.3.1', /PV_Dictionary v0\.3\.1/.test(html));
     const csp = home.headers.get('content-security-policy') || '';
     check("CSP 有 script-src 'self'", /script-src 'self'/.test(csp));
     check('CSP 沒有 unsafe-inline', !/unsafe-inline/.test(csp), csp.slice(0, 120));

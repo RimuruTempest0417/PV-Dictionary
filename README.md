@@ -3,10 +3,10 @@
 線上英文生字字典：學生**點書本封面 → 選單元 → 看生字表**（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.3.0（本機 Demo ＋ 線上版骨架）**
+- 目前版本：**v0.3.1（本機 Demo ＋ 線上版已上線）**
 - 規劃書：`docs/規劃書-v0.0.1.md`｜部署說明：`docs/deploy-vercel.md`
 - 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie、介面預設英文可切中文
-- 線上：Vercel `pv-dictionary`＋Supabase（**待填入兩個環境變數後即完成**，見 `docs/deploy-vercel.md`）
+- 線上：**已上線** https://pv-dictionary-mylearning.vercel.app （Vercel `pv-dictionary` ＋ Supabase；環境變數已設好）
 
 ---
 
@@ -90,7 +90,16 @@ Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-sout
 
 資料層怎麼運作（`lib/store/supabase.js` 開頭有完整說明）：**每個 /api 請求先抓下 7 張表 → 路由照舊同步讀寫 →
 回應送出「之前」把異動寫回**（寫回失敗回 500，不假裝成功）。這樣做是因為路由是同步風格，
-而且 serverless 在回應後會凍結實例、不能之後才寫資料庫。
+而且 serverless 在回應送出後會凍結實例、不能之後才寫資料庫。
+
+**每個請求都重新抓**（不是每個實例抓一次）：否則別的實例剛寫進去的東西你看不到
+（老師加了生字、學生看不到就完了）。想省查詢量可以設 `SUPABASE_HYDRATE_TTL_MS`（毫秒）。
+代價：同一瞬間的兩個寫入請求仍可能互相覆蓋（學校規模可接受）；兩個實例同時新增資料時
+若配到同一個 id，後寫的那筆會回 500 `DB_WRITE_FAILED`（大聲失敗，不會假裝成功）。
+
+`/api/health` 會回一段 `db` 診斷（主機代號、金鑰角色與專案 ref、最後一次資料庫錯誤）——
+上線後連不上資料庫時，先看這個就知道是「連錯專案」「金鑰種類不對」還是「資料庫真的空的」。
+（不含任何機密：只放金鑰的 `role`／`ref` 宣告，不放金鑰本身。）
 
 上線步驟與驗證指令：`docs/deploy-vercel.md`。要準備的環境變數：
 `DATA_BACKEND=supabase`、`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`JWT_SECRET`、`SITE_URL`
@@ -177,10 +186,12 @@ guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin
 
 ```bash
 npm run check:syntax   # 所有 JS 語法檢查 + server.js 模組載入檢查
-npm test               # 56 項：角色權限矩陣、資料層（JSON 與 Supabase adapter）、匯入解析、i18n、API 端到端、守門檢查
+npm test               # 58 項：角色權限矩陣、資料層（JSON 與 Supabase adapter）、匯入解析、i18n、API 端到端、守門檢查
 npm run check:browser  # 四支真 Chrome 檢查（劇本 54 ＋ 空白起步 31 ＋ 語言切換 28 ＋ 帳號管理 50）
 node scripts/supabase-smoke.js          # 線上資料庫：連線／schema／各表筆數
 node scripts/supabase-smoke.js --write  # 線上資料庫：寫入 → 新連線讀回 → 清理 → 確認乾淨
+node scripts/live-verify.js             # 線上版端到端：登入、權限、真的寫進資料庫再清掉（21 項）
+DATA_BACKEND=supabase npm run seed -- --prune-accounts   # 在正式資料庫建立／重設帳號
 ```
 
 瀏覽器驗收涵蓋：**書架（封面）→ 目錄 → 生字表的三層動線**、**上傳書本封面後書架換成封面圖**、
