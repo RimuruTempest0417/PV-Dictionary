@@ -291,14 +291,18 @@ function createApp(options = {}) {
     });
 
     app.get('/api/health', (req, res) => {
+        /* 診斷資訊：只吐不含機密的東西（主機代號、金鑰角色／專案 ref、最後一次錯誤），
+         * 用來分辨「連錯專案」「金鑰種類不對」「資料庫真的空的」這三種情況。 */
+        const db = typeof store.diagnostics === 'function' ? store.diagnostics() : null;
         res.json({
             version: PACKAGE.version,
             backend: store.backend,
             backend_label: DATA_BACKEND_LABEL[store.backend] || store.backend,
             data_file: store.backend === 'json' ? store.dataFile : null,
-            schema_ready: true,
-            jwt_secret_configured: Boolean(process.env.JWT_SECRET),
-            counts: store.tableCounts()
+            schema_ready: store.backend === 'supabase' ? Boolean(db && db.hydrate_ok) : true,
+            jwt_secret_configured: Boolean(process.env.JWT_SECRET) && !/^REPLACE_ME/.test(String(process.env.JWT_SECRET)),
+            counts: store.tableCounts(),
+            db
         });
     });
 
@@ -1147,6 +1151,6 @@ if (require.main === module) {
     }
     app.listen(port, () => {
         console.log(`PV_Dictionary v${PACKAGE.version} 已啟動：http://localhost:${port}`);
-        console.log(`資料來源：${process.env.DATA_BACKEND || 'json'} → ${path.resolve(dataFile)}`);
+        console.log(`資料來源：${process.env.DATA_BACKEND || 'json'}${(process.env.DATA_BACKEND || 'json') === 'supabase' ? '（Supabase 線上資料庫）' : ` → ${path.resolve(dataFile)}`}`);
     });
 }

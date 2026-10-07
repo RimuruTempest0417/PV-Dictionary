@@ -29,6 +29,10 @@ const PRUNE_ACCOUNTS = process.argv.includes('--prune-accounts');
 const WITH_ADMIN = process.argv.includes('--with-admin');
 const WITH_TEAM = process.argv.includes('--with-team');
 
+/* 資料後端：預設本機 JSON；DATA_BACKEND=supabase 時直接對線上 Supabase 建立帳號
+ *   DATA_BACKEND=supabase npm run seed -- --prune-accounts   ← 在正式資料庫建立 Gary */
+const BACKEND = process.env.DATA_BACKEND === 'supabase' ? 'supabase' : 'json';
+
 /* ---------------- .env 輔助 ---------------- */
 function readEnvFile() {
     if (!fs.existsSync(ENV_FILE)) return {};
@@ -166,14 +170,25 @@ const TEAM_USERS = [
 ];
 
 /* ---------------- 執行 ---------------- */
-function main() {
+async function main() {
     ensureEnv('DATA_BACKEND', () => 'json');
     ensureEnv('DATA_FILE', () => 'data/store.json');
     ensureEnv('PORT', () => '3000');
     ensureEnv('JWT_SECRET', () => crypto.randomBytes(32).toString('hex'));
 
-    const store = createStore({ backend: 'json', dataFile: DATA_FILE });
-    if (RESET && fs.existsSync(DATA_FILE)) {
+    if (BACKEND === 'supabase' && RESET) {
+        console.error('✖ --reset 只支援本機 JSON 資料檔（清空線上資料庫太危險，請在 Supabase 介面自行處理）');
+        process.exit(1);
+    }
+
+    const store = BACKEND === 'supabase'
+        ? createStore({ backend: 'supabase' })
+        : createStore({ backend: 'json', dataFile: DATA_FILE });
+    if (typeof store.hydrate === 'function') {
+        await store.hydrate();
+        console.log('資料來源：Supabase（已載入現有資料）');
+    }
+    if (RESET && BACKEND === 'json' && fs.existsSync(DATA_FILE)) {
         fs.rmSync(DATA_FILE);
         store.reload();
         console.log(`已清空資料檔：${DATA_FILE}`);
@@ -290,6 +305,11 @@ function main() {
         createdUsers.push(`${spec.username}（${spec.role}）`);
     }
 
+    if (typeof store.flush === 'function') {
+        const result = await store.flush();
+        console.log(`已寫回 Supabase：${result.written} 筆異動`);
+    }
+
     console.log('--- 示範資料 ---');
     if (WITH_SAMPLE) {
         console.log(`書本 ${createdBooks} 本、單元 ${createdUnits} 個、生字 ${createdEntries} 個（已存在的不重複建立）`);
@@ -299,13 +319,16 @@ function main() {
     console.log('--- 帳號 ---');
     console.log(createdUsers.length ? `新建立：${createdUsers.join('、')}` : '帳號已存在，未變更');
     console.log(`目前帳號：${store.listUsers().map((u) => `${u.username}（${u.role}${u.is_active === false ? '，已停用' : ''}）`).join('、')}`);
-    console.log(`資料檔：${DATA_FILE}`);
+    console.log(`資料來源：${BACKEND === 'supabase' ? 'Supabase（線上）' : DATA_FILE}`);
     console.log('密碼：已寫入 .env 的 SEED_*_PASSWORD（本檔不印出密碼）');
     console.log('查詢方式：grep SEED_ .env');
     console.log('--- 接下來 ---');
     console.log('1. node server.js');
-    console.log('2. 開 http://localhost:3000 → 右上角「登入」（manager 或 webmanager）');
+    console.log('2. 開 http://localhost:3000 → 右上角「登入」');
     console.log('3. 登入後按右上角「✏️ 管理」→ 📗 新增書本 → 🏗 新增單元 → ➕ 新增生字');
 }
 
-main();
+main().catch((err) => {
+    console.error('✖ 失敗：', err.message);
+    process.exitCode = 1;
+});

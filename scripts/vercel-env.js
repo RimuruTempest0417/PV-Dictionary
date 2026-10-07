@@ -109,11 +109,24 @@ async function main() {
     const deployments = await vercel('GET', `/v6/deployments?projectId=${PROJECT_ID}&target=production&limit=1&teamId=${TEAM_ID}`);
     const latest = (deployments.deployments || [])[0];
     if (!latest) throw new Error('找不到 production 部署可以重新部署');
-    const redeploy = await vercel('POST', `/v13/deployments?teamId=${TEAM_ID}&forceNew=1`, {
-        name: PROJECT_NAME,
-        deploymentId: latest.id,
-        target: 'production'
-    });
+    let redeploy;
+    try {
+        redeploy = await vercel('POST', `/v13/deployments/${latest.id}/redeploy?teamId=${TEAM_ID}&forceNew=1`, {});
+    } catch (err) {
+        /* 舊版 API：用 git source 直接再建一次（repoId 從專案的 git 連結拿） */
+        const project = await vercel('GET', `/v9/projects/${PROJECT_ID}?teamId=${TEAM_ID}`);
+        const repoId = project.link && project.link.repoId;
+        if (!repoId) throw new Error(`無法重新部署：${err.message}`);
+        redeploy = await vercel('POST', `/v13/deployments?teamId=${TEAM_ID}&forceNew=1`, {
+            name: PROJECT_NAME,
+            gitSource: {
+                type: 'github',
+                ref: (project.link && project.link.productionBranch) || 'main',
+                repoId
+            },
+            target: 'production'
+        });
+    }
     console.log(`✔ 已觸發重新部署：${redeploy.id}`);
 
     for (let i = 0; i < 40; i += 1) {
