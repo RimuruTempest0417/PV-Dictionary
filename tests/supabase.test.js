@@ -19,6 +19,7 @@ function fakeSupabase() {
     const db = {};
     for (const name of TABLES) db[name] = [];
     const calls = [];
+    const flags = { failWrites: false, failMessage: '' };
     const originalFetch = global.fetch;
 
     function tableOf(pathname) {
@@ -37,6 +38,10 @@ function fakeSupabase() {
         calls.push({ method, table, wanted, body, headers: init.headers });
 
         if (!db[table]) throw new Error(`假 PostgREST 沒有這張表：${table}`);
+        if (flags.failWrites && method !== 'GET') {
+            const message = flags.failMessage || 'simulated write failure';
+            return { ok: false, status: 400, text: async () => JSON.stringify({ message, code: '42703' }) };
+        }
         if (method === 'GET') {
             const rows = wanted ? db[table].filter((r) => String(r.id) === String(wanted)) : db[table].slice();
             return { ok: true, status: 200, text: async () => JSON.stringify(rows) };
@@ -72,6 +77,7 @@ function fakeSupabase() {
     return {
         db,
         calls,
+        flags,
         restore() { global.fetch = originalFetch; },
         seedUsers(rows) { db.dict_users.push(...rows); }
     };
@@ -249,4 +255,46 @@ test('Supabase 後端跑起整個 app：API 寫入的資料真的進資料庫（
     const list = await (await fetch(`${base}/api/books/${book.id}/units`)).json();
     assert.equal(list.units.length, 1);
     assert.equal(list.book.name, 'NorthStar 1');
+});
+
+test('Supabase 後端：寫回失敗時回 500，並帶上真正的原因（details.message）', async (t) => {
+    /* 這段是回歸測試：使用者上傳書本封面時，線上 500，但畫面只顯示「{message}」——
+     * 兩個問題各自都要被擋住：① 後端要把原因放進 details ② 前端不能把佔位符原樣印出來 */
+    const fake = withFake(t);
+    fake.seedUsers([
+        { id: 1, username: 'manager', display_name: '網頁管理員', role: 'admin', is_active: true, password_hash: hashPassword('pass1234') }
+    ]);
+
+    process.env.JWT_SECRET = process.env.JWT_SECRET || 'supabase-test-secret';
+    const { createApp } = require('../server');
+    const app = createApp({ backend: 'supabase', url: 'https://example.supabase.co', key: 'k' });
+    const server = app.listen(0);
+    const base = `http://127.0.0.1:${server.address().port}`;
+    t.after(() => { try { server.close(); } catch (err) { /* 已關閉 */ } });
+
+    const login = await fetch(`${base}/api/auth/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'manager', password: 'pass1234' })
+    });
+    assert.equal(login.status, 200);
+    const cookie = (typeof login.headers.getSetCookie === 'function' ? login.headers.getSetCookie() : [])
+        .map((line) => line.split(';')[0]).join('; ');
+
+    fake.flags.failWrites = true;
+    fake.flags.failMessage = 'column "cover_data" of relation "dict_books" does not exist';
+
+    const res = await fetch(`${base}/api/books`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ code: 'NSX', name: '不會存進去的書' })
+    });
+    assert.equal(res.status, 500, '寫回失敗不能假裝成功');
+    const body = await res.json();
+    assert.equal(body.code, 'DB_WRITE_FAILED');
+    assert.ok(body.details && body.details.message, '要帶上真正的原因，否則使用者只會看到 {message}');
+    assert.match(body.details.message, /cover_data/);
+
+    /* 失敗後記憶體不可以留著假資料：下一個請求要看到資料庫的真實狀態 */
+    fake.flags.failWrites = false;
+    const after = await (await fetch(`${base}/api/books`)).json();
+    assert.deepEqual(after.books, [], '失敗的寫入不能留在記憶體裡');
 });

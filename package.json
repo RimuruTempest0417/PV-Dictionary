@@ -1,6 +1,6 @@
 {
     "name": "pv-dictionary",
-    "version": "0.3.1",
+    "version": "0.3.2",
     "description": "PV_Dictionary — 線上英文生字字典（Express 5 + Supabase）",
     "main": "server.js",
     "type": "commonjs",
@@ -10,7 +10,9 @@
         "test": "node --test tests/*.test.js",
         "check:syntax": "node scripts/check-syntax.js",
         "check:browser": "node tests/browser/demo-check.js && node tests/browser/empty-start-check.js && node tests/browser/lang-check.js && node tests/browser/users-check.js",
-        "check": "npm run check:syntax && npm test"
+        "check": "npm run check:syntax && npm run check:schema && npm test",
+        "check:schema": "node scripts/schema-check.js --offline",
+        "check:schema:live": "node scripts/schema-check.js"
     },
     "keywords": [
         "dictionary",

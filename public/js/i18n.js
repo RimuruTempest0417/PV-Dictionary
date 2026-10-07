@@ -714,11 +714,19 @@
         return storedLang() || DEFAULT_LANG;
     }
 
+    /* 插值：{name} 會被換成 vars.name。
+     * ★ 沒給值的佔位符要「整段拿掉」，不能留 {message} 在畫面上（使用者真的看到過
+     *   「這次的修改沒有存進資料庫（{message}）」），也不能留空括號。 */
     function interpolate(text, vars) {
-        if (!vars) return text;
-        return String(text).replace(/\{(\w+)\}/g, (match, key) => (
-            vars[key] === undefined || vars[key] === null ? match : String(vars[key])
+        const values = vars || {};
+        const filled = String(text).replace(/\{(\w+)\}/g, (match, key) => (
+            values[key] === undefined || values[key] === null ? '' : String(values[key])
         ));
+        return filled
+            .replace(/[（(]\s*[)）]/g, '')     /* 值被拿掉後留下的空括號 */
+            .replace(/[ \t]{2,}/g, ' ')        /* 收掉多餘空白 */
+            .replace(/\s+([，。、；：])/g, '$1')
+            .trim();
     }
 
     function t(key, vars) {

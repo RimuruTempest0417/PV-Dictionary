@@ -181,7 +181,11 @@ function createApp(options = {}) {
                 await store.hydrate();
             } catch (err) {
                 console.error('[store] 讀取 Supabase 失敗：', err.message);
-                return res.status(503).json({ error: msg('DB_UNAVAILABLE', { message: err.message }), code: 'DB_UNAVAILABLE' });
+                return res.status(503).json({
+                    error: msg('DB_UNAVAILABLE', { message: err.message }),
+                    code: 'DB_UNAVAILABLE',
+                    details: { message: err.message }
+                });
             }
             const originalJson = res.json.bind(res);
             res.json = (body) => {
@@ -192,7 +196,11 @@ function createApp(options = {}) {
                         console.error('[store] 寫回 Supabase 失敗：', err.message);
                         if (res.headersSent) return res;
                         res.status(500);
-                        return originalJson({ error: msg('DB_WRITE_FAILED', { message: err.message }), code: 'DB_WRITE_FAILED' });
+                        return originalJson({
+                            error: msg('DB_WRITE_FAILED', { message: err.message }),
+                            code: 'DB_WRITE_FAILED',
+                            details: { message: err.message }
+                        });
                     });
                 return res;
             };

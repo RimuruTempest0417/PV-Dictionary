@@ -3,7 +3,7 @@
 線上英文生字字典：學生**點書本封面 → 選單元 → 看生字表**（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.3.1（本機 Demo ＋ 線上版已上線）**
+- 目前版本：**v0.3.2（本機 Demo ＋ 線上版已上線）**
 - 規劃書：`docs/規劃書-v0.0.1.md`｜部署說明：`docs/deploy-vercel.md`
 - 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie、介面預設英文可切中文
 - 線上：**已上線** https://pv-dictionary-mylearning.vercel.app （Vercel `pv-dictionary` ＋ Supabase；環境變數已設好）
@@ -186,11 +186,13 @@ guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin
 
 ```bash
 npm run check:syntax   # 所有 JS 語法檢查 + server.js 模組載入檢查
-npm test               # 58 項：角色權限矩陣、資料層（JSON 與 Supabase adapter）、匯入解析、i18n、API 端到端、守門檢查
+npm run check:schema   # 程式要用的欄位 vs migrations/*.sql（不用網路）
+npm test               # 64 項：角色權限矩陣、資料層（JSON 與 Supabase）、schema 守門、匯入解析、i18n、API 端到端
 npm run check:browser  # 四支真 Chrome 檢查（劇本 54 ＋ 空白起步 31 ＋ 語言切換 28 ＋ 帳號管理 50）
+npm run check:schema:live        # 同一份欄位清單 vs 線上 Supabase 實際 schema
 node scripts/supabase-smoke.js          # 線上資料庫：連線／schema／各表筆數
 node scripts/supabase-smoke.js --write  # 線上資料庫：寫入 → 新連線讀回 → 清理 → 確認乾淨
-node scripts/live-verify.js             # 線上版端到端：登入、權限、真的寫進資料庫再清掉（21 項）
+node scripts/live-verify.js             # 線上版端到端：schema、帶封面的書往返、登入後上傳封面（不留測試資料）
 DATA_BACKEND=supabase npm run seed -- --prune-accounts   # 在正式資料庫建立／重設帳號
 ```
 

@@ -110,3 +110,45 @@ test('i18n：後端回應一律是英文（預設語言）＋ code', () => {
     assert.deepEqual(chineseErrors, [], '後端的錯誤訊息應該用 msg(code)（英文），不要在 server.js 寫中文');
     assert.match(server, /require\('\.\/lib\/messages'\)/);
 });
+
+/* 使用者實際看到的 bug：錯誤訊息裡的值沒帶到，畫面就印出「（{message}）」。
+ * 現在規矩是：**沒給值的佔位符整段拿掉**，連空括號也不能留。 */
+test('i18n：沒帶到值的佔位符不會原樣印出來（{message} 事件）', () => {
+    const store = {};
+    const code = fs.readFileSync(path.join(ROOT, 'public/js/i18n.js'), 'utf8');
+    const context = {
+        window: { dispatchEvent() {} },
+        console,
+        CustomEvent: class CustomEvent {
+            constructor(type, init) { this.type = type; this.detail = init && init.detail; }
+        },
+        localStorage: {
+            getItem: (key) => (key in store ? store[key] : null),
+            setItem: (key, value) => { store[key] = String(value); },
+            removeItem: (key) => { delete store[key]; }
+        },
+        document: {
+            documentElement: { setAttribute() {} },
+            querySelectorAll: () => [],
+            dispatchEvent() {}
+        }
+    };
+    vm.createContext(context);
+    vm.runInContext(code, context, { filename: 'i18n.js' });
+    const api = context.window.PDI18n;
+
+    for (const lang of ['en', 'zh']) {
+        api.setLang(lang);
+        const bare = api.t('errors.DB_WRITE_FAILED');
+        assert.equal(/\{|\}/.test(bare), false, `${lang}：不該出現 {…}（${bare}）`);
+        assert.equal(/[（(]\s*[)）]/.test(bare), false, `${lang}：不該留空括號（${bare}）`);
+        assert.equal(/\s{2,}/.test(bare), false, `${lang}：不該有多餘空白（${bare}）`);
+
+        const withValue = api.t('errors.DB_WRITE_FAILED', { message: 'column "x" does not exist' });
+        assert.match(withValue, /column "x" does not exist/, `${lang}：有值時要插進去`);
+    }
+
+    api.setLang('zh');
+    assert.equal(api.errorMessage({ code: 'DB_WRITE_FAILED' }), api.t('errors.DB_WRITE_FAILED'));
+    assert.match(api.errorMessage({ code: 'DB_WRITE_FAILED', details: { message: 'boom' } }), /boom/);
+});

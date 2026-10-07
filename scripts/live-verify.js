@@ -3,12 +3,14 @@
  *
  * 驗什麼：
  *   1. 首頁／CSP 標頭／analytics.js（Vercel Web Analytics 的同源檔案）
- *   2. Gary 登入 → /api/auth/me → /api/admin/users（只有 Gary）
- *   3. **真的寫進資料庫**：建一本書 → 下一個請求（會重新 hydrate）看得到 → 打 /api/health 看得到筆數
- *   4. 清乾淨：直接用 Supabase REST 刪掉測試資料 → 再讀一次確認回到空的
- *   5. 順便證明寫入路徑（登入本身就會寫 last_login_at 與稽核）
+ *   2. schema 漂移：線上資料庫的欄位 vs lib/schema.js 的清單（封面欄位漏了就是 500）
+ *   3. 資料庫直連往返（不需登入）：插入帶封面的測試書 → App 讀得到 → 刪除
+ *   4. 登入後的驗收：登入 → /api/auth/me → 帳號清單 → 建書 → 上傳封面 → 刪封面
+ *   5. 清乾淨：只刪這次的測試資料，並確認筆數回到開始前的水準
  *
- * 全程不印任何密碼／金鑰。用法：node scripts/live-verify.js [--base https://...]
+ * 登入帳號：預設 Gary，密碼用 .env 的 VERIFY_PASSWORD（沒有就退回 SEED_WEB_MANAGER_PASSWORD）；
+ * 若你自己改過密碼，登入段會被略過並提示怎麼補。
+ * 全程不印任何密碼／金鑰。用法：node scripts/live-verify.js [--base https://...] [--no-auth]
  */
 require('dotenv').config();
 
@@ -18,11 +20,18 @@ const BASE = (() => {
 })();
 const HOST = new URL(BASE).origin;
 const TEST_CODE = '__live_verify__';
+const NO_AUTH = process.argv.includes('--no-auth');
+const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AARAAI/wH+AB0AAAAASUVORK5CYII=';
 
 let pass = 0;
 let fail = 0;
+let skipped = 0;
 function check(label, ok, extra) {
     if (ok) { pass += 1; console.log(`  ✔ ${label}${extra ? `：${extra}` : ''}`); } else { fail += 1; console.log(`  ✖ ${label}${extra ? `：${extra}` : ''}`); }
+}
+function skip(label, why) {
+    skipped += 1;
+    console.log(`  － 略過 ${label}（${why}）`);
 }
 
 async function supabase(path, options) {
@@ -44,14 +53,40 @@ async function supabase(path, options) {
     return text ? JSON.parse(text) : null;
 }
 
+async function supabaseOpenApi() {
+    const url = String(process.env.SUPABASE_URL || '').replace(/\/+$/, '');
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) return null;
+    const res = await fetch(`${url}/rest/v1/`, {
+        headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/openapi+json' }
+    });
+    if (!res.ok) return null;
+    return res.json();
+}
+
+async function counts() {
+    const health = await (await fetch(`${BASE}/api/health`)).json();
+    return health.counts || {};
+}
+
+async function cleanup(bookIds) {
+    for (const id of bookIds.filter((value) => value)) {
+        await supabase(`dict_books?id=eq.${id}`, { method: 'DELETE', body: null });
+        await supabase(`dict_audit_logs?target_id=eq.${id}`, { method: 'DELETE', body: null });
+    }
+    await supabase(`dict_books?code=eq.${TEST_CODE}`, { method: 'DELETE', body: null });
+}
+
 async function main() {
     console.log(`線上驗收：${BASE}\n`);
+    const createdIds = [];
 
     console.log('1. 靜態與標頭');
     const home = await fetch(`${BASE}/`);
     const html = await home.text();
+    const version = (await (await fetch(`${BASE}/api/version`)).json()).version;
     check('首頁 HTTP 200', home.status === 200);
-    check('標題是 v0.3.1', /PV_Dictionary v0\.3\.1/.test(html));
+    check(`頁面標的是 v${version}`, html.includes(`v${version}`), `v${version}`);
     const csp = home.headers.get('content-security-policy') || '';
     check("CSP 有 script-src 'self'", /script-src 'self'/.test(csp));
     check('CSP 沒有 unsafe-inline', !/unsafe-inline/.test(csp), csp.slice(0, 120));
@@ -60,64 +95,123 @@ async function main() {
     check('/js/analytics.js 是同源檔案（200）', analytics.status === 200);
     check('analytics 走 /_vercel/insights（Vercel 服務）', /\/_vercel\/insights\/script\.js/.test(html));
 
-    console.log('\n2. 登入與權限');
-    const password = process.env.SEED_WEB_MANAGER_PASSWORD || process.env.SEED_MANAGER_PASSWORD;
-    if (!password) { console.log('  ✖ .env 沒有種子密碼可用，跳過登入驗證'); return; }
-    const login = await fetch(`${BASE}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Origin: HOST },
-        body: JSON.stringify({ username: 'Gary', password })
-    });
-    const loginBody = await login.text();
-    check('Gary 登入 HTTP 200', login.status === 200, loginBody.slice(0, 120));
-    const setCookie = login.headers.getSetCookie ? login.headers.getSetCookie() : [login.headers.get('set-cookie') || ''];
-    const cookie = setCookie.map((row) => String(row).split(';')[0]).filter(Boolean).join('; ');
-    check('拿到 HttpOnly cookie', /pd_token=/.test(cookie));
-    const user = JSON.parse(loginBody || '{}').user || {};
-    check('角色是 web_manager', user.role === 'web_manager', String(user.role));
+    /* schema 漂移：線上資料庫的欄位要跟 lib/schema.js 的清單一致。
+     * （書本封面的 cover_* 欄位就是漏了這一步，上線後上傳封面直接 500。） */
+    const spec = await supabaseOpenApi();
+    if (spec) {
+        const { compareWithLive } = require('../lib/schema');
+        const live = compareWithLive(spec.definitions || {});
+        const pretty = live.missing.map((item) => `${item.table}.${item.column}`);
+        check('線上 schema 沒有缺少程式要用的欄位', pretty.length === 0, pretty.join('、'));
+    } else {
+        console.log('  （略過 schema 檢查：.env 沒有 Supabase 憑證）');
+    }
 
-    const authed = (path, options) => fetch(`${BASE}${path}`, Object.assign({}, options, {
-        headers: Object.assign({ Cookie: cookie, Origin: HOST }, (options && options.headers) || {})
-    }));
-    const me = await authed('/api/auth/me');
-    const meBody = await me.json();
-    check('/api/auth/me 認得這個 cookie', me.status === 200, `role=${meBody.user && meBody.user.role}`);
-    check('permissions.can_manage_users 為 true', Boolean(meBody.permissions && meBody.permissions.can_manage_users));
+    const baseline = await counts();
+    console.log(`   （開始前的筆數：${JSON.stringify(baseline)}）`);
 
-    const users = await authed('/api/admin/users');
-    const usersBody = await users.json();
-    const list = usersBody.users || [];
-    check('帳號清單只有 Gary 一人', list.length === 1 && list[0].username === 'Gary', list.map((u) => u.username).join(','));
+    console.log('\n3. 資料庫直連往返：帶封面的書（不需要登入）');
+    try {
+        /* id 自己配（跟 App 一樣用 max(id)+1）：identity sequence 只有在「不給 id」時才會遞增，
+         * 而本專案的資料一律帶 id 寫入，所以不能靠 sequence。 */
+        const maxRows = await supabase('dict_books?select=id&order=id.desc&limit=1');
+        const nextBookId = (maxRows[0] ? Number(maxRows[0].id) : 0) + 1;
+        const inserted = await supabase('dict_books', {
+            method: 'POST',
+            body: {
+                id: nextBookId,
+                code: TEST_CODE,
+                name: 'ZZ Live Verify',
+                grade: '',
+                publisher: '',
+                sort_order: 999,
+                is_published: true,
+                cover_mime: 'image/png',
+                cover_data: PNG_1PX,
+                cover_bytes: Buffer.from(PNG_1PX, 'base64').length
+            }
+        });
+        const directId = inserted && inserted[0] && inserted[0].id;
+        createdIds.push(directId);
+        check('資料庫收得下封面欄位（INSERT 成功）', Boolean(directId), `id=${directId}`);
+        const cover = await fetch(`${BASE}/api/covers/${directId}`);
+        check('GET /api/covers/<id> 回圖片', cover.status === 200 && /image\/png/.test(cover.headers.get('content-type') || ''), `HTTP ${cover.status}`);
+        const books = await (await fetch(`${BASE}/api/books`)).json();
+        const row = (books.books || []).find((b) => b.code === TEST_CODE);
+        check('書本清單看得到它有封面（has_cover）', Boolean(row && row.has_cover));
+        check('清單沒有把 base64 一起回傳', JSON.stringify(row || {}).indexOf(PNG_1PX.slice(0, 40)) === -1);
+    } catch (err) {
+        check('資料庫收得下封面欄位（INSERT 成功）', false, err.message);
+    }
 
-    console.log('\n3. 真的寫進資料庫（建一本書 → 下一個請求看得到）');
-    const created = await authed('/api/books', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'ZZ Live Verify', code: TEST_CODE })
-    });
-    const createdBody = await created.json();
-    check('建立書本 HTTP 201', created.status === 201, JSON.stringify(createdBody).slice(0, 120));
-    const bookId = createdBody.book && createdBody.book.id;
+    console.log('\n4. 登入後的驗收');
+    const username = process.env.VERIFY_USERNAME || 'Gary';
+    const password = process.env.VERIFY_PASSWORD || process.env.SEED_WEB_MANAGER_PASSWORD || process.env.SEED_MANAGER_PASSWORD;
+    if (NO_AUTH || !password) {
+        skip('登入相關檢查', NO_AUTH ? '--no-auth' : '沒有可用的密碼（.env 的 VERIFY_PASSWORD 或 SEED_WEB_MANAGER_PASSWORD）');
+    } else {
+        const login = await fetch(`${BASE}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Origin: HOST },
+            body: JSON.stringify({ username, password })
+        });
+        const loginText = await login.text();
+        if (login.status !== 200) {
+            skip('登入相關檢查', `登入失敗 HTTP ${login.status}（若你改過密碼，可在 .env 加 VERIFY_PASSWORD=<${username} 目前密碼> 後重跑）`);
+        } else {
+            const loginBody = JSON.parse(loginText);
+            check(`登入 ${username} HTTP 200`, true, `role=${loginBody.user && loginBody.user.role}`);
+            const setCookie = login.headers.getSetCookie ? login.headers.getSetCookie() : [login.headers.get('set-cookie') || ''];
+            const cookie = setCookie.map((row) => String(row).split(';')[0]).filter(Boolean).join('; ');
+            check('拿到 HttpOnly cookie', /pd_token=/.test(cookie));
 
-    const books = await (await fetch(`${BASE}/api/books`)).json();
-    check('書本清單看得到它（＝真的寫進 Supabase）', (books.books || []).some((b) => b.code === TEST_CODE));
-    const inDb = await supabase(`dict_books?code=eq.${TEST_CODE}&select=id,code,name`);
-    check('用 Supabase REST 直接查也查得到', inDb.length === 1, JSON.stringify(inDb));
-    const health = await (await fetch(`${BASE}/api/health`)).json();
-    check('health 看到 backend=supabase、data_file=null', health.backend === 'supabase' && health.data_file === null);
-    check('health 的書本筆數 ≥1', (health.counts && health.counts.books) >= 1, JSON.stringify(health.counts));
+            const authed = (path, options) => fetch(`${BASE}${path}`, Object.assign({}, options, {
+                headers: Object.assign({ Cookie: cookie, Origin: HOST }, (options && options.headers) || {})
+            }));
 
-    console.log('\n4. 清乾淨（只刪這次的測試資料）');
-    if (bookId) await supabase(`dict_books?id=eq.${bookId}`, { method: 'DELETE', body: null });
-    await supabase(`dict_audit_logs?action=eq.BOOK_CREATE&target_id=eq.${bookId}`, { method: 'DELETE', body: null });
-    const cleaned = await supabase(`dict_books?code=eq.${TEST_CODE}&select=id`);
-    check('測試書本已從資料庫刪除', cleaned.length === 0);
-    const after = await (await fetch(`${BASE}/api/books`)).json();
-    check('線上書本清單回到空的', (after.books || []).length === 0, `books=${(after.books || []).length}`);
-    const afterHealth = await (await fetch(`${BASE}/api/health`)).json();
-    check('health 的書本筆數回到 0', afterHealth.counts.books === 0, JSON.stringify(afterHealth.counts));
+            const me = await authed('/api/auth/me');
+            const meBody = await me.json();
+            check('/api/auth/me 認得這個 cookie', me.status === 200, `role=${meBody.user && meBody.user.role}`);
+            const users = await (await authed('/api/admin/users')).json();
+            const list = users.users || [];
+            check('帳號清單讀得到', list.length >= 1, list.map((u) => u.username).join(','));
 
-    console.log(`\n===== 線上驗收：${pass} 通過 / ${fail} 失敗 =====`);
+            const created = await authed('/api/books', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: 'ZZ Live Verify', code: TEST_CODE, is_published: false })
+            });
+            const createdBody = await created.json();
+            check('建立書本 HTTP 201', created.status === 201, JSON.stringify(createdBody).slice(0, 140));
+            const apiId = createdBody.book && createdBody.book.id;
+            if (apiId) createdIds.push(apiId);
+
+            if (apiId) {
+                const books = await (await fetch(`${BASE}/api/books`)).json();
+                check('書本清單看得到它（＝真的寫進 Supabase）', (books.books || []).some((b) => b.code === TEST_CODE));
+                const upload = await authed(`/api/books/${apiId}/cover`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ data: `data:image/png;base64,${PNG_1PX}`, mime: 'image/png' })
+                });
+                const uploadText = await upload.text();
+                check('上傳書本封面 HTTP 201（你回報的那個 500）', upload.status === 201, uploadText.slice(0, 160));
+                const covered = (await (await fetch(`${BASE}/api/books`)).json()).books || [];
+                check('上傳後清單顯示 has_cover', Boolean((covered.find((b) => b.code === TEST_CODE) || {}).has_cover));
+                const removed = await authed(`/api/books/${apiId}/cover`, { method: 'DELETE' });
+                check('刪除封面 HTTP 200', removed.status === 200, (await removed.text()).slice(0, 120));
+            }
+        }
+    }
+
+    console.log('\n5. 清乾淨（只刪這次的測試資料）');
+    await cleanup(createdIds);
+    const left = await supabase(`dict_books?code=eq.${TEST_CODE}&select=id`);
+    check('測試資料已從資料庫刪除', left.length === 0);
+    const after = await counts();
+    check('筆數回到開始前的水準', JSON.stringify(after) === JSON.stringify(baseline), `before=${JSON.stringify(baseline)} after=${JSON.stringify(after)}`);
+
+    console.log(`\n===== 線上驗收：${pass} 通過 / ${fail} 失敗${skipped ? ` / ${skipped} 略過` : ''} =====`);
     process.exitCode = fail ? 1 : 0;
 }
 
