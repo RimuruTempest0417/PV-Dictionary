@@ -1,0 +1,91 @@
+/* 顏色／字級／間距變數（單一真實來源）
+ * 淺色票在 :root；深色票跟隨系統（prefers-color-scheme）。
+ * 改色時兩邊都要改（本專案目前沒有手動切換主題，所以只有這兩份）。
+ */
+:root {
+    /* 排版（Apple 規範：系統字體、字距與行高隨字級變化） */
+    --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang TC", "Helvetica Neue", system-ui, sans-serif;
+    --font-read: "New York", "Iowan Old Style", "Palatino", Georgia, "Times New Roman", serif;
+    --fs-display: clamp(1.5rem, 3.2vw, 2rem);
+    --fs-title: 1.1875rem;
+    --fs-body: 1rem;
+    --fs-small: 0.8125rem;
+    --tracking-display: -0.02em;
+    --tracking-title: -0.01em;
+    --lh-tight: 1.2;
+    --lh-body: 1.65;
+
+    /* 顏色 */
+    --bg: #f5f5f7;
+    --surface: rgba(255, 255, 255, 0.72);
+    --surface-solid: #ffffff;
+    --card: #ffffff;
+    --text: #1d1d1f;
+    --text-muted: #6e6e73;
+    --line: rgba(0, 0, 0, 0.09);
+    --line-strong: rgba(0, 0, 0, 0.16);
+    --field: #ffffff;
+    --accent: #0071e3;
+    --accent-hover: #0077ed;
+    --accent-text: #ffffff;
+    --accent-soft: rgba(0, 113, 227, 0.1);
+    --ok: #1d7f4b;
+    --ok-soft: rgba(29, 127, 75, 0.12);
+    --warn: #9a6400;
+    --warn-soft: rgba(154, 100, 0, 0.12);
+    --danger: #c8102e;
+    --danger-soft: rgba(200, 16, 46, 0.1);
+
+    /* 形狀與層次 */
+    --radius-lg: 18px;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --radius-pill: 999px;
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05), 0 10px 30px rgba(0, 0, 0, 0.06);
+    --shadow-pop: 0 18px 60px rgba(0, 0, 0, 0.22);
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+    /* 半透明材質（原則 12）：模糊 + 飽和度 */
+    --blur: saturate(180%) blur(20px);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #000000;
+        --surface: rgba(28, 28, 30, 0.72);
+        --surface-solid: #1c1c1e;
+        --card: #16161a;
+        --text: #f5f5f7;
+        --text-muted: #a1a1a6;
+        --line: rgba(255, 255, 255, 0.12);
+        --line-strong: rgba(255, 255, 255, 0.22);
+        --field: #1f1f23;
+        --accent: #0a84ff;
+        --accent-hover: #409cff;
+        --accent-text: #ffffff;
+        --accent-soft: rgba(10, 132, 255, 0.18);
+        --ok: #4cd07d;
+        --ok-soft: rgba(76, 208, 125, 0.16);
+        --warn: #f0b429;
+        --warn-soft: rgba(240, 180, 41, 0.16);
+        --danger: #ff6b6b;
+        --danger-soft: rgba(255, 107, 107, 0.16);
+        --shadow-card: none;
+        --shadow-pop: 0 24px 70px rgba(0, 0, 0, 0.6);
+    }
+}
+
+/* 減弱動態效果（原則 14）：不做位移與彈性，只留淡入 */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}

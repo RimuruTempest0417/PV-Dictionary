@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PV_Dictionary">
+    <rect width="64" height="64" rx="14" fill="#0071e3"/>
+    <path d="M18 16h20a8 8 0 0 1 8 8v24H26a8 8 0 0 1-8-8V16z" fill="#ffffff" opacity="0.95"/>
+    <path d="M26 16v32" stroke="#0071e3" stroke-width="2"/>
+    <path d="M31 28h11M31 36h11" stroke="#0071e3" stroke-width="3" stroke-linecap="round"/>
+</svg>

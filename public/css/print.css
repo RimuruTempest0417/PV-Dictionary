@@ -1,0 +1,71 @@
+/* 列印樣式（v0.0.1）
+ * CSP 是 style-src 'self'，所以列印樣式必須放在檔案裡（不能用行內 style）。
+ * 只印出「單元 + 生字表」，其餘介面元素一律隱藏。
+ */
+@page {
+    size: A4;
+    margin: 14mm;
+}
+
+body {
+    background-color: #fff;
+    color: #000;
+}
+
+.topbar,
+.footer,
+.admin,
+.picker,
+.modal,
+.toast,
+.unit-head-actions,
+.vocab-actions {
+    display: none !important;
+}
+
+.page {
+    max-width: none;
+    padding: 0;
+}
+
+.unit-card {
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+
+.unit-title {
+    font-size: 18pt;
+}
+
+.vocab-list {
+    gap: 0;
+}
+
+.vocab-item {
+    border: none;
+    border-bottom: 1px solid #ccc;
+    border-radius: 0;
+    padding: 6pt 0;
+    page-break-inside: avoid;
+    box-shadow: none;
+    transform: none;
+}
+
+.headword {
+    font-size: 13pt;
+}
+
+.ipa,
+.pos-badge,
+.meaning-en,
+.example-en {
+    color: #333;
+}
+
+.pos-badge,
+.tag-badge {
+    background: none;
+    border: 1px solid #999;
+    padding: 0 4px;
+}
