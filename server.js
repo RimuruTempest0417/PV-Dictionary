@@ -767,11 +767,20 @@ function createApp(options = {}) {
     app.get('/api/admin/users', requireRole('admin'), (req, res) => {
         const users = store.listUsers().map((user) => Object.assign(publicUser(user), {
             can_manage: Roles.canManageUser(req.user, user),
-            is_self: String(user.id) === String(req.user.id)
+            can_change_role: Roles.canManageUser(req.user, user),
+            is_self: String(user.id) === String(req.user.id),
+            grant_count: store.listGrants({ userId: user.id }).length
         }));
         res.json({
             users,
-            assignable_roles: Roles.ASSIGNABLE_ROLES.map((role) => ({ value: role, label: Roles.roleLabel(role) })),
+            /* web_manager 可以建立／指派同級，所以它的選單要包含 web_manager；其他角色不含。 */
+            assignable_roles: (Roles.canCreateRole(req.user, 'web_manager')
+                ? Roles.ASSIGNABLE_ROLES.concat(['web_manager'])
+                : Roles.ASSIGNABLE_ROLES).map((role) => ({ value: role, label: Roles.roleLabel(role) })),
+            /* 只有 web_manager 可以指派 admin／web_manager（比自己低的角色才在 assignable_roles 裡） */
+            can_assign_admin: Roles.canCreateRole(req.user, 'admin'),
+            can_assign_web_manager: Roles.canCreateRole(req.user, 'web_manager'),
+            can_delete_users: true,
             role_levels: Roles.ROLE_LEVELS
         });
     });
@@ -831,7 +840,11 @@ function createApp(options = {}) {
             if (!Roles.canCreateRole(req.user, body.role)) {
                 return res.status(403).json({ error: msg('ROLE_ASSIGN_FORBIDDEN'), code: 'ROLE_ASSIGN_FORBIDDEN' });
             }
-            patch.role = body.role;
+            /* 不能把最後一位網站管理員降級（否則沒人能再管理帳號） */
+            if (target.role === 'web_manager' && Roles.normalizeRole(body.role) !== 'web_manager' && store.countUsersByRole('web_manager') <= 1) {
+                return res.status(400).json({ error: msg('LAST_WEB_MANAGER'), code: 'LAST_WEB_MANAGER' });
+            }
+            patch.role = Roles.normalizeRole(body.role);
         }
         const updated = store.updateUser(target.id, patch);
         logAudit(store, {
@@ -842,6 +855,31 @@ function createApp(options = {}) {
             ip: req.ip
         });
         return res.json({ user: publicUser(updated) });
+    });
+
+    app.delete('/api/admin/users/:id', requireRole('admin'), (req, res) => {
+        const target = store.getUser(req.params.id);
+        if (!target) return res.status(404).json({ error: msg('USER_NOT_FOUND'), code: 'USER_NOT_FOUND' });
+        if (String(target.id) === String(req.user.id)) {
+            return res.status(400).json({ error: msg('CANNOT_DELETE_SELF'), code: 'CANNOT_DELETE_SELF' });
+        }
+        if (!Roles.canManageUser(req.user, target)) {
+            return res.status(403).json({ error: msg('USER_MANAGE_FORBIDDEN'), code: 'USER_MANAGE_FORBIDDEN' });
+        }
+        if (target.role === 'web_manager' && store.countUsersByRole('web_manager') <= 1) {
+            return res.status(400).json({ error: msg('LAST_WEB_MANAGER'), code: 'LAST_WEB_MANAGER' });
+        }
+        const grants = store.listGrants({ userId: target.id });
+        for (const grant of grants) store.deleteGrant(grant.id);
+        store.deleteUser(target.id);
+        logAudit(store, {
+            user: req.user,
+            action: 'USER_DELETE',
+            targetId: target.id,
+            details: `${target.username}（${target.role}${grants.length ? `，${grants.length} 筆授權一併刪除` : ''}）`,
+            ip: req.ip
+        });
+        return res.json({ ok: true, id: target.id, grants_removed: grants.length });
     });
 
     app.get('/api/admin/grants', requireRole('admin'), (req, res) => {
@@ -869,6 +907,12 @@ function createApp(options = {}) {
             return res.status(400).json({ error: msg('TARGET_NOT_FOUND'), code: 'TARGET_NOT_FOUND' });
         }
         if (!bookId && !unitId) return res.status(400).json({ error: msg('GRANT_TARGET_REQUIRED'), code: 'GRANT_TARGET_REQUIRED' });
+        const duplicate = store.listGrants({}).find((grant) => String(grant.user_id) === String(user.id)
+            && String(grant.book_id || '') === String(bookId || '')
+            && String(grant.unit_id || '') === String(unitId || ''));
+        if (duplicate) {
+            return res.status(409).json({ error: msg('GRANT_EXISTS'), code: 'GRANT_EXISTS', details: { username: user.username } });
+        }
         const grant = store.createGrant({
             user_id: user.id,
             book_id: bookId,
@@ -879,17 +923,26 @@ function createApp(options = {}) {
         });
         logAudit(store, {
             user: req.user,
-            action: 'USER_UPDATE',
+            action: 'GRANT_CREATE',
             targetId: user.id,
-            details: `授權 ${user.username} 編輯 ${unitId ? `單元 #${unitId}` : `書本 #${bookId}`}`,
+            details: `授權 ${user.username} ${unitId ? `單元 #${unitId}` : `書本 #${bookId}`}（${grant.can_publish ? '可發佈' : '可編輯'}）`,
             ip: req.ip
         });
         return res.status(201).json({ grant });
     });
 
     app.delete('/api/admin/grants/:id', requireRole('admin'), (req, res) => {
-        const ok = store.deleteGrant(req.params.id);
-        if (!ok) return res.status(404).json({ error: msg('GRANT_NOT_FOUND'), code: 'GRANT_NOT_FOUND' });
+        const existing = store.listGrants({}).find((grant) => String(grant.id) === String(req.params.id));
+        if (!existing) return res.status(404).json({ error: msg('GRANT_NOT_FOUND'), code: 'GRANT_NOT_FOUND' });
+        const owner = store.getUser(existing.user_id);
+        store.deleteGrant(existing.id);
+        logAudit(store, {
+            user: req.user,
+            action: 'GRANT_DELETE',
+            targetId: existing.user_id,
+            details: `移除 ${owner ? owner.username : `#${existing.user_id}`} 的授權（${existing.unit_id ? `單元 #${existing.unit_id}` : `書本 #${existing.book_id}`}）`,
+            ip: req.ip
+        });
         return res.json({ ok: true });
     });
 

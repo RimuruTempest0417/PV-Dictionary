@@ -936,3 +936,136 @@ code {
         flex: 1 1 auto;
     }
 }
+
+/* ---------------- 帳號管理與授權（v0.1.0） ----------------
+ * 表格在窄螢幕改成橫向捲動，不做卡片化（欄位多，卡片化反而看不出「同一列」的關係）。
+ */
+.panel.inset {
+    background-color: var(--surface);
+    box-shadow: none;
+}
+
+.table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--fs-small);
+}
+
+.data-table th,
+.data-table td {
+    text-align: left;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--line);
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.data-table th {
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.data-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.cell-hint {
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-top: 2px;
+}
+
+.cell-actions {
+    display: flex;
+    gap: var(--space-1);
+    flex-wrap: wrap;
+}
+
+.inline-select,
+.inline-input {
+    font: inherit;
+    color: var(--text);
+    background-color: var(--field);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    min-height: 32px;
+}
+
+.inline-input {
+    min-width: 200px;
+}
+
+.row-sub td {
+    background-color: var(--accent-soft);
+}
+
+.row-sub-inner {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.field-check {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--fs-small);
+    min-height: 44px;
+}
+
+.badge.is-ok {
+    background-color: var(--ok);
+}
+
+.badge.is-off {
+    background-color: var(--text-muted);
+}
+
+.grant-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.grant-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    justify-content: space-between;
+    background-color: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: var(--space-2) var(--space-3);
+    flex-wrap: wrap;
+}
+
+.grant-main {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.grant-scope {
+    color: var(--text-muted);
+    font-size: var(--fs-small);
+}
+
+.grant-empty {
+    color: var(--text-muted);
+    font-size: var(--fs-small);
+}

@@ -392,3 +392,166 @@ test('安全回應標頭：CSP 嚴格、沒有外洩框架資訊', async (t) => 
     assert.equal(res.headers.get('x-powered-by'), null);
     assert.equal(res.headers.get('x-frame-options'), 'DENY');
 });
+
+/* ================= v0.1.0 帳號管理與授權管理 ================= */
+
+test('帳號管理：建立 → 新帳號可以登入 → 改角色 → 停用後就登不進來', async (t) => {
+    const { base } = startServer(t);
+    const manager = await login(base, 'manager');
+
+    const created = await api(base, '/api/admin/users', {
+        method: 'POST', cookie: manager.cookie,
+        body: { username: 'teacherchan', display_name: 'Miss Chan', password: 'chan12345', role: 'teacher' }
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.data.user.username, 'teacherchan');
+    assert.equal(created.data.user.role, 'teacher');
+    assert.equal(created.data.user.password_hash, undefined, '回應不得包含密碼雜湊');
+
+    const newLogin = await login(base, 'teacherchan', 'chan12345');
+    assert.equal(newLogin.status, 200, '新帳號應可立即登入');
+
+    const id = created.data.user.id;
+    const changed = await api(base, `/api/admin/users/${id}`, {
+        method: 'PATCH', cookie: manager.cookie, body: { role: 'class_rep' }
+    });
+    assert.equal(changed.status, 200);
+    assert.equal(changed.data.user.role, 'class_rep');
+
+    const off = await api(base, `/api/admin/users/${id}`, {
+        method: 'PATCH', cookie: manager.cookie, body: { is_active: false }
+    });
+    assert.equal(off.status, 200);
+    assert.equal(off.data.user.is_active, false);
+    const blocked = await login(base, 'teacherchan', 'chan12345');
+    assert.equal(blocked.status, 401, '停用的帳號不能再登入');
+
+    const reset = await api(base, `/api/admin/users/${id}`, {
+        method: 'PATCH', cookie: manager.cookie, body: { password: 'newpass123' }
+    });
+    assert.equal(reset.status, 200);
+    assert.equal((await login(base, 'teacherchan', 'newpass123')).status, 401, '帳號仍是停用狀態');
+});
+
+test('帳號管理：不能管理自己、admin 不能動網站管理員、網站管理員之間可以互相管理', async (t) => {
+    const { base, store } = startServer(t);
+    const manager = await login(base, 'manager');
+    const webmanager = await login(base, 'webmanager');
+    const teacher = await login(base, 'teacher');
+
+    const me = store.findUserByUsername('manager');
+    const self = await api(base, `/api/admin/users/${me.id}`, {
+        method: 'PATCH', cookie: manager.cookie, body: { display_name: 'Renamed' }
+    });
+    assert.equal(self.status, 403, '不能改自己的帳號');
+
+    const selfDelete = await api(base, `/api/admin/users/${me.id}`, { method: 'DELETE', cookie: manager.cookie });
+    assert.equal(selfDelete.status, 400);
+    assert.equal(selfDelete.data.code, 'CANNOT_DELETE_SELF');
+
+    const ownerRow = store.findUserByUsername('webmanager');
+    const ownerEdit = await api(base, `/api/admin/users/${ownerRow.id}`, {
+        method: 'PATCH', cookie: manager.cookie, body: { is_active: false }
+    });
+    assert.equal(ownerEdit.status, 403, 'admin 不能停用網站管理員');
+
+    const ownerSelfDelete = await api(base, `/api/admin/users/${ownerRow.id}`, { method: 'DELETE', cookie: webmanager.cookie });
+    assert.equal(ownerSelfDelete.status, 400);
+    assert.equal(ownerSelfDelete.data.code, 'CANNOT_DELETE_SELF', '網站管理員也不能刪掉自己');
+
+    /* 網站管理員可以再建立一位同級，也可以把多餘的那位刪掉（但刪不掉唯一的自己） */
+    const secondOwner = await api(base, '/api/admin/users', {
+        method: 'POST', cookie: webmanager.cookie,
+        body: { username: 'webmanager2', password: 'webmgr12345', role: 'web_manager' }
+    });
+    assert.equal(secondOwner.status, 201, '網站管理員可以建立同級');
+    assert.equal(secondOwner.data.user.role, 'web_manager');
+    const secondId = secondOwner.data.user.id;
+    const secondDelete = await api(base, `/api/admin/users/${secondId}`, { method: 'DELETE', cookie: webmanager.cookie });
+    assert.equal(secondDelete.status, 200, '多餘的網站管理員可以移除');
+
+    const assignAdmin = await api(base, '/api/admin/users', {
+        method: 'POST', cookie: manager.cookie,
+        body: { username: 'admin2', password: 'admin12345', role: 'admin' }
+    });
+    assert.equal(assignAdmin.status, 403, 'admin 不能建立同級的 admin');
+
+    const teacherTries = await api(base, '/api/admin/users', {
+        method: 'POST', cookie: teacher.cookie, body: { username: 'x', password: 'xxxxxxxx', role: 'student' }
+    });
+    assert.equal(teacherTries.status, 403, '老師不能建立帳號');
+});
+
+test('刪除帳號：授權一併清掉，而且帳號真的消失', async (t) => {
+    const { base, store, ids } = startServer(t);
+    const manager = await login(base, 'manager');
+    const created = await api(base, '/api/admin/users', {
+        method: 'POST', cookie: manager.cookie,
+        body: { username: 'helper', password: 'helper1234', role: 'student' }
+    });
+    const id = created.data.user.id;
+
+    await api(base, '/api/admin/grants', {
+        method: 'POST', cookie: manager.cookie, body: { user_id: id, unit_id: ids.unit.id, can_edit: true }
+    });
+    assert.equal(store.listGrants({ userId: id }).length, 1);
+
+    const removed = await api(base, `/api/admin/users/${id}`, { method: 'DELETE', cookie: manager.cookie });
+    assert.equal(removed.status, 200);
+    assert.equal(removed.data.grants_removed, 1, '回報清掉的授權數');
+    assert.equal(store.getUser(id), null);
+    assert.equal(store.listGrants({ userId: id }).length, 0, '授權不能留成孤兒');
+});
+
+test('授權管理：授權某個單元後才能編輯；重複授權會擋；移除後就沒有編輯權', async (t) => {
+    const { base, store, ids } = startServer(t);
+    const manager = await login(base, 'manager');
+    const helper = await api(base, '/api/admin/users', {
+        method: 'POST', cookie: manager.cookie,
+        body: { username: 'helper', password: 'helper1234', role: 'teacher' }
+    });
+    const helperId = helper.data.user.id;
+    const helperLogin = await login(base, 'helper', 'helper1234');
+
+    /* 先把 helper 降成學生：學生對這個單元本來沒有編輯權，這樣才測得到「授權」的效果 */
+    await api(base, `/api/admin/users/${helperId}`, { method: 'PATCH', cookie: manager.cookie, body: { role: 'student' } });
+    const before = await api(base, `/api/units/${ids.unit.id}/entries`, {
+        method: 'POST', cookie: helperLogin.cookie, body: { headword: 'library', en_definition: 'a place with books' }
+    });
+    assert.equal(before.status, 403, '沒被授權的學生不能新增生字');
+
+    const granted = await api(base, '/api/admin/grants', {
+        method: 'POST', cookie: manager.cookie,
+        body: { user_id: helperId, unit_id: ids.unit.id, can_edit: true, can_publish: false }
+    });
+    assert.equal(granted.status, 201);
+    assert.equal(granted.data.grant.granted_by, 'manager', '要記下是誰授權的');
+
+    const duplicate = await api(base, '/api/admin/grants', {
+        method: 'POST', cookie: manager.cookie, body: { user_id: helperId, unit_id: ids.unit.id }
+    });
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.data.code, 'GRANT_EXISTS');
+
+    const after = await api(base, `/api/units/${ids.unit.id}/entries`, {
+        method: 'POST', cookie: helperLogin.cookie, body: { headword: 'library', en_definition: 'a place with books' }
+    });
+    assert.equal(after.status, 201);
+    assert.equal(after.data.entry.status, 'pending', '被授權但不能發佈的人，新增仍要審核');
+
+    const grantId = granted.data.grant.id;
+    const removed = await api(base, `/api/admin/grants/${grantId}`, { method: 'DELETE', cookie: manager.cookie });
+    assert.equal(removed.status, 200);
+    const gone = await api(base, `/api/admin/grants`, { method: 'GET', cookie: manager.cookie });
+    assert.equal(gone.data.grants.length, 0);
+
+    const again = await api(base, `/api/units/${ids.unit.id}/entries`, {
+        method: 'POST', cookie: helperLogin.cookie, body: { headword: 'gym', en_definition: 'a place to exercise' }
+    });
+    assert.equal(again.status, 403, '移除授權後就不能再編輯');
+
+    const logs = store.listAuditLogs({ limit: 50 });
+    const actions = logs.items.map((row) => row.action);
+    assert.equal(actions.includes('GRANT_CREATE'), true, '授權要留稽核紀錄');
+    assert.equal(actions.includes('GRANT_DELETE'), true, '移除授權也要留稽核紀錄');
+});

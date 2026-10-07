@@ -85,7 +85,8 @@ test('使用者管理：admin 以上，且不能管理自己或同級以上', ()
     assert.equal(Roles.canManageUser(admin, { id: 1, role: 'admin' }), false, '也不能管理自己');
     assert.equal(Roles.canManageUser(owner, admin), true, 'web_manager 可以管理 admin');
     assert.equal(Roles.canManageUser(admin, owner), false, 'admin 不能動 web_manager');
-    assert.equal(Roles.canManageUser(owner, { id: 2, role: 'web_manager' }), false, 'web_manager 也是不能改自己');
+    assert.equal(Roles.canManageUser(owner, { id: 9, role: 'web_manager' }), true, '網站管理員之間可以互相管理');
+    assert.equal(Roles.canManageUser(owner, { id: 2, role: 'web_manager' }), false, '但還是不能改自己');
 });
 
 test('建立角色：必須高於目標；web_manager 只能由 web_manager 建立', () => {

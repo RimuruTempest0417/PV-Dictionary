@@ -294,7 +294,7 @@
         const list = document.getElementById('auditList');
         if (!block || block.hidden || !window.PDAuth.can('can_view_audit')) return;
         try {
-            const data = await api.get('/api/admin/audit-logs?limit=12');
+            const data = await api.get('/api/admin/audit-logs?limit=25');
             clear(list);
             if (!data.logs.length) {
                 list.appendChild(el('li', { class: 'audit-item', text: t('audit.empty') }));

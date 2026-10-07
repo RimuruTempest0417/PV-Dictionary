@@ -1,0 +1,299 @@
+/* 帳號管理與授權管理的真實瀏覽器驗收（v0.1.0）
+ *
+ * 要守住的行為：
+ *   1. 只有 admin 以上看得到「帳號管理 / 授權管理」，老師登入後看不到
+ *   2. 管理員真的能在畫面上建立帳號 → 新帳號立刻出現在表格，而且能用新密碼登入
+ *   3. 行內改角色、行內重設密碼、停用、兩段式刪除都真的有效果
+ *   4. 授權某個單元之後，被授權的人真的能編輯那個單元（未授權時 403）；移除後又回到 403
+ *   5. 稽核紀錄用目前語言顯示新動作（Create user / Grant permission）
+ *   6. 版面不溢出、無 CSP 違規、無前端例外、不下載、不寫截圖
+ */
+const fs = require('node:fs');
+const path = require('node:path');
+
+const { Browser, sleep } = require('./lib/cdp');
+const { STUBS, startApp, loginViaUi, logoutViaUi, visibleIds } = require('./lib/harness');
+
+const PASSWORD = 'pass1234';
+
+let passed = 0;
+let failed = 0;
+const failures = [];
+
+function check(label, condition, detail) {
+    if (condition) {
+        passed += 1;
+        console.log(`  ✔ ${label}`);
+    } else {
+        failed += 1;
+        failures.push(label + (detail ? `（${detail}）` : ''));
+        console.log(`  ✖ ${label}${detail ? ` → ${detail}` : ''}`);
+    }
+}
+
+/* 頁面內用的小工具：靠帳號文字找到那一列（避免依賴列序） */
+const ROW_HELPERS = `
+    window.__rowFor = (username) => [...document.querySelectorAll('#usersTableBody tr')]
+        .find((tr) => {
+            const cell = tr.querySelector('td strong');
+            return cell && cell.textContent.trim() === username;
+        }) || null;
+    return true;
+`;
+
+async function loginAs(base, username, password) {
+    const res = await fetch(`${base}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    });
+    return res.status;
+}
+
+async function apiAs(base, username, password, url, body) {
+    const login = await fetch(`${base}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    });
+    const cookies = typeof login.headers.getSetCookie === 'function' ? login.headers.getSetCookie() : [];
+    const cookie = cookies.map((line) => line.split(';')[0]).join('; ');
+    const res = await fetch(`${base}${url}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify(body || {})
+    });
+    return res.status;
+}
+
+async function main() {
+    const app = startApp({ prefix: 'pv-users-' });
+    const store = app.store;
+    const book = store.createBook({ code: 'B5A', name: 'Book 5A', sort_order: 1, is_published: true });
+    const unit = store.createUnit({ book_id: book.id, unit_no: 1, title: 'My New School', sort_order: 1, is_published: true });
+    store.createEntry({
+        unit_id: unit.id, headword: 'campus', headword_norm: 'campus',
+        part_of_speech: 'n.', zh_meaning: '校園', en_definition: 'the land of a school',
+        status: 'published', sort_order: 1, created_by: 'seed'
+    });
+
+    const browser = await Browser.launch({ width: 1360, height: 1000 });
+    let exitCode = 0;
+    try {
+        await browser.goto(`${app.base}/`);
+        await browser.evaluate(STUBS);
+        await browser.waitFor(`document.getElementById('bookTabs').children.length > 0`);
+
+        console.log('\n【1】訪客與老師都看不到帳號管理');
+        const guestVisible = await visibleIds(browser, ['usersBlock', 'grantsBlock']);
+        check('訪客看不到帳號管理與授權管理', guestVisible.length === 0, guestVisible.join('、'));
+
+        await loginViaUi(browser, { username: 'teacher' });
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await sleep(500);
+        const teacherVisible = await visibleIds(browser, ['usersBlock', 'grantsBlock']);
+        check('老師打開「管理」也看不到帳號管理', teacherVisible.length === 0, teacherVisible.join('、'));
+        const teacherApi = await apiAs(app.base, 'teacher', PASSWORD, '/api/admin/users', {});
+        check('老師直接打 API 也是 403（前端藏起來不算防護）', teacherApi === 403, String(teacherApi));
+
+        console.log('\n【2】管理員登入後看得到帳號管理');
+        await logoutViaUi(browser);
+        await loginViaUi(browser, { username: 'manager', expectText: 'Web administrator' });
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await browser.evaluate(ROW_HELPERS);
+        await browser.waitFor(`document.querySelectorAll('#usersTableBody tr').length >= 5`, { timeout: 8000 });
+        const adminVisible = await visibleIds(browser, ['usersBlock', 'grantsBlock']);
+        check('管理員看得到帳號管理與授權管理', adminVisible.length === 2, adminVisible.join('、'));
+        const tableInfo = await browser.evaluate(`
+            return {
+                rows: [...document.querySelectorAll('#usersTableBody tr')].length,
+                accounts: [...document.querySelectorAll('#usersTableBody td strong')].map((n) => n.textContent),
+                hasSelfBadge: document.getElementById('usersTableBody').textContent.includes('you'),
+                roleSelects: document.querySelectorAll('#usersTableBody select[data-action="role"]').length,
+                headers: [...document.querySelectorAll('#usersBlock thead th')].map((th) => th.textContent)
+            };
+        `);
+        check('五個種子帳號都列出來', tableInfo.rows === 5 && tableInfo.accounts.includes('teacher'), JSON.stringify(tableInfo.accounts));
+        check('自己的那一列有標記（you）', tableInfo.hasSelfBadge);
+        check('比自己低的角色可以行內改（admin 不能改自己／同級／網站管理員）', tableInfo.roleSelects === 3, String(tableInfo.roleSelects));
+        check('表頭是英文', tableInfo.headers.includes('Account') && tableInfo.headers.includes('Role'), tableInfo.headers.join(','));
+
+        console.log('\n【3】建立帳號（畫面操作 → 表格出現 → 新帳號可登入）');
+        await browser.evaluate(`document.getElementById('newUserBtn').click(); return true;`);
+        await browser.waitFor(`getComputedStyle(document.getElementById('userForm')).display !== 'none'`);
+        await browser.evaluate(`
+            document.getElementById('fUsername').value = 'teacherchan';
+            document.getElementById('fDisplayName').value = 'Miss Chan';
+            document.getElementById('fPassword').value = 'chan123456';
+            document.getElementById('fUserRole').value = 'teacher';
+            document.forms.userForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        await browser.waitFor(`window.__rowFor('teacherchan') !== null`, { timeout: 8000 });
+        const createdRow = await browser.evaluate(`
+            const tr = window.__rowFor('teacherchan');
+            return { cells: [...tr.querySelectorAll('td')].map((td) => td.textContent.trim()), hidden: getComputedStyle(document.getElementById('userForm')).display };
+        `);
+        check('新帳號出現在表格且名稱正確', createdRow.cells[1] === 'Miss Chan', JSON.stringify(createdRow.cells));
+        check('新帳號預設啟用中', createdRow.cells[3].includes('Active'), createdRow.cells[3]);
+        check('送出後表單自動關起來', createdRow.hidden === 'none', createdRow.hidden);
+        check('新帳號可以用新密碼登入', (await loginAs(app.base, 'teacherchan', 'chan123456')) === 200);
+
+        console.log('\n【4】行內改角色、重設密碼、停用');
+        const teacherChanId = store.findUserByUsername('teacherchan').id;
+        await browser.evaluate(`
+            const select = document.querySelector('#usersTableBody select[data-user-id="${teacherChanId}"]');
+            select.value = 'class_rep';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.querySelector('#usersTableBody select[data-user-id="${teacherChanId}"]').value === 'class_rep'`, { timeout: 8000 });
+        check('改角色成功（資料庫也是新角色）', store.findUserByUsername('teacherchan').role === 'class_rep', store.findUserByUsername('teacherchan').role);
+
+        await browser.evaluate(`
+            const tr = window.__rowFor('teacherchan');
+            tr.querySelector('[data-action="reset-password"]').click();
+            return true;
+        `);
+        await browser.waitFor(`document.querySelector('#usersTableBody [data-field="new-password"]') !== null`, { timeout: 5000 });
+        await browser.evaluate(`
+            document.querySelector('#usersTableBody [data-field="new-password"]').value = 'reset99999';
+            document.querySelector('#usersTableBody [data-action="save-password"]').click();
+            return true;
+        `);
+        await browser.waitFor(`document.querySelector('#usersTableBody [data-field="new-password"]') === null`, { timeout: 8000 });
+        check('重設密碼後可以用新密碼登入', (await loginAs(app.base, 'teacherchan', 'reset99999')) === 200);
+        check('舊密碼失效', (await loginAs(app.base, 'teacherchan', 'chan123456')) === 401);
+
+        await browser.evaluate(`
+            window.__rowFor('teacherchan').querySelector('[data-action="toggle-active"]').click();
+            return true;
+        `);
+        await browser.waitFor(`window.__rowFor('teacherchan').textContent.includes('Disabled')`, { timeout: 8000 });
+        check('停用後資料庫也標成停用', store.findUserByUsername('teacherchan').is_active === false);
+        check('停用後登不進來', (await loginAs(app.base, 'teacherchan', 'reset99999')) === 401);
+
+        console.log('\n【5】刪除帳號要按兩次（防手滑）');
+        await browser.evaluate(`
+            window.__rowFor('teacherchan').querySelector('[data-action="delete-user"]').click();
+            return true;
+        `);
+        await browser.waitFor(`window.__rowFor('teacherchan') && window.__rowFor('teacherchan').textContent.includes('Press again to confirm')`, { timeout: 5000 });
+        check('第一次按只進入確認狀態，帳號還在', store.findUserByUsername('teacherchan') !== null);
+        await browser.evaluate(`
+            window.__rowFor('teacherchan').querySelector('[data-action="delete-user"]').click();
+            return true;
+        `);
+        await browser.waitFor(`window.__rowFor('teacherchan') === null`, { timeout: 8000 });
+        check('第二次按才真的刪掉', store.findUserByUsername('teacherchan') === null);
+
+        console.log('\n【6】授權管理：授權單元 → 真的能編輯 → 移除 → 又不能');
+        const studentId = store.findUserByUsername('student').id;
+        const beforeGrant = await apiAs(app.base, 'student', PASSWORD, `/api/units/${unit.id}/entries`, { headword: 'library', en_definition: 'a place with books' });
+        check('授權前，學生對這個單元是 403', beforeGrant === 403, String(beforeGrant));
+
+        await browser.evaluate(`document.getElementById('newGrantBtn').click(); return true;`);
+        await browser.waitFor(`getComputedStyle(document.getElementById('grantForm')).display !== 'none'`);
+        await browser.evaluate(`
+            document.getElementById('fGrantUser').value = '${studentId}';
+            const scope = document.getElementById('fGrantScope');
+            scope.value = 'unit';
+            scope.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.querySelectorAll('#fGrantUnit option').length > 0`, { timeout: 8000 });
+        const unitOptionValue = await browser.evaluate(`return document.getElementById('fGrantUnit').value;`);
+        await browser.evaluate(`
+            document.getElementById('fGrantPublish').checked = true;
+            document.forms.grantForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.querySelectorAll('#grantsList .grant-item').length === 1`, { timeout: 8000 });
+        const grantText = await browser.evaluate(`return document.querySelector('#grantsList .grant-item').textContent;`);
+        check('授權後清單出現那一筆（含書本與單元）', grantText.includes('student') && grantText.includes('Unit 1'), grantText);
+        check('標示為可編輯＋發佈', grantText.includes('Edit + publish'), grantText);
+        check('單位選單帶入的是真正的單元', String(unitOptionValue) === String(unit.id), `${unitOptionValue} vs ${unit.id}`);
+
+        const afterGrant = await apiAs(app.base, 'student', PASSWORD, `/api/units/${unit.id}/entries`, { headword: 'library', en_definition: 'a place with books' });
+        check('授權後，同樣的學生可以新增生字', afterGrant === 201, String(afterGrant));
+
+        await browser.evaluate(`document.querySelector('#grantsList [data-action="delete-grant"]').click(); return true;`);
+        await browser.waitFor(`document.querySelector('#grantsList [data-action="delete-grant"]').textContent.includes('Press again to confirm')`, { timeout: 5000 });
+        check('移除授權也要兩段式確認', store.listGrants({}).length === 1);
+        await browser.evaluate(`document.querySelector('#grantsList [data-action="delete-grant"]').click(); return true;`);
+        await browser.waitFor(`document.querySelectorAll('#grantsList .grant-item').length === 0`, { timeout: 8000 });
+        check('移除後清單變空（顯示提示）', (await browser.evaluate(`return document.getElementById('grantsList').textContent;`)).includes('No extra permissions'), '');
+        const afterRemove = await apiAs(app.base, 'student', PASSWORD, `/api/units/${unit.id}/entries`, { headword: 'gym', en_definition: 'a place to exercise' });
+        check('移除授權後又回到 403', afterRemove === 403, String(afterRemove));
+
+        console.log('\n【7】稽核紀錄：新動作有紀錄、標籤跟著語言');
+        await browser.evaluate(`document.getElementById('auditRefreshBtn').click(); return true;`);
+        /* 重新整理是非同步的：要等「新的動作」真的出現在清單裡，不是等清單非空（舊資料也會非空） */
+        await browser.waitFor(`document.getElementById('auditList').textContent.includes('Remove permission')`, { timeout: 8000 });
+        const auditInfo = await browser.evaluate(`return {
+            items: document.querySelectorAll('#auditList > li').length,
+            text: document.getElementById('auditList').textContent,
+            labelUserCreate: window.PDI18n.auditActionLabel('USER_CREATE', ''),
+            labelUserDelete: window.PDI18n.auditActionLabel('USER_DELETE', '')
+        };`);
+        check('稽核面板列出紀錄', auditInfo.items > 0, `${auditInfo.items} 筆`);
+        check('授權與移除授權都出現在紀錄裡',
+            auditInfo.text.includes('Grant permission') && auditInfo.text.includes('Remove permission'), '');
+        check('帳號管理的新動作標籤是英文（Create user / Delete user）',
+            auditInfo.labelUserCreate === 'Create user' && auditInfo.labelUserDelete === 'Delete user',
+            JSON.stringify([auditInfo.labelUserCreate, auditInfo.labelUserDelete]));
+
+        console.log('\n【8】切中文後新面板跟著翻譯 + 版面不溢出');
+        await browser.evaluate(`document.querySelector('#langSwitch [data-lang="zh"]').click(); return true;`);
+        await sleep(600);
+        const zhPanels = await browser.evaluate(`return {
+            usersTitle: document.querySelector('#usersBlock .panel-title').textContent,
+            grantsTitle: document.querySelector('#grantsBlock .panel-title').textContent,
+            header: document.querySelector('#usersBlock thead th').textContent,
+            newUserBtn: document.getElementById('newUserBtn').textContent,
+            audit: document.getElementById('auditList').textContent
+        };`);
+        check('帳號管理標題變中文', zhPanels.usersTitle.includes('帳號管理'), zhPanels.usersTitle);
+        check('授權管理標題變中文', zhPanels.grantsTitle.includes('授權管理'), zhPanels.grantsTitle);
+        check('表頭變中文', zhPanels.header === '帳號', zhPanels.header);
+        check('按鈕變中文', zhPanels.newUserBtn.includes('新增帳號'), zhPanels.newUserBtn);
+        check('稽核動作標籤也變中文', zhPanels.audit.includes('新增授權'), '');
+
+        await browser.setViewport(402, 874, true);
+        await sleep(400);
+        const overflow = await browser.evaluate(`return document.documentElement.scrollWidth - window.innerWidth;`);
+        check('手機版（402px）帳號管理也不會橫向溢出', overflow <= 1, `溢出 ${overflow}px`);
+        const tableScrolls = await browser.evaluate(`
+            const wrap = document.querySelector('#usersBlock .table-wrap');
+            return wrap ? wrap.scrollWidth > wrap.clientWidth : false;
+        `);
+        check('窄螢幕時表格自己在框內橫向捲動（不是把整頁撐開）', tableScrolls === true);
+        await browser.setViewport(1360, 1000, false);
+        await sleep(300);
+
+        console.log('\n【9】收尾：沒有 CSP 違規、例外、下載、截圖');
+        const csp = await browser.evaluate(`return window.__cspViolations || [];`);
+        check('沒有 CSP 違規', csp.length === 0, JSON.stringify(csp));
+        check('沒有前端例外', browser.pageErrors.length === 0, browser.pageErrors.join(' | '));
+        const shot = await browser.screenshot(path.join(app.dir, 'should-not-exist.png'));
+        check('截圖預設不寫檔', shot === null && !fs.existsSync(path.join(app.dir, 'should-not-exist.png')));
+        check('檢查過程沒有觸發任何下載', (await browser.evaluate(`return (window.__downloads || []).length;`)) === 0);
+    } catch (err) {
+        failed += 1;
+        failures.push(`執行錯誤：${err.message}`);
+        console.error('\n✖ 檢查中斷：', err.message);
+        exitCode = 1;
+    } finally {
+        await browser.close();
+        app.cleanup();
+    }
+
+    console.log(`\n===== 帳號管理驗收：${passed} 通過 / ${failed} 失敗 =====`);
+    if (failures.length) {
+        console.log('失敗項目：');
+        for (const item of failures) console.log(` - ${item}`);
+    }
+    if (failed || exitCode) process.exit(1);
+}
+
+main();

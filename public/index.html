@@ -179,6 +179,89 @@
             </div>
             <ul id="auditList" class="audit-list"></ul>
         </div>
+
+        <div id="usersBlock" class="panel" hidden>
+            <div class="panel-head">
+                <h2 class="panel-title" data-i18n="users.title">👥 Accounts</h2>
+                <button id="usersRefreshBtn" class="btn btn-ghost" type="button" data-i18n="users.reload">Reload</button>
+            </div>
+            <p class="panel-note" data-i18n="users.note"></p>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th data-i18n="users.colAccount">Account</th>
+                            <th data-i18n="users.colName">Display name</th>
+                            <th data-i18n="users.colRole">Role</th>
+                            <th data-i18n="users.colStatus">Status</th>
+                            <th data-i18n="users.colLastLogin">Last sign-in</th>
+                            <th data-i18n="users.colActions">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTableBody"></tbody>
+                </table>
+            </div>
+            <p class="hint" id="usersMsg" role="status"></p>
+            <div class="form-actions">
+                <button id="newUserBtn" class="btn btn-secondary" type="button" data-i18n="users.create">➕ New account</button>
+            </div>
+            <form id="userForm" class="panel form inset" hidden>
+                <div class="panel-head">
+                    <h3 class="panel-title" id="userFormTitle"></h3>
+                    <p class="panel-note" data-i18n="users.createNote"></p>
+                </div>
+                <input type="hidden" id="fUserId">
+                <div class="field-grid">
+                    <label class="field" id="userUsernameField"><span class="field-label" data-i18n="users.username">Account *</span>
+                        <input id="fUsername" type="text" maxlength="32" autocomplete="off" placeholder="teacherchan"></label>
+                    <label class="field"><span class="field-label" data-i18n="users.displayName">Display name</span>
+                        <input id="fDisplayName" type="text" maxlength="40" placeholder="Miss Chan"></label>
+                    <label class="field" id="userPasswordField"><span class="field-label" data-i18n="users.password">Password *</span>
+                        <input id="fPassword" type="password" maxlength="64" autocomplete="new-password"></label>
+                    <label class="field" id="userRoleField"><span class="field-label" data-i18n="users.colRole">Role</span>
+                        <select id="fUserRole"></select></label>
+                </div>
+                <div class="form-actions">
+                    <button id="saveUserBtn" class="btn btn-primary" type="submit" data-i18n="entry.save">Save</button>
+                    <button id="userCancelBtn" class="btn btn-ghost" type="button" data-i18n="entry.cancel">Cancel</button>
+                    <span id="userFormMsg" class="form-msg" role="status"></span>
+                </div>
+            </form>
+        </div>
+
+        <div id="grantsBlock" class="panel" hidden>
+            <div class="panel-head">
+                <h2 class="panel-title" data-i18n="grants.title">🔑 Permissions</h2>
+                <button id="grantsRefreshBtn" class="btn btn-ghost" type="button" data-i18n="users.reload">Reload</button>
+            </div>
+            <p class="panel-note" data-i18n="grants.note"></p>
+            <ul id="grantsList" class="grant-list"></ul>
+            <form id="grantForm" class="form inset" hidden>
+                <div class="field-grid">
+                    <label class="field"><span class="field-label" data-i18n="grants.person">Person</span>
+                        <select id="fGrantUser"></select></label>
+                    <label class="field"><span class="field-label" data-i18n="grants.scope">Scope</span>
+                        <select id="fGrantScope">
+                            <option value="book" data-i18n="grants.bookScope">Whole book</option>
+                            <option value="unit" data-i18n="grants.unitScope">One unit</option>
+                        </select></label>
+                    <label class="field" id="grantBookField"><span class="field-label" data-i18n="grants.selectBook">Choose a book</span>
+                        <select id="fGrantBook"></select></label>
+                    <label class="field" id="grantUnitField" hidden><span class="field-label" data-i18n="grants.selectUnit">Choose a unit</span>
+                        <select id="fGrantUnit"></select></label>
+                    <label class="field-check"><input type="checkbox" id="fGrantPublish">
+                        <span data-i18n="grants.canPublish">Can also publish</span></label>
+                </div>
+                <div class="form-actions">
+                    <button id="saveGrantBtn" class="btn btn-primary" type="submit" data-i18n="grants.add">Grant</button>
+                    <button id="grantCancelBtn" class="btn btn-ghost" type="button" data-i18n="entry.cancel">Cancel</button>
+                    <span id="grantMsg" class="form-msg" role="status"></span>
+                </div>
+            </form>
+            <div class="form-actions">
+                <button id="newGrantBtn" class="btn btn-secondary" type="button" data-i18n="grants.add">Grant</button>
+            </div>
+        </div>
     </section>
 </main>
 
@@ -235,6 +318,7 @@
 <script src="/js/auth.js"></script>
 <script src="/js/vocab.js"></script>
 <script src="/js/admin.js"></script>
+<script src="/js/users.js"></script>
 <script src="/js/app.js"></script>
 </body>
 </html>

@@ -69,8 +69,8 @@ test('前端沒有行內事件屬性與行內 style（CSP 會把它們擋成啞�
 test('前端用到的元素 id 真的存在（getElementById 找不到就會靜默不做事）', () => {
     const html = fs.readFileSync(path.join(ROOT, 'public/index.html'), 'utf8');
     const htmlIds = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
-    /* 這幾個是 JS 動態產生的（標題列按鈕），HTML 裡沒有是正常的 */
-    const createdByJs = new Set(['loginBtn', 'logoutBtn', 'adminToggleBtn']);
+    /* 這幾個是 JS 動態產生的（標題列按鈕、行內重設密碼訊息），HTML 裡沒有是正常的 */
+    const createdByJs = new Set(['loginBtn', 'logoutBtn', 'adminToggleBtn', 'rowPasswordMsg']);
     const files = fs.readdirSync(path.join(ROOT, 'public/js')).filter((f) => f.endsWith('.js'));
     const missing = [];
     for (const file of files) {

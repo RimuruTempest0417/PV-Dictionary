@@ -3,7 +3,7 @@
 線上英文生字字典：學生點書本 → 點單元 → 看生字表（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.0.3（Demo）**
+- 目前版本：**v0.1.0（Demo）**
 - 規劃書：`docs/規劃書-v0.0.1.md`
 - 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie、介面預設英文可切中文
 
@@ -49,6 +49,22 @@ grep SEED_ .env
   所以「同一個錯誤」在兩種語言下都會是對的語言，而 API 對外（curl／腳本）也維持英文。
 - `tests/i18n.test.js` 會擋住「翻譯漏了某個鍵」「程式用了不存在的鍵」「兩邊插值變數不一致」
   「新的 error code 沒有翻譯」這四種靜默錯誤。
+
+---
+
+## 資料庫與上線狀態
+
+| 環境 | 資料層 | 狀態 |
+|---|---|---|
+| 本機 Demo | 本機 JSON（`data/store.json`，不進 Git） | 可用，內容清空由你手動加入 |
+| 線上（Vercel） | Supabase PostgreSQL | **專案已建好、schema 已套用**（見下），adapter 與部署待做 |
+
+Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-southeast-1`，免費方案），
+7 張表 `dict_*` 已依 `migrations/2026-10-08-v0.0.1-init.sql` 建立，RLS 全開且不加 policy、
+已撤銷 anon／authenticated 權限（只有 service_role 進得去）。
+
+上線前要準備（**由你自己填，不要貼在對話裡**）：
+`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`JWT_SECRET`、`DATA_BACKEND=supabase`、`SITE_URL`。
 
 ---
 
@@ -123,12 +139,13 @@ guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin
 
 ```bash
 npm run check:syntax   # 所有 JS 語法檢查 + server.js 模組載入檢查
-npm test               # 45 項：角色權限矩陣、資料層、匯入解析、i18n 完整性、API 端到端、守門檢查
-npm run check:browser  # 94 項：真 Chrome 三支檢查（劇本 39 ＋ 空白起步 30 ＋ 語言切換 25）
+npm test               # 49 項：角色權限矩陣、資料層、匯入解析、i18n 完整性、API 端到端（含帳號與授權）、守門檢查
+npm run check:browser  # 四支真 Chrome 檢查（劇本 39 ＋ 空白起步 30 ＋ 語言切換 25 ＋ 帳號管理 40）
 ```
 
 瀏覽器驗收涵蓋：訪客瀏覽與 TTS 播放、搜尋、管理員新增／批次匯入／刪除（兩段式確認）、
 老師錄音上傳與播放來源切換、新增單元與書本、科代表待審核 → 老師核准 → 訪客可見、
+**帳號管理（建立／改角色／重設密碼／停用／刪除）與授權管理（授權單元後真的能編輯、移除後又不行）**、
 **資料全空時「開站就是學生視角、彈窗可以開也可以關、管理員能建立第一本書」**、
 **預設英文／切換中文／重新載入記得選擇／後端錯誤訊息跟著語言走**、
 版面不溢出（含 402px 手機）、無 CSP 違規、無前端例外、無下載、不寫截圖。

@@ -248,6 +248,10 @@
         }));
         const auditBlock = document.getElementById('auditBlock');
         auditBlock.hidden = !window.PDAuth.can('can_view_audit');
+        /* 帳號管理與授權管理：只有 admin 以上看得到（後端一樣會再檢查） */
+        const manageUsers = window.PDAuth.can('can_manage_users');
+        document.getElementById('usersBlock').hidden = !manageUsers;
+        document.getElementById('grantsBlock').hidden = !manageUsers;
     }
 
     async function toggleAdminSection() {
@@ -258,6 +262,7 @@
         if (section.hidden) return;
         await window.PDAdmin.refreshAvailability();
         await window.PDAdmin.loadAudit();
+        await window.PDUsers.refresh();
     }
 
     /* 切換語言：靜態文字由 i18n 掃描更新，動態內容靠 pd:langchange 事件重畫 */
@@ -309,6 +314,10 @@
         await reloadUnit();
         const canEdit = window.PDAuth.can('can_edit');
         if (!canEdit) document.getElementById('adminSection').hidden = true;
+        if (window.PDAuth.user) {
+            document.getElementById('usersBlock').hidden = !window.PDAuth.can('can_manage_users');
+            document.getElementById('grantsBlock').hidden = !window.PDAuth.can('can_manage_users');
+        }
         renderUnitHead();
         renderVocab();
     }
@@ -342,6 +351,7 @@
             window.PDAdmin.renderPending(state.entries);
             window.PDAdmin.refreshAvailability();
             if (!document.getElementById('auditBlock').hidden) window.PDAdmin.loadAudit();
+            if (!document.getElementById('usersBlock').hidden) window.PDUsers.refresh();
             toast(event.detail.lang === 'zh' ? t('toast.langChanged') : 'Language: English');
         });
         document.getElementById('printBtn').addEventListener('click', () => window.print());
@@ -366,6 +376,7 @@
             /* 未登入是正常狀態 */
         }
         window.PDAdmin.init();
+        window.PDUsers.init();
         bindEvents();
         renderAuth();
         try {
