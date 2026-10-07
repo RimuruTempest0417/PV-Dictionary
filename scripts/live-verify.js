@@ -14,6 +14,8 @@
  */
 require('dotenv').config();
 
+const crypto = require('crypto');
+
 const BASE = (() => {
     const i = process.argv.indexOf('--base');
     return (i > -1 && process.argv[i + 1]) || process.env.LIVE_BASE || 'https://pv-dictionary-mylearning.vercel.app';
@@ -21,6 +23,8 @@ const BASE = (() => {
 const HOST = new URL(BASE).origin;
 const TEST_CODE = '__live_verify__';
 const NO_AUTH = process.argv.includes('--no-auth');
+const EPHEMERAL = process.argv.includes('--ephemeral-teacher') || process.env.VERIFY_EPHEMERAL_TEACHER === '1';
+const TEMP_USER = '__live_verify_teacher__';
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AARAAI/wH+AB0AAAAASUVORK5CYII=';
 
 let pass = 0;
@@ -75,6 +79,12 @@ async function cleanup(bookIds) {
         await supabase(`dict_audit_logs?target_id=eq.${id}`, { method: 'DELETE', body: null });
     }
     await supabase(`dict_books?code=eq.${TEST_CODE}`, { method: 'DELETE', body: null });
+    /* 臨時帳號（--ephemeral-teacher 用的）連它的稽核一起清掉 */
+    const temp = await supabase(`dict_users?username=eq.${TEMP_USER}&select=id`);
+    for (const row of temp) {
+        await supabase(`dict_audit_logs?or=(user_id.eq.${row.id},user_id.eq.${TEMP_USER})`, { method: 'DELETE', body: null });
+    }
+    await supabase(`dict_users?username=eq.${TEMP_USER}`, { method: 'DELETE', body: null });
 }
 
 async function main() {
@@ -142,6 +152,65 @@ async function main() {
         check('清單沒有把 base64 一起回傳', JSON.stringify(row || {}).indexOf(PNG_1PX.slice(0, 40)) === -1);
     } catch (err) {
         check('資料庫收得下封面欄位（INSERT 成功）', false, err.message);
+    }
+
+    console.log('\n3b. 臨時教師帳號：走一次「建書 → 上傳封面」（不碰你的帳號，結束後刪掉）');
+    if (!EPHEMERAL) {
+        skip('臨時帳號上傳驗收', '加 --ephemeral-teacher 就會跑（會建立並刪除一個臨時老師帳號）');
+    } else {
+        try {
+            const { hashPassword } = require('../lib/passwords');
+            const tempPassword = crypto.randomBytes(24).toString('base64url');
+            const maxUsers = await supabase('dict_users?select=id&order=id.desc&limit=1');
+            await supabase('dict_users', {
+                method: 'POST',
+                body: {
+                    id: (maxUsers[0] ? Number(maxUsers[0].id) : 0) + 1,
+                    username: TEMP_USER,
+                    display_name: 'Live verify (temp)',
+                    role: 'teacher',
+                    is_active: true,
+                    password_hash: hashPassword(tempPassword)
+                }
+            });
+            const login = await fetch(`${BASE}/api/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Origin: HOST },
+                body: JSON.stringify({ username: TEMP_USER, password: tempPassword })
+            });
+            check('臨時教師帳號可以登入', login.status === 200, `HTTP ${login.status}`);
+            const setCookie = login.headers.getSetCookie ? login.headers.getSetCookie() : [login.headers.get('set-cookie') || ''];
+            const cookie = setCookie.map((row) => String(row).split(';')[0]).filter(Boolean).join('; ');
+            const authed = (path, options) => fetch(`${BASE}${path}`, Object.assign({}, options, {
+                headers: Object.assign({ Cookie: cookie, Origin: HOST }, (options && options.headers) || {})
+            }));
+
+            const created = await authed('/api/books', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: 'ZZ Live Verify', code: `${TEST_CODE}_api`, is_published: false })
+            });
+            const createdBody = await created.json();
+            check('臨時教師可以建立書本（HTTP 201）', created.status === 201, JSON.stringify(createdBody).slice(0, 140));
+            const bookId = createdBody.book && createdBody.book.id;
+            if (bookId) createdIds.push(bookId);
+
+            if (bookId) {
+                const upload = await authed(`/api/books/${bookId}/cover`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ data: `data:image/png;base64,${PNG_1PX}`, mime: 'image/png' })
+                });
+                const uploadText = await upload.text();
+                check('上傳書本封面 HTTP 201（＝你回報的那個 500）', upload.status === 201, uploadText.slice(0, 200));
+                const cover = await fetch(`${BASE}/api/covers/${bookId}`);
+                check('封面讀得回來（圖片）', cover.status === 200 && /image\/png/.test(cover.headers.get('content-type') || ''), `HTTP ${cover.status}`);
+                const removed = await authed(`/api/books/${bookId}/cover`, { method: 'DELETE' });
+                check('刪除封面 HTTP 200', removed.status === 200);
+            }
+        } catch (err) {
+            check('臨時帳號上傳驗收', false, err.message);
+        }
     }
 
     console.log('\n4. 登入後的驗收');
