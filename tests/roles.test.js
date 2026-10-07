@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const Roles = require('../lib/roles');
 
 const admin = { id: 1, username: 'manager', role: 'admin' };
-const owner = { id: 2, username: 'owner', role: 'web_owner' };
+const owner = { id: 2, username: 'webmanager', role: 'web_manager' };
 const teacher = { id: 3, username: 'teacher', role: 'teacher' };
 const rep = { id: 4, username: 'classrep', role: 'class_rep' };
 const student = { id: 5, username: 'student', role: 'student' };
@@ -15,7 +15,7 @@ const guest = null;
 const unit = { id: 10, book_id: 1, unit_no: 1 };
 
 test('角色階梯順序固定', () => {
-    assert.deepEqual(Object.keys(Roles.ROLE_LEVELS), ['guest', 'student', 'class_rep', 'teacher', 'admin', 'web_owner']);
+    assert.deepEqual(Object.keys(Roles.ROLE_LEVELS), ['guest', 'student', 'class_rep', 'teacher', 'admin', 'web_manager']);
     assert.ok(Roles.atLeast('teacher', 'class_rep'));
     assert.ok(!Roles.atLeast('student', 'class_rep'));
     assert.equal(Roles.normalizeRole('不存在'), 'guest');
@@ -83,19 +83,26 @@ test('使用者管理：admin 以上，且不能管理自己或同級以上', ()
     assert.equal(Roles.canManageUser(admin, student), true);
     assert.equal(Roles.canManageUser(admin, admin), false, '不能管理同級');
     assert.equal(Roles.canManageUser(admin, { id: 1, role: 'admin' }), false, '也不能管理自己');
-    assert.equal(Roles.canManageUser(owner, admin), true, 'web_owner 可以管理 admin');
-    assert.equal(Roles.canManageUser(admin, owner), false, 'admin 不能動 web_owner');
-    assert.equal(Roles.canManageUser(owner, { id: 2, role: 'web_owner' }), false, 'web_owner 也是不能改自己');
+    assert.equal(Roles.canManageUser(owner, admin), true, 'web_manager 可以管理 admin');
+    assert.equal(Roles.canManageUser(admin, owner), false, 'admin 不能動 web_manager');
+    assert.equal(Roles.canManageUser(owner, { id: 2, role: 'web_manager' }), false, 'web_manager 也是不能改自己');
 });
 
-test('建立角色：必須高於目標；web_owner 只能由 web_owner 建立', () => {
+test('建立角色：必須高於目標；web_manager 只能由 web_manager 建立', () => {
     assert.equal(Roles.canCreateRole(admin, 'student'), true);
     assert.equal(Roles.canCreateRole(admin, 'teacher'), true);
     assert.equal(Roles.canCreateRole(admin, 'admin'), false, 'admin 不能建立同級 admin');
-    assert.equal(Roles.canCreateRole(admin, 'web_owner'), false);
+    assert.equal(Roles.canCreateRole(admin, 'web_manager'), false);
     assert.equal(Roles.canCreateRole(owner, 'admin'), true);
-    assert.equal(Roles.canCreateRole(owner, 'web_owner'), true);
+    assert.equal(Roles.canCreateRole(owner, 'web_manager'), true);
     assert.equal(Roles.canCreateRole(teacher, 'class_rep'), true);
+});
+
+test('舊角色名稱 web_owner 會被自動看成 web_manager（不讓舊帳號被降成訪客）', () => {
+    assert.equal(Roles.normalizeRole('web_owner'), 'web_manager');
+    assert.equal(Roles.roleOf({ id: 9, role: 'web_owner' }), 'web_manager');
+    assert.equal(Roles.levelOf('web_owner'), Roles.ROLE_LEVELS.web_manager);
+    assert.equal(Roles.roleLabel('web_manager'), '網站管理員');
 });
 
 test('稽核日誌只有 admin 以上看得到', () => {

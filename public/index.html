@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="PV_Dictionary 線上英文生字字典：依書本與單元查詢生字、音標、詞性、中文與英文解釋，並可聽讀音。">
-    <title>PV_Dictionary v0.0.1</title>
+    <title>PV_Dictionary v0.0.2</title>
     <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/img/favicon.svg">
     <link rel="stylesheet" href="/css/tokens.css">
@@ -53,12 +53,23 @@
             </div>
             <div class="unit-head-actions">
                 <button id="printBtn" class="btn btn-ghost" type="button">🖨 列印</button>
-                <button id="adminToggleBtn" class="btn btn-secondary" type="button" hidden>✏️ 管理</button>
             </div>
         </div>
         <p id="unitHint" class="hint" hidden></p>
         <ul id="vocabList" class="vocab-list"></ul>
         <p id="vocabEmpty" class="empty" hidden>這個單元還沒有生字。</p>
+    </section>
+
+    <section id="emptyState" class="unit-card empty-state" hidden>
+        <h1 class="unit-title">還沒有可以查的生字</h1>
+        <p class="empty-state-text">這本字典目前沒有任何書本與單元。學生進來時會看到這個畫面。</p>
+        <p class="empty-state-text">老師或管理員：先登入，再按右上角的「✏️ 管理」照下面順序建立，學生立刻就能查。</p>
+        <ol class="empty-state-steps">
+            <li>「📗 新增書本」→ 填代號（例：B5A）與書名</li>
+            <li>「🏗 新增單元」→ 填單元編號與標題（例：Unit 1 My New School）</li>
+            <li>「➕ 新增生字」或「📋 批次貼上」→ 加入生字、讀音、詞性、中文與英文解釋</li>
+            <li>需要老師錄音時，在生字卡按「🎙 錄音 / 上傳」</li>
+        </ol>
     </section>
 
     <section id="adminSection" class="admin" hidden aria-label="生字管理">
@@ -76,6 +87,7 @@
             <button id="newUnitBtn" class="btn btn-secondary" type="button">🏗 新增單元</button>
             <button id="newBookBtn" class="btn btn-secondary" type="button">📗 新增書本</button>
         </div>
+        <p id="adminHint" class="hint" hidden></p>
 
         <form id="entryForm" class="panel form" hidden>
             <div class="panel-head">

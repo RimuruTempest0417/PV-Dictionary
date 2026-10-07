@@ -11,6 +11,16 @@
     box-sizing: border-box;
 }
 
+/* ★★ `[hidden]` 必須由作者樣式明確關掉 display（不要移除這一條）
+ * 原因：.modal / .panel / .admin / .unit-card 這些 class 都設了 display（flex 等），
+ * 作者樣式一律勝過瀏覽器預設的 `[hidden]{display:none}` → 「設了 hidden 的元素」
+ * 在畫面上依然可見：開站時登入視窗、錄音視窗與整個管理面板會直接蓋在頁面上，
+ * 按關閉也關不掉（程式其實把 hidden 設對了，只是被 CSS 蓋掉）。
+ * 這一條同時修好所有同類元素，不要再個別補 display:none。 */
+[hidden] {
+    display: none !important;
+}
+
 html {
     -webkit-text-size-adjust: 100%;
 }
@@ -306,6 +316,27 @@ code {
     color: var(--text-muted);
     font-size: var(--fs-small);
     padding: var(--space-4) 0;
+}
+
+/* 完全沒有資料時的起始畫面（學生看到的樣子） */
+.empty-state {
+    gap: var(--space-3);
+}
+
+.empty-state-text {
+    color: var(--text-muted);
+    font-size: 0.9375rem;
+}
+
+.empty-state-steps {
+    margin: 0;
+    padding-left: 1.25rem;
+    color: var(--text-muted);
+    font-size: 0.9375rem;
+}
+
+.empty-state-steps li {
+    margin-bottom: 4px;
 }
 
 /* ---------------- 生字清單 ---------------- */

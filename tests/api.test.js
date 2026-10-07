@@ -16,7 +16,7 @@ const PASSWORD = 'pass1234';
 function seedStore(store) {
     const users = [
         ['manager', 'admin', '網頁管理員'],
-        ['owner', 'web_owner', '網站擁有者'],
+        ['webmanager', 'web_manager', '網站管理員'],
         ['teacher', 'teacher', '英文老師'],
         ['classrep', 'class_rep', '英文科代表'],
         ['student', 'student', '學生']

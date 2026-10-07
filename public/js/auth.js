@@ -18,7 +18,7 @@
     }
 
     function atLeast(role) {
-        const levels = { guest: 0, student: 1, class_rep: 2, teacher: 3, admin: 4, web_owner: 5 };
+        const levels = { guest: 0, student: 1, class_rep: 2, teacher: 3, admin: 4, web_manager: 5 };
         const mine = state.user ? (levels[state.user.role] || 0) : 0;
         return mine >= (levels[role] || 0);
     }

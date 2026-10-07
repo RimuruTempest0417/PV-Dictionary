@@ -20,6 +20,9 @@ const ROOT = path.resolve(__dirname, '..');
 const ENV_FILE = path.join(ROOT, '.env');
 const DATA_FILE = path.resolve(ROOT, process.env.DATA_FILE || 'data/store.json');
 const RESET = process.argv.includes('--reset');
+/* 預設「只建立帳號、不建立任何生字」：使用者要用自己的真實內容從零開始填。
+ * 要載入示範教材（2 本 × 3 單元 × 6 生字）給人看效果時，才加 --with-sample。 */
+const WITH_SAMPLE = process.argv.includes('--with-sample');
 
 /* ---------------- .env 輔助 ---------------- */
 function readEnvFile() {
@@ -146,7 +149,7 @@ const BOOKS = [
 
 const USERS = [
     { key: 'SEED_MANAGER_PASSWORD', username: 'manager', display_name: '網頁管理員', role: 'admin' },
-    { key: 'SEED_OWNER_PASSWORD', username: 'owner', display_name: '網站擁有者', role: 'web_owner' },
+    { key: 'SEED_WEB_MANAGER_PASSWORD', username: 'webmanager', display_name: '網站管理員', role: 'web_manager' },
     { key: 'SEED_TEACHER_PASSWORD', username: 'teacher', display_name: '英文老師', role: 'teacher' },
     { key: 'SEED_CLASS_REP_PASSWORD', username: 'classrep', display_name: '英文科代表', role: 'class_rep' }
 ];
@@ -169,7 +172,7 @@ function main() {
     let createdUnits = 0;
     let createdEntries = 0;
 
-    for (const bookSpec of BOOKS) {
+    for (const bookSpec of (WITH_SAMPLE ? BOOKS : [])) {
         let book = store.listBooks({ includeUnpublished: true }).find((b) => b.code === bookSpec.code);
         if (!book) {
             book = store.createBook({
@@ -236,12 +239,20 @@ function main() {
     }
 
     console.log('--- 示範資料 ---');
-    console.log(`書本 ${createdBooks} 本、單元 ${createdUnits} 個、生字 ${createdEntries} 個（已存在的不重複建立）`);
+    if (WITH_SAMPLE) {
+        console.log(`書本 ${createdBooks} 本、單元 ${createdUnits} 個、生字 ${createdEntries} 個（已存在的不重複建立）`);
+    } else {
+        console.log('未建立任何生字（預設就是空的，讓你自己填）。要載入示範教材請執行：npm run seed -- --with-sample');
+    }
     console.log('--- 帳號 ---');
     console.log(createdUsers.length ? `新建立：${createdUsers.join('、')}` : '帳號已存在，未變更');
     console.log(`資料檔：${DATA_FILE}`);
     console.log('密碼：已寫入 .env 的 SEED_*_PASSWORD（本檔不印出密碼）');
     console.log('查詢方式：grep SEED_ .env');
+    console.log('--- 接下來 ---');
+    console.log('1. node server.js');
+    console.log('2. 開 http://localhost:3000 → 右上角「登入」（manager 或 webmanager）');
+    console.log('3. 登入後按右上角「✏️ 管理」→ 📗 新增書本 → 🏗 新增單元 → ➕ 新增生字');
 }
 
 main();

@@ -19,6 +19,50 @@
         if (node) node.hidden = !show;
     }
 
+    /* 依「目前有沒有書本／單元」與角色更新管理區塊的可用狀態。
+     * 第一次使用時資料是空的：沒有書本就沒有單元、沒有單元就不能加生字；
+     * 按鈕要直接停用並說明原因，而不是按下去才報錯。 */
+    function refreshAvailability() {
+        const state = window.PDState || {};
+        const hasBook = Boolean(state.currentBookId);
+        const hasUnit = Boolean(state.currentUnitId);
+        const canMaintain = window.PDAuth.atLeast('teacher');
+
+        const unitBtn = document.getElementById('newUnitBtn');
+        const bookBtn = document.getElementById('newBookBtn');
+        const entryBtn = document.getElementById('newEntryBtn');
+        const importBtn = document.getElementById('importToggleBtn');
+        const hint = document.getElementById('adminHint');
+
+        bookBtn.hidden = !canMaintain;
+        unitBtn.hidden = !canMaintain;
+        unitBtn.disabled = !hasBook;
+        entryBtn.disabled = !hasUnit;
+        importBtn.disabled = !hasUnit;
+        bookBtn.title = '建立一本新的書本';
+        unitBtn.title = hasBook ? `加到 ${state.currentBookName || '目前的書本'}` : '請先建立一本書';
+        entryBtn.title = hasUnit ? '' : '請先選擇或建立單元';
+        importBtn.title = entryBtn.title;
+
+        hint.hidden = hasUnit;
+        if (!hasUnit) {
+            hint.textContent = !hasBook
+                ? '目前還沒有任何書本：請先按「📗 新增書本」，再建立單元，然後就可以加入生字。'
+                : '這本書還沒有單元：請按「🏗 新增單元」建立第一個單元，之後就能加入生字。';
+            // 沒有單元時不該停在一個送不出去的表單上
+            showPanel('entryForm', false);
+            showPanel('importForm', false);
+        }
+    }
+
+    function requireUnit() {
+        if (!window.PDState.currentUnitId) {
+            window.PDUI.toast(window.PDState.currentBookId ? '請先建立或選擇一個單元' : '請先建立一本書與單元', 'error');
+            return false;
+        }
+        return true;
+    }
+
     function fillEntryForm(entry) {
         document.getElementById('entryId').value = entry ? entry.id : '';
         document.getElementById('fHeadword').value = entry ? entry.headword : '';
@@ -32,6 +76,7 @@
     }
 
     function openEntryForm(entry) {
+        if (!entry && !requireUnit()) return;
         state.editingId = entry ? entry.id : null;
         fillEntryForm(entry || null);
         document.getElementById('entryFormTitle').textContent = entry ? `✏️ 修改生字：${entry.headword}` : '➕ 新增生字';
@@ -56,7 +101,10 @@
         event.preventDefault();
         const msg = document.getElementById('entryFormMsg');
         const unitId = window.PDState.currentUnitId;
-        if (!unitId) return;
+        if (!unitId) {
+            setFormMessage(msg, '請先建立或選擇一個單元', 'error');
+            return;
+        }
         const payload = {
             headword: document.getElementById('fHeadword').value,
             part_of_speech: document.getElementById('fPos').value,
@@ -92,6 +140,7 @@
 
     /* ---------------- 批次貼上 ---------------- */
     function openImport() {
+        if (!requireUnit()) return;
         setFormMessage(document.getElementById('importMsg'), '');
         showPanel('importForm', true);
         showPanel('entryForm', false);
@@ -104,7 +153,10 @@
         event.preventDefault();
         const msg = document.getElementById('importMsg');
         const unitId = window.PDState.currentUnitId;
-        if (!unitId) return;
+        if (!unitId) {
+            setFormMessage(msg, '請先建立或選擇一個單元', 'error');
+            return;
+        }
         const text = document.getElementById('importText').value;
         const button = document.getElementById('importBtn');
         button.disabled = true;
@@ -460,5 +512,14 @@
         });
     }
 
-    window.PDAdmin = { init, loadAudit, openEntryForm, closeEntryForm, renderPending, openAudioModal, closeAudioModal };
+    window.PDAdmin = {
+        init,
+        loadAudit,
+        refreshAvailability,
+        openEntryForm,
+        closeEntryForm,
+        renderPending,
+        openAudioModal,
+        closeAudioModal
+    };
 })();

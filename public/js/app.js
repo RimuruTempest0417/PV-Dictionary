@@ -92,11 +92,21 @@
     function renderUnitHead() {
         const unit = state.currentUnit;
         const section = document.getElementById('unitSection');
+        const empty = document.getElementById('emptyState');
         if (!unit) {
             section.hidden = true;
+            /* 沒有可選的單元時要給學生一個清楚的起始畫面，不能只留一片空白。 */
+            const firstText = empty.querySelector('.empty-state-text');
+            if (firstText) {
+                firstText.textContent = state.books.length === 0
+                    ? '這本字典目前沒有任何書本與單元。學生進來時會看到這個畫面。'
+                    : '目前的書本還沒有任何單元。學生進來時會看到這個畫面。';
+            }
+            empty.hidden = false;
             return;
         }
         section.hidden = false;
+        empty.hidden = true;
         document.getElementById('unitTitle').textContent
             = `Unit ${unit.unit_no}${unit.title ? ` · ${unit.title}` : ''}`;
         const published = state.entries.filter((entry) => entry.status === 'published').length;
@@ -104,7 +114,6 @@
         const parts = [`${unit.book_name || state.currentBookName}`, `共 ${published} 個生字`];
         if (pending) parts.push(`待審核 ${pending} 個`);
         document.getElementById('unitMeta').textContent = parts.join(' · ');
-        document.getElementById('adminToggleBtn').hidden = !window.PDAuth.can('can_edit');
         document.getElementById('printBtn').hidden = false;
         const hint = document.getElementById('unitHint');
         if (!window.PDAudio.ttsSupported()) {
@@ -162,6 +171,7 @@
         renderUnitHead();
         renderVocab();
         window.PDAdmin.renderPending(state.entries);
+        window.PDAdmin.refreshAvailability();
         if (typeof options === 'object' && options && options.keepForm) {
             /* 表單保持開啟（連續輸入情境） */
         } else {
@@ -182,6 +192,7 @@
             renderUnitTabs();
             renderUnitHead();
             renderVocab();
+            window.PDAdmin.refreshAvailability();
         }
         await window.PDAdmin.loadAudit();
     }
@@ -207,6 +218,16 @@
             }));
             return;
         }
+        /* 「✏️ 管理」放在這裡（而不是單元卡片裡）：完全沒有書本與單元時也要進得去，
+         * 否則第一次使用時永遠建立不了第一本書。 */
+        if (window.PDAuth.can('can_edit')) {
+            area.appendChild(el('button', {
+                class: 'btn btn-secondary',
+                text: '✏️ 管理',
+                attrs: { type: 'button', id: 'adminToggleBtn' },
+                on: { click: toggleAdminSection }
+            }));
+        }
         area.appendChild(el('span', { class: 'user-chip' }, [
             // 顯示名稱若與角色標籤相同（例如 manager 的顯示名稱就叫「網頁管理員」），改顯示帳號
             el('strong', { text: user.display_name && user.display_name !== user.role_label ? user.display_name : user.username }),
@@ -220,6 +241,19 @@
         }));
         const auditBlock = document.getElementById('auditBlock');
         auditBlock.hidden = !window.PDAuth.can('can_view_audit');
+    }
+
+    async function toggleAdminSection() {
+        const section = document.getElementById('adminSection');
+        const button = document.getElementById('adminToggleBtn');
+        section.hidden = !section.hidden;
+        if (section.hidden) {
+            if (button) button.textContent = '✏️ 管理';
+            return;
+        }
+        if (button) button.textContent = '✏️ 收起管理';
+        await window.PDAdmin.refreshAvailability();
+        await window.PDAdmin.loadAudit();
     }
 
     function openLoginModal() {
@@ -285,11 +319,6 @@
             renderVocab();
         });
         document.getElementById('printBtn').addEventListener('click', () => window.print());
-        document.getElementById('adminToggleBtn').addEventListener('click', async () => {
-            const section = document.getElementById('adminSection');
-            section.hidden = !section.hidden;
-            if (!section.hidden) await window.PDAdmin.loadAudit();
-        });
         document.getElementById('loginForm').addEventListener('submit', doLogin);
         document.getElementById('loginCancelBtn').addEventListener('click', closeLoginModal);
         document.getElementById('loginModal').addEventListener('click', (event) => {
@@ -314,7 +343,11 @@
             if (state.books.length) {
                 await selectBook(state.books[0].id);
             } else {
-                toast('目前沒有任何書本，請先以管理員身分登入建立。');
+                // 完全沒有資料：顯示起始畫面（寫清楚下一步），不要只丟一句提示訊息
+                renderUnitTabs();
+                renderUnitHead();
+                renderVocab();
+                window.PDAdmin.refreshAvailability();
             }
         } catch (err) {
             toast(`載入失敗：${err.message}`, 'error');

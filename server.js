@@ -814,8 +814,8 @@ function createApp(options = {}) {
         if (body.display_name !== undefined) patch.display_name = str(body.display_name, LIMITS.display_name);
         if (body.is_active !== undefined) {
             const next = boolish(body.is_active, true);
-            if (!next && store.countUsersByRole('web_owner') <= (target.role === 'web_owner' ? 1 : 0)) {
-                return res.status(400).json({ error: '至少要保留一位網站擁有者' });
+            if (!next && store.countUsersByRole('web_manager') <= (target.role === 'web_manager' ? 1 : 0)) {
+                return res.status(400).json({ error: '至少要保留一位網站管理員' });
             }
             patch.is_active = next;
         }

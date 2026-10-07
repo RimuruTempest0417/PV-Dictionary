@@ -3,7 +3,7 @@
 線上英文生字字典：學生點書本 → 點單元 → 看生字表（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.0.1（Demo）**
+- 目前版本：**v0.0.2（Demo）**
 - 規劃書：`docs/規劃書-v0.0.1.md`
 - 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie
 
@@ -13,7 +13,7 @@
 
 ```bash
 npm install
-npm run seed       # 建立示範課本（2 本 × 3 單元 × 6 生字）與種子帳號，並產生 .env
+npm run seed       # 只建立帳號（**不會**預先填任何生字，內容由你自己加入）
 node server.js     # 開 http://localhost:3000
 ```
 
@@ -25,13 +25,17 @@ grep SEED_ .env
 
 | 帳號 | 角色 | 可以做的事 |
 |---|---|---|
-| `manager` | 網頁管理員 | 全部功能（含使用者管理、稽核紀錄） |
-| `owner` | 網站擁有者 | 最高權限（可指派管理員） |
-| `teacher` | 老師 | 新增／修改／刪除生字、核准科代表的生字、上傳錄音、維護書本與單元 |
-| `classrep` | 科代表 | 新增生字（進「待審核」）、批次匯入 |
+| `manager` | 網頁管理員（`admin`） | 全部功能（含使用者管理、稽核紀錄） |
+| `webmanager` | 網站管理員（`web_manager`） | 最高權限（可指派管理員） |
+| `teacher` | 老師（`teacher`） | 新增／修改／刪除生字、核准科代表的生字、上傳錄音、維護書本與單元 |
+| `classrep` | 科代表（`class_rep`） | 新增生字（進「待審核」）、批次匯入 |
 | （未登入） | 訪客／學生 | 瀏覽、搜尋、聽讀音——**學生不需要登入** |
 
-重置示範資料：`npm run seed -- --reset`（會清空 `data/store.json` 再重建）。
+第一次使用（資料全空）的順序：登入 → 右上角「✏️ 管理」→「📗 新增書本」→「🏗 新增單元」→「➕ 新增生字」。
+頁面上的起始畫面也會直接把這幾步寫出來。
+
+- 只想看示範效果：`npm run seed -- --with-sample`（示範課本 2 本 × 3 單元 × 6 生字）
+- 全部重新來過：`npm run seed -- --reset`（會清空 `data/store.json` 再建立帳號）
 
 ---
 
@@ -63,10 +67,12 @@ librarian	/laɪˈbreə.ri.ən/	n.	圖書館員	a person who works in a library
 角色階梯（`lib/roles.js` 是唯一權威，後端每次都重新驗證）：
 
 ```
-guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin(網頁管理員) < web_owner(網站擁有者)
+guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin(網頁管理員) < web_manager(網站管理員)
+
+（`web_owner` 是 v0.0.1 的舊名稱，`normalizeRole()` 會自動當成 `web_manager`，不會讓舊帳號被降權。）
 ```
 
-| 動作 | 訪客/學生 | 科代表 | 老師 | 管理員 | 網站擁有者 |
+| 動作 | 訪客/學生 | 科代表 | 老師 | 管理員 | 網站管理員 |
 |---|---|---|---|---|---|
 | 瀏覽生字、聽讀音、搜尋 | ✓ | ✓ | ✓ | ✓ | ✓ |
 | 新增／編輯生字 | ✗ | ✓（待審核） | ✓ | ✓ | ✓ |
@@ -104,12 +110,13 @@ guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin
 
 ```bash
 npm run check:syntax   # 所有 JS 語法檢查 + server.js 模組載入檢查
-npm test               # 35 項：角色權限矩陣、資料層、匯入解析、API 端到端、守門檢查
-npm run check:browser  # 39 項：真 Chrome 走完 12 步 Demo 劇本（不寫截圖、不觸發下載）
+npm test               # 36 項：角色權限矩陣、資料層、匯入解析、API 端到端、守門檢查
+npm run check:browser  # 69 項：真 Chrome 走完 12 步 Demo 劇本（39）＋ 空白起步與彈窗開關（30）
 ```
 
 瀏覽器驗收涵蓋：訪客瀏覽與 TTS 播放、搜尋、管理員新增／批次匯入／刪除（兩段式確認）、
 老師錄音上傳與播放來源切換、新增單元與書本、科代表待審核 → 老師核准 → 訪客可見、
+**資料全空時「開站就是學生視角、彈窗可以開也可以關、管理員能建立第一本書」**、
 版面不溢出（含 402px 手機）、無 CSP 違規、無前端例外、無下載、不寫截圖。
 
 ---
@@ -123,7 +130,7 @@ lib/auth.js                 # JWT、cookie、CSRF 來源檢查、CORS、安全�
 lib/audit.js                # 稽核動作與中文標籤
 lib/store/{index,json}.js   # 資料層介面與本機 JSON 實作（Supabase adapter 待實作）
 public/                     # 前端（index.html + css/ + js/，零行內樣式與行內事件）
-scripts/seed.js             # 示範資料與種子帳號
+scripts/seed.js             # 種子帳號（預設不填任何生字；--with-sample 才載入示範教材）
 scripts/check-syntax.js     # 語法 + 模組載入檢查
 tests/                      # node:test 單元／API 測試、tests/browser 真 Chrome 驗收
 migrations/                 # Supabase schema（v0.1.0 使用）
