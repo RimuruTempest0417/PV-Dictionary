@@ -1,0 +1,17 @@
+# 依賴與環境
+node_modules/
+.env
+.env.*
+!.env.example
+
+# Demo 資料（本機 JSON store，不上版控）
+data/
+
+# 備份與日誌
+backups/
+*.log
+
+# macOS / 編輯器雜物
+.DS_Store
+* [0-9].*
+* [0-9]
