@@ -440,22 +440,60 @@
         }
     }
 
-    /* ---------------- 稽核紀錄 ---------------- */
+    /* ---------------- 稽核紀錄（可依動作／帳號／日期篩選，並用顏色分類） ---------------- */
+    const auditFilterIds = ['auditActionFilter', 'auditUserFilter', 'auditFromFilter', 'auditToFilter'];
+
+    function readAuditFilters() {
+        const value = (id) => {
+            const node = document.getElementById(id);
+            return node && typeof node.value === 'string' ? node.value.trim() : '';
+        };
+        return { action: value('auditActionFilter'), user: value('auditUserFilter'), from: value('auditFromFilter'), to: value('auditToFilter') };
+    }
+
+    /* 動作下拉只填一次（用後端回傳的 actions 清單，兩邊永遠一致），之後只更新選中的值 */
+    function fillAuditActionOptions(actions, selected) {
+        const select = document.getElementById('auditActionFilter');
+        if (!select || !Array.isArray(actions) || !actions.length) return;
+        const wanted = selected === undefined ? select.value : selected;
+        clear(select);
+        select.appendChild(el('option', { text: t('audit.filterAll'), attrs: { value: '' } }));
+        for (const item of actions) {
+            const label = window.PDI18n.auditActionLabel(item.value, item.label);
+            select.appendChild(el('option', { text: label === item.value ? item.value : `${label}（${item.value}）`, attrs: { value: item.value } }));
+        }
+        select.value = wanted && actions.some((item) => item.value === wanted) ? wanted : '';
+    }
+
     async function loadAudit() {
         const block = document.getElementById('auditBlock');
         const list = document.getElementById('auditList');
         if (!block || block.hidden || !window.PDAuth.can('can_view_audit')) return;
+        const filters = readAuditFilters();
+        const params = new URLSearchParams({ limit: '50' });
+        for (const key of Object.keys(filters)) if (filters[key]) params.set(key, filters[key]);
         try {
-            const data = await api.get('/api/admin/audit-logs?limit=25');
+            const data = await api.get(`/api/admin/audit-logs?${params.toString()}`);
+            fillAuditActionOptions(data.actions, filters.action);
+            const count = document.getElementById('auditCount');
+            if (count) {
+                count.textContent = t('audit.count', { shown: data.logs.length, total: data.total });
+                count.dataset.total = String(data.total);
+                count.dataset.shown = String(data.logs.length);
+            }
             clear(list);
             if (!data.logs.length) {
                 list.appendChild(el('li', { class: 'audit-item', text: t('audit.empty') }));
                 return;
             }
             for (const row of data.logs) {
-                list.appendChild(el('li', { class: 'audit-item' }, [
+                const tone = window.PDI18n.auditTone(row.action);
+                list.appendChild(el('li', { class: 'audit-item', dataset: { tone, action: row.action } }, [
                     el('span', { class: 'audit-when', text: formatDateTime(row.created_at) }),
-                    el('span', { text: `${window.PDI18n.auditActionLabel(row.action, row.action_label)}｜${row.details || row.target_id || ''}` }),
+                    el('span', { class: 'audit-main' }, [
+                        el('span', { class: `audit-chip audit-chip--${tone}`, text: window.PDI18n.auditActionLabel(row.action, row.action_label) }),
+                        el('span', { class: 'audit-detail', text: row.details || row.target_id || '' })
+                    ]),
                     el('span', { class: 'audit-who', text: row.display_name || row.user_id || '' })
                 ]));
             }
@@ -463,6 +501,34 @@
             clear(list);
             list.appendChild(el('li', { class: 'audit-item', text: t('audit.failed', { message: window.PDI18n.errorMessage(err) }) }));
         }
+    }
+
+    function clearAuditFilters() {
+        for (const id of auditFilterIds) {
+            const node = document.getElementById(id);
+            if (node) node.value = '';
+        }
+        return loadAudit();
+    }
+
+    function bindAuditFilters() {
+        const action = document.getElementById('auditActionFilter');
+        if (action) action.addEventListener('change', loadAudit);
+        for (const id of ['auditFromFilter', 'auditToFilter']) {
+            const node = document.getElementById(id);
+            if (node) node.addEventListener('change', loadAudit);
+        }
+        /* 帳號欄位打字時不要每個字都打一次 API：停 350ms 再查 */
+        const user = document.getElementById('auditUserFilter');
+        if (user) {
+            let timer = null;
+            user.addEventListener('input', () => {
+                if (timer) clearTimeout(timer);
+                timer = setTimeout(() => { timer = null; loadAudit(); }, 350);
+            });
+        }
+        const clearBtn = document.getElementById('auditClearBtn');
+        if (clearBtn) clearBtn.addEventListener('click', clearAuditFilters);
     }
 
     /* ---------------- 老師錄音（上傳檔案或直接用麥克風錄） ---------------- */
@@ -645,6 +711,7 @@
         document.getElementById('unitCancelBtn').addEventListener('click', () => showPanel(null));
         document.getElementById('bookCancelBtn').addEventListener('click', () => showPanel(null));
         document.getElementById('auditRefreshBtn').addEventListener('click', loadAudit);
+        bindAuditFilters();
 
         document.getElementById('audioPickFileBtn').addEventListener('click', pickAudioFile);
         document.getElementById('audioFileInput').addEventListener('change', onAudioFileChosen);

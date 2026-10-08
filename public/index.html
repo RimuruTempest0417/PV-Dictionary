@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="PV_Dictionary — an online English vocabulary dictionary: browse words by book and unit, with pronunciation, part of speech, Chinese and English meanings.">
-    <title>PV_Dictionary v0.3.3</title>
-    <link rel="icon" href="/img/favicon.svg?v=0.3.3" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.3.3">
-    <link rel="stylesheet" href="/css/tokens.css?v=0.3.3">
-    <link rel="stylesheet" href="/css/app.css?v=0.3.3">
-    <link rel="stylesheet" href="/css/print.css?v=0.3.3" media="print">
-    <script src="/js/analytics.js?v=0.3.3"></script>
+    <title>PV_Dictionary v0.3.4</title>
+    <link rel="icon" href="/img/favicon.svg?v=0.3.4" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.3.4">
+    <link rel="stylesheet" href="/css/tokens.css?v=0.3.4">
+    <link rel="stylesheet" href="/css/app.css?v=0.3.4">
+    <link rel="stylesheet" href="/css/print.css?v=0.3.4" media="print">
+    <script src="/js/analytics.js?v=0.3.4"></script>
     <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
@@ -227,6 +227,18 @@
                 <h2 class="panel-title" data-i18n="audit.title">🧾 Recent activity</h2>
                 <button id="auditRefreshBtn" class="btn btn-ghost" type="button" data-i18n="audit.reload">Reload</button>
             </div>
+            <div class="audit-filters">
+                <label class="field"><span class="field-label" data-i18n="audit.filterAction">Action</span>
+                    <select id="auditActionFilter"></select></label>
+                <label class="field"><span class="field-label" data-i18n="audit.filterUser">Account</span>
+                    <input id="auditUserFilter" type="search" maxlength="40" autocomplete="off"></label>
+                <label class="field"><span class="field-label" data-i18n="audit.filterFrom">From</span>
+                    <input id="auditFromFilter" type="date"></label>
+                <label class="field"><span class="field-label" data-i18n="audit.filterTo">To</span>
+                    <input id="auditToFilter" type="date"></label>
+                <button id="auditClearBtn" class="btn btn-ghost btn-small" type="button" data-i18n="audit.filterClear">Clear filters</button>
+            </div>
+            <p class="panel-note" id="auditCount" role="status"></p>
             <ul id="auditList" class="audit-list"></ul>
         </div>
 
@@ -316,7 +328,7 @@
 </main>
 
 <footer class="footer">
-    <span>PV_Dictionary <span id="versionLabel">v0.3.3</span></span>
+    <span>PV_Dictionary <span id="versionLabel">v0.3.4</span></span>
     <span class="footer-sep">·</span>
     <span id="backendLabel" class="footer-muted"></span>
     <span class="footer-sep">·</span>
@@ -379,14 +391,14 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="/js/i18n.js?v=0.3.3"></script>
-<script src="/js/api.js?v=0.3.3"></script>
-<script src="/js/ui.js?v=0.3.3"></script>
-<script src="/js/audio.js?v=0.3.3"></script>
-<script src="/js/auth.js?v=0.3.3"></script>
-<script src="/js/vocab.js?v=0.3.3"></script>
-<script src="/js/admin.js?v=0.3.3"></script>
-<script src="/js/users.js?v=0.3.3"></script>
-<script src="/js/app.js?v=0.3.3"></script>
+<script src="/js/i18n.js?v=0.3.4"></script>
+<script src="/js/api.js?v=0.3.4"></script>
+<script src="/js/ui.js?v=0.3.4"></script>
+<script src="/js/audio.js?v=0.3.4"></script>
+<script src="/js/auth.js?v=0.3.4"></script>
+<script src="/js/vocab.js?v=0.3.4"></script>
+<script src="/js/admin.js?v=0.3.4"></script>
+<script src="/js/users.js?v=0.3.4"></script>
+<script src="/js/app.js?v=0.3.4"></script>
 </body>
 </html>

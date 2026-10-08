@@ -138,6 +138,13 @@
             'audit.reload': 'Reload',
             'audit.empty': 'No records yet.',
             'audit.failed': 'Could not load: {message}',
+            'audit.filterAction': 'Action',
+            'audit.filterUser': 'Account',
+            'audit.filterFrom': 'From',
+            'audit.filterTo': 'To',
+            'audit.filterAll': 'All actions',
+            'audit.filterClear': 'Clear filters',
+            'audit.count': 'Showing {shown} of {total}',
 
             'audio.titlePrefix': '🎙 Teacher recording',
             'backend.json': 'Local JSON file (demo)',
@@ -477,6 +484,13 @@
             'audit.reload': '重新載入',
             'audit.empty': '目前沒有紀錄。',
             'audit.failed': '讀取失敗：{message}',
+            'audit.filterAction': '動作',
+            'audit.filterUser': '帳號',
+            'audit.filterFrom': '開始日期',
+            'audit.filterTo': '結束日期',
+            'audit.filterAll': '全部動作',
+            'audit.filterClear': '清除篩選',
+            'audit.count': '顯示 {shown}／共 {total} 筆',
 
             'audio.titlePrefix': '🎙 老師錄音',
             'backend.json': '本機 JSON 檔（Demo）',
@@ -762,6 +776,34 @@
         return fallback || action;
     }
 
+    /* 稽核動作的色彩分類：讓「誰做了什麼」一眼看得出來（新增綠／修改黃／刪除紅／審核藍／登入灰）。
+     * ★ 一定要覆蓋 AUDIT_ACTION_LABELS 的每一個動作 —— tests/i18n.test.js 有守門測試，
+     *   以後新增稽核動作若忘了歸類會直接紅燈（不然那個動作會變成沒有顏色的孤兒）。 */
+    const AUDIT_TONES = {
+        create: ['ENTRY_CREATE', 'ENTRY_IMPORT', 'BOOK_CREATE', 'UNIT_CREATE', 'USER_CREATE', 'GRANT_CREATE', 'COVER_UPLOAD', 'AUDIO_UPLOAD'],
+        update: ['ENTRY_UPDATE', 'BOOK_UPDATE', 'UNIT_UPDATE', 'USER_UPDATE', 'PASSWORD_CHANGE'],
+        remove: ['ENTRY_DELETE', 'AUDIO_DELETE', 'USER_DELETE', 'GRANT_DELETE', 'COVER_DELETE'],
+        review: ['ENTRY_APPROVE', 'ENTRY_REJECT', 'UNIT_PUBLISH', 'UNIT_UNPUBLISH'],
+        auth: ['LOGIN', 'LOGOUT']
+    };
+    const AUDIT_TONE_FALLBACKS = [
+        [/(DELETE|REMOVE|REVOKE)$/, 'remove'],
+        [/(CREATE|UPLOAD|IMPORT|ADD|GRANT)$/, 'create'],
+        [/(UPDATE|EDIT|CHANGE|RESET|RENAME)$/, 'update'],
+        [/(APPROVE|REJECT|PUBLISH|UNPUBLISH|REVIEW)$/, 'review'],
+        [/(LOGIN|LOGOUT|SIGNIN|SIGNOUT)$/, 'auth']
+    ];
+    function auditTone(action) {
+        const value = String(action || '').toUpperCase();
+        for (const tone of Object.keys(AUDIT_TONES)) {
+            if (AUDIT_TONES[tone].includes(value)) return tone;
+        }
+        for (const [pattern, tone] of AUDIT_TONE_FALLBACKS) {
+            if (pattern.test(value)) return tone;
+        }
+        return 'other';
+    }
+
     /* 掃靜態 HTML：data-i18n（textContent）、data-i18n-placeholder、data-i18n-title、data-i18n-aria */
     function applyStaticTranslations(root) {
         const scope = root || document;
@@ -815,6 +857,8 @@
         errorMessage,
         roleLabel,
         auditActionLabel,
+        auditTone,
+        AUDIT_TONES,
         applyStaticTranslations,
         setLang,
         init,

@@ -84,6 +84,24 @@ test('前端用到的元素 id 真的存在（getElementById 找不到就會靜�
     assert.deepEqual(missing, [], `index.html 裡找不到這些 id：${missing.join('、')}`);
 });
 
+test('前端把 data-* 或 option 的 value 交給 el() 時要用 attrs（直接給鍵會被靜默忽略）', () => {
+    /* el() 只認 options.attrs / options.dataset；寫成 { 'data-tone': x } 或 { value: x } 都不會生效，
+     * 而且畫面上完全看不出來（元素在、文字對，屬性就是不見了 → 選單選了卻篩不出東西）。 */
+    const files = fs.readdirSync(path.join(ROOT, 'public/js')).filter((f) => f.endsWith('.js'));
+    const wrong = [];
+    for (const file of files) {
+        const lines = fs.readFileSync(path.join(ROOT, 'public/js', file), 'utf8').split('\n');
+        lines.forEach((line, index) => {
+            if (!/\bel\(/.test(line)) return;
+            const hasAttrs = /attrs\s*:/.test(line) || /dataset\s*:/.test(line);
+            if (hasAttrs) return;
+            if (/'data-[a-z-]+'\s*:/.test(line)) wrong.push(`${file}:${index + 1}（data-* 屬性）`);
+            if (/el\('option'/.test(line) && /\bvalue\s*:/.test(line)) wrong.push(`${file}:${index + 1}（option 的 value）`);
+        });
+    }
+    assert.deepEqual(wrong, [], `這些地方的屬性會被忽略：${wrong.join('、')}`);
+});
+
 test('伺服器端不含寫死的密碼或 Supabase 金鑰', () => {
     const files = ['server.js', path.join('lib', 'auth.js'), path.join('lib', 'store', 'index.js')];
     for (const file of files) {

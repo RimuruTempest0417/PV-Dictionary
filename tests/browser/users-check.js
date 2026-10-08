@@ -263,6 +263,52 @@ async function main() {
             auditInfo.labelUserCreate === 'Create user' && auditInfo.labelUserDelete === 'Delete user',
             JSON.stringify([auditInfo.labelUserCreate, auditInfo.labelUserDelete]));
 
+        /* ---- 篩選與顏色分類 ---- */
+        const filterUi = await browser.evaluate(`return {
+            action: Boolean(document.getElementById('auditActionFilter')),
+            user: Boolean(document.getElementById('auditUserFilter')),
+            from: Boolean(document.getElementById('auditFromFilter')),
+            to: Boolean(document.getElementById('auditToFilter')),
+            clear: Boolean(document.getElementById('auditClearBtn')),
+            options: document.getElementById('auditActionFilter').options.length,
+            tones: [...new Set([...document.querySelectorAll('#auditList > li[data-tone]')].map((li) => li.dataset.tone))],
+            chips: document.querySelectorAll('#auditList .audit-chip').length
+        };`);
+        check('稽核面板有動作／帳號／日期篩選與清除鈕',
+            filterUi.action && filterUi.user && filterUi.from && filterUi.to && filterUi.clear, JSON.stringify(filterUi));
+        check('動作下拉有「全部」＋各動作選項', filterUi.options > 1, `${filterUi.options} 個`);
+        check('每列都有顏色分類與動作標籤', filterUi.chips > 0 && filterUi.tones.length > 0, JSON.stringify(filterUi.tones));
+
+        await browser.evaluate(`
+            const select = document.getElementById('auditActionFilter');
+            select.value = 'USER_CREATE';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+        `);
+        await browser.waitFor(
+            `document.querySelectorAll('#auditList > li[data-action]').length > 0
+             && [...document.querySelectorAll('#auditList > li[data-action]')].every((li) => li.dataset.action === 'USER_CREATE')`,
+            { timeout: 8000 }
+        );
+        const filtered = await browser.evaluate(`return {
+            actions: [...new Set([...document.querySelectorAll('#auditList > li[data-action]')].map((li) => li.dataset.action))],
+            tones: [...new Set([...document.querySelectorAll('#auditList > li[data-action]')].map((li) => li.dataset.tone))],
+            chip: document.querySelector('#auditList .audit-chip').textContent,
+            count: document.getElementById('auditCount').textContent
+        };`);
+        check('選了動作之後清單只剩那一種動作', filtered.actions.length === 1 && filtered.actions[0] === 'USER_CREATE', JSON.stringify(filtered.actions));
+        check('USER_CREATE 歸在「新增」色系', filtered.tones.length === 1 && filtered.tones[0] === 'create', JSON.stringify(filtered.tones));
+        check('標籤顯示該動作的語言標籤', filtered.chip === 'Create user', filtered.chip);
+        check('筆數文字顯示「顯示 N／共 M」', /Showing/.test(filtered.count) && /of/.test(filtered.count), filtered.count);
+
+        await browser.evaluate(`document.getElementById('auditClearBtn').click(); return true;`);
+        await browser.waitFor(
+            `document.getElementById('auditActionFilter').value === ''
+             && document.querySelectorAll('#auditList > li[data-action]').length > 1`,
+            { timeout: 8000 }
+        );
+        check('按「清除篩選」回到全部紀錄', true);
+
         console.log('\n【8】切中文後新面板跟著翻譯 + 版面不溢出');
         await browser.evaluate(`document.getElementById('navUsersBtn').click(); return true;`);
         await browser.evaluate(`document.querySelector('#langSwitch [data-lang="zh"]').click(); return true;`);

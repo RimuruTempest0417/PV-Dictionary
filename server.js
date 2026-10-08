@@ -15,7 +15,7 @@ const fs = require('fs');
 const { createStore, normalizeHeadword, DATA_BACKEND_LABEL } = require('./lib/store');
 const Roles = require('./lib/roles');
 const Auth = require('./lib/auth');
-const { logAudit, AUDIT_ACTION_LABELS, actionLabel } = require('./lib/audit');
+const { logAudit, AUDIT_ACTION_LABELS, actionLabel, normalizeAuditFilters } = require('./lib/audit');
 const { msg } = require('./lib/messages');
 const { verifyPassword, hashPassword, needsPasswordUpgrade } = require('./lib/passwords');
 
@@ -1113,13 +1113,24 @@ function createApp(options = {}) {
     app.get('/api/admin/audit-logs', requireRole('admin'), (req, res) => {
         const limit = Math.min(200, Math.max(1, num(req.query.limit, 50)));
         const offset = Math.max(0, num(req.query.offset, 0));
-        const result = store.listAuditLogs({ limit, offset, q: str(req.query.q, 80) });
+        /* 篩選：q（全文）／action（動作）／user（帳號或顯示名稱）／from・to（日期 YYYY-MM-DD）。
+         * 規則集中在 lib/audit.js，兩個資料層共用同一份。 */
+        const filters = {
+            q: str(req.query.q, 80),
+            action: str(req.query.action, 40),
+            user: str(req.query.user, 40),
+            from: str(req.query.from, 10),
+            to: str(req.query.to, 10)
+        };
+        const result = store.listAuditLogs(Object.assign({ limit, offset }, filters));
+        const normalized = normalizeAuditFilters(filters);
         res.json({
             logs: result.items.map((row) => Object.assign({}, row, { action_label: actionLabel(row.action) })),
             total: result.total,
             limit,
             offset,
             has_more: result.has_more,
+            filters: { q: normalized.q, action: normalized.action, user: normalized.user, from: normalized.fromDate, to: normalized.toDate },
             actions: Object.keys(AUDIT_ACTION_LABELS).map((action) => ({ value: action, label: AUDIT_ACTION_LABELS[action] }))
         });
     });

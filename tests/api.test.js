@@ -370,6 +370,55 @@ test('稽核日誌：管理員看得到、老師看不到，而且真的記錄�
     assert.equal(entryLog.action_label, '新增生字');
 });
 
+test('稽核紀錄可以依動作／帳號／日期篩選（畫面篩選用的就是這組參數）', async (t) => {
+    const { base, ids } = startServer(t);
+    const manager = await login(base, 'manager');
+    const teacher = await login(base, 'teacher');
+    const created = await api(base, `/api/units/${ids.unit.id}/entries`, {
+        method: 'POST',
+        cookie: teacher.cookie,
+        body: { headword: 'filterdemo', zh_meaning: '篩選示範', en_definition: 'a filter demo' }
+    });
+    assert.equal(created.status, 201);
+
+    const all = await api(base, '/api/admin/audit-logs?limit=100', { cookie: manager.cookie });
+    assert.equal(all.status, 200);
+    assert.ok(all.data.total >= 3, `至少要有幾筆紀錄（實際 ${all.data.total}）`);
+
+    const byAction = await api(base, '/api/admin/audit-logs?action=ENTRY_CREATE&limit=100', { cookie: manager.cookie });
+    assert.ok(byAction.data.logs.length >= 1);
+    assert.deepEqual([...new Set(byAction.data.logs.map((row) => row.action))], ['ENTRY_CREATE']);
+    assert.equal(byAction.data.filters.action, 'ENTRY_CREATE');
+    assert.match(byAction.data.logs[0].details, /filterdemo/);
+    assert.ok(byAction.data.total < all.data.total, 'total 也要跟著篩選（畫面要顯示「顯示 N／共 M 筆」）');
+
+    const byUser = await api(base, '/api/admin/audit-logs?user=teacher&limit=100', { cookie: manager.cookie });
+    assert.ok(byUser.data.logs.length >= 2, 'teacher 的登入與新增生字都要在');
+    assert.ok(byUser.data.logs.every((row) => String(row.user_id || '').includes('teacher')));
+    const upper = await api(base, '/api/admin/audit-logs?user=TEACHER&limit=100', { cookie: manager.cookie });
+    assert.equal(upper.data.total, byUser.data.total, '帳號篩選不分大小寫');
+
+    /* 日期：今天有紀錄、2000 年沒有 */
+    const today = new Date().toISOString().slice(0, 10);
+    const todayRows = await api(base, `/api/admin/audit-logs?from=${today}&to=${today}&limit=100`, { cookie: manager.cookie });
+    assert.equal(todayRows.data.total, all.data.total, '今天的區間應該等於全部');
+    assert.equal(todayRows.data.filters.from, today, '回傳實際生效的日期，前端才能顯示「目前篩選」');
+    const oldRows = await api(base, '/api/admin/audit-logs?from=2000-01-01&to=2000-01-02&limit=100', { cookie: manager.cookie });
+    assert.equal(oldRows.data.total, 0);
+
+    /* 格式不對的日期一律忽略 —— 不能讓打錯字變成「查不到任何東西」 */
+    const badDate = await api(base, '/api/admin/audit-logs?from=yesterday&limit=100', { cookie: manager.cookie });
+    assert.equal(badDate.data.total, all.data.total);
+    assert.equal(badDate.data.filters.from, '');
+
+    /* 不存在的動作 → 0 筆（不可以靜默變成「全部」） */
+    const badAction = await api(base, '/api/admin/audit-logs?action=NOT_A_REAL_ACTION&limit=100', { cookie: manager.cookie });
+    assert.equal(badAction.data.total, 0);
+
+    /* 動作清單要跟著回傳，前端下拉才不會各寫一份 */
+    assert.ok(all.data.actions.some((item) => item.value === 'ENTRY_CREATE' && item.label === '新增生字'));
+});
+
 test('健康檢查與版本端點提供前端需要的資訊', async (t) => {
     const { base } = startServer(t);
     const health = await api(base, '/api/health');

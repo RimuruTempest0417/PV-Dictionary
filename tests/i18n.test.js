@@ -104,6 +104,43 @@ test('i18n：稽核動作與角色名稱都有翻譯（中文標籤不能只留�
     assert.deepEqual(missingRoles, [], `缺少翻譯的角色：${missingRoles.join('、')}`);
 });
 
+test('i18n：每個稽核動作都有顏色分類（沒有沒顏色的孤兒動作）', () => {
+    const { AUDIT_ACTION_LABELS } = require('../lib/audit');
+    const store = {};
+    const code = fs.readFileSync(path.join(ROOT, 'public/js/i18n.js'), 'utf8');
+    const context = {
+        window: { dispatchEvent() {} },
+        console,
+        CustomEvent: class CustomEvent {
+            constructor(type, init) { this.type = type; this.detail = init && init.detail; }
+        },
+        localStorage: {
+            getItem: (key) => (key in store ? store[key] : null),
+            setItem: (key, value) => { store[key] = String(value); },
+            removeItem: (key) => { delete store[key]; }
+        },
+        document: {
+            documentElement: { setAttribute() {} },
+            querySelectorAll: () => [],
+            dispatchEvent() {}
+        }
+    };
+    vm.createContext(context);
+    vm.runInContext(code, context, { filename: 'i18n.js' });
+    const api = context.window.PDI18n;
+    const known = Object.keys(api.AUDIT_TONES);
+
+    for (const action of Object.keys(AUDIT_ACTION_LABELS)) {
+        const tone = api.auditTone(action);
+        assert.ok(known.includes(tone), `${action} 的顏色分類是「${tone}」，請加進 AUDIT_TONES`);
+    }
+    /* 以後才加的新動作：用字尾推斷也要合理（至少不能全灰） */
+    assert.equal(api.auditTone('FOO_DELETE'), 'remove');
+    assert.equal(api.auditTone('FOO_CREATE'), 'create');
+    assert.equal(api.auditTone('FOO_APPROVE'), 'review');
+    assert.equal(api.auditTone('SOMETHING_ELSE'), 'other');
+});
+
 test('i18n：後端回應一律是英文（預設語言）＋ code', () => {
     const server = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
     const chineseErrors = [...server.matchAll(/error: [^,}\n]*[\u4e00-\u9fff][^,}\n]*/g)].map((m) => m[0]);
