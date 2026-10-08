@@ -64,5 +64,42 @@
         return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
     }
 
-    window.PDUI = { el, clear, toast, setFormMessage, formatDateTime };
+    /* ---------------- 載入指示（Loading） ----------------
+     * api.js 的每個請求都會 show()／hide()，這裡只決定「還有請求在飛就顯示」。
+     * 最短顯示 350ms：太快閃一下反而像畫面壞掉。 */
+    const loader = (() => {
+        const MIN_MS = 350;
+        let inFlight = 0;
+        let shownAt = 0;
+        let timer = null;
+        function paint(visible) {
+            const el = document.getElementById('appLoader');
+            if (el) el.hidden = !visible;
+        }
+        function show() {
+            inFlight += 1;
+            if (timer) { clearTimeout(timer); timer = null; }
+            if (inFlight === 1) {
+                shownAt = Date.now();
+                paint(true);
+            }
+        }
+        function hide() {
+            inFlight = Math.max(0, inFlight - 1);
+            if (inFlight > 0) return;
+            const wait = Math.max(0, MIN_MS - (Date.now() - shownAt));
+            timer = setTimeout(() => {
+                timer = null;
+                if (inFlight === 0) paint(false);
+            }, wait);
+        }
+        return {
+            show,
+            hide,
+            get inFlight() { return inFlight; }
+        };
+    })();
+
+    window.PDUI = { el, clear, toast, setFormMessage, formatDateTime, loader };
+    window.PDLoader = loader;
 })();

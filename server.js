@@ -176,7 +176,12 @@ function createApp(options = {}) {
     /* Supabase 版資料層：每個 /api 請求先 hydrate（抓下 7 張表）、回應送出「之前」flush（寫回異動）。
      * 為什麼要這樣做，見 lib/store/supabase.js 開頭的說明；json 版沒有 hydrate()，直接放行。 */
     if (typeof store.hydrate === 'function') {
+        /* 不需要資料庫的路由直接放行（例如 /api/version）：這支原本也要等 7 個查詢才回，
+         * 一次 2～5 秒。注意：app.use('/api') 裡的 req.path 是相對於掛載點的路徑（沒有 /api 前綴），
+         * 所以拿 originalUrl 來比對才不會判斷錯。 */
+        const DB_FREE = /^\/api\/version\/?$/;
         app.use('/api', async (req, res, next) => {
+            if (DB_FREE.test(String(req.originalUrl || '').split('?')[0])) return next();
             try {
                 await store.hydrate();
             } catch (err) {
@@ -321,7 +326,10 @@ function createApp(options = {}) {
     function publicBook(book) {
         if (!book) return book;
         const copy = Object.assign({}, book);
-        const hasCover = Boolean(copy.cover_data);
+        /* ★ 有沒有封面看 cover_bytes / cover_mime，不要看 cover_data：
+         *   封面 base64 已經不進記憶體快取（見 lib/store/supabase.js 的 SELECT_COLUMNS），
+         *   cover_data 在清單裡一律是 null。 */
+        const hasCover = Number(copy.cover_bytes) > 0 || Boolean(copy.cover_mime);
         delete copy.cover_data;
         copy.has_cover = hasCover;
         copy.cover_url = hasCover ? `/api/covers/${copy.id}` : null;
@@ -395,13 +403,16 @@ function createApp(options = {}) {
         });
     });
 
-    app.get('/api/audio/:id', (req, res) => {
+    app.get('/api/audio/:id', async (req, res) => {
+        /* 錄音 base64 不在記憶體快取裡（見 lib/store/supabase.js）：真的要檔案時才單筆抓 */
         const audio = store.getAudio(req.params.id);
         if (!audio) return res.status(404).json({ error: msg('AUDIO_NOT_FOUND'), code: 'AUDIO_NOT_FOUND' });
-        res.setHeader('Content-Type', audio.mime || 'audio/mpeg');
+        const full = typeof store.getAudioData === 'function' ? await store.getAudioData(audio.id) : audio;
+        if (!full || !full.data) return res.status(404).json({ error: msg('AUDIO_NOT_FOUND'), code: 'AUDIO_NOT_FOUND' });
+        res.setHeader('Content-Type', full.mime || audio.mime || 'audio/mpeg');
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
         res.setHeader('X-Content-Type-Options', 'nosniff');
-        return res.send(Buffer.from(audio.data, 'base64'));
+        return res.send(Buffer.from(full.data, 'base64'));
     });
 
     /* ================= 認證 ================= */
@@ -785,16 +796,19 @@ function createApp(options = {}) {
     });
 
     /* ================= 書本封面（老師用手機拍封面 → 上傳） ================= */
-    app.get('/api/covers/:id', (req, res) => {
+    app.get('/api/covers/:id', async (req, res) => {
+        /* 封面 base64 不在記憶體快取裡（見 lib/store/supabase.js）：真的要檔案時才單筆抓 */
         const book = store.getBook(req.params.id);
-        if (!book || !book.cover_data) {
+        if (!book) return res.status(404).json({ error: msg('COVER_NOT_FOUND'), code: 'COVER_NOT_FOUND' });
+        const cover = typeof store.getBookCoverData === 'function' ? await store.getBookCoverData(book.id) : book;
+        if (!cover || !cover.cover_data) {
             return res.status(404).json({ error: msg('COVER_NOT_FOUND'), code: 'COVER_NOT_FOUND' });
         }
-        res.setHeader('Content-Type', book.cover_mime || 'image/jpeg');
+        res.setHeader('Content-Type', cover.cover_mime || 'image/jpeg');
         /* 換封面會更新 cover_updated_at，前端用 ?v= 破快取，所以這裡可以久放 */
         res.setHeader('Cache-Control', 'public, max-age=86400');
         res.setHeader('X-Content-Type-Options', 'nosniff');
-        return res.send(Buffer.from(book.cover_data, 'base64'));
+        return res.send(Buffer.from(cover.cover_data, 'base64'));
     });
 
     app.post('/api/books/:id/cover', requireRole('teacher'), (req, res) => {
@@ -1114,6 +1128,9 @@ function createApp(options = {}) {
     app.use(express.static(path.join(__dirname, 'public'), {
         index: 'index.html',
         etag: true,
+        /* CSS／JS／圖示可以久放（index.html 用 ?v=<版本> 指名版本，改版就換網址）；
+         * HTML 一律 no-cache，才不會拿到舊的版本標記。 */
+        maxAge: '7d',
         setHeaders(res, filePath) {
             if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         }

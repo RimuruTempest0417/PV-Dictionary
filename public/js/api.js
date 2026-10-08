@@ -31,19 +31,26 @@
             init.headers['Content-Type'] = 'application/json';
             init.body = JSON.stringify(opts.body);
         }
-        let res;
+        /* 有請求在飛就顯示頂部載入條（ui.js 的 PDLoader；最短顯示時間也由它控制） */
+        const loader = window.PDUI && window.PDUI.loader;
+        if (loader) loader.show();
         try {
-            res = await fetch(path, init);
-        } catch (err) {
-            throw new ApiError('Could not reach the server', 0, { code: 'NETWORK' });
+            let res;
+            try {
+                res = await fetch(path, init);
+            } catch (err) {
+                throw new ApiError('Could not reach the server', 0, { code: 'NETWORK' });
+            }
+            const type = res.headers.get('content-type') || '';
+            const data = type.includes('application/json') ? await res.json().catch(() => null) : null;
+            if (!res.ok) {
+                const message = (data && data.error) || `HTTP ${res.status}`;
+                throw new ApiError(message, res.status, data);
+            }
+            return data;
+        } finally {
+            if (loader) loader.hide();
         }
-        const type = res.headers.get('content-type') || '';
-        const data = type.includes('application/json') ? await res.json().catch(() => null) : null;
-        if (!res.ok) {
-            const message = (data && data.error) || `HTTP ${res.status}`;
-            throw new ApiError(message, res.status, data);
-        }
-        return data;
     }
 
     window.PDApi = {

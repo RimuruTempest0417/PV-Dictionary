@@ -34,8 +34,9 @@ function fakeSupabase() {
         const table = tableOf(parsed.pathname);
         const idFilter = parsed.searchParams.get('id');
         const wanted = idFilter && idFilter.startsWith('eq.') ? idFilter.slice(3) : null;
+        const select = parsed.searchParams.get('select');
         const body = init.body ? JSON.parse(init.body) : null;
-        calls.push({ method, table, wanted, body, headers: init.headers });
+        calls.push({ method, table, wanted, body, headers: init.headers, select });
 
         if (!db[table]) throw new Error(`假 PostgREST 沒有這張表：${table}`);
         if (flags.failWrites && method !== 'GET') {
@@ -43,7 +44,16 @@ function fakeSupabase() {
             return { ok: false, status: 400, text: async () => JSON.stringify({ message, code: '42703' }) };
         }
         if (method === 'GET') {
-            const rows = wanted ? db[table].filter((r) => String(r.id) === String(wanted)) : db[table].slice();
+            const picked = (row) => {
+                if (!select || select === '*') return Object.assign({}, row);
+                const out = {};
+                for (const column of select.split(',')) {
+                    const name = column.trim();
+                    if (name in row) out[name] = row[name];
+                }
+                return out;
+            };
+            const rows = (wanted ? db[table].filter((r) => String(r.id) === String(wanted)) : db[table].slice()).map(picked);
             return { ok: true, status: 200, text: async () => JSON.stringify(rows) };
         }
         if (method === 'POST') {
@@ -179,9 +189,9 @@ test('Supabase 資料層：寫回失敗要 throw（而且不會偷偷把異動�
     assert.equal(store.listBooks({ includeUnpublished: true }).some((b) => b.name === 'Boom'), false);
 });
 
-test('Supabase 資料層：每次請求都重新抓（別人剛寫進去的東西下一個請求就看得到）', async (t) => {
+test('Supabase 資料層：ttl 設 0 時每個請求都重新抓（別人剛寫進去的東西下一個請求就看得到）', async (t) => {
     const fake = withFake(t);
-    const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k' });
+    const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k', hydrateTtlMs: 0 });
     await store.hydrate();
     assert.equal(store.listBooks().length, 0);
 
@@ -189,7 +199,7 @@ test('Supabase 資料層：每次請求都重新抓（別人剛寫進去的東�
     fake.db.dict_books.push({ id: 1, code: 'B1', name: '別的實例寫的', sort_order: 1, is_published: true });
 
     await store.hydrate();
-    assert.equal(store.listBooks().length, 1, 'ttl 預設 0：下一個請求就要看到資料庫的最新狀態');
+    assert.equal(store.listBooks().length, 1, 'ttl=0：下一個請求就要看到資料庫的最新狀態');
 });
 
 test('Supabase 資料層：還有沒寫回的異動時不重抓（避免把寫入弄丟）', async (t) => {
@@ -202,6 +212,81 @@ test('Supabase 資料層：還有沒寫回的異動時不重抓（避免把寫�
     await store.hydrate();
     assert.equal(store.pendingOps(), 1, '重抓會把還沒寫回的異動丟掉，所以寧可先不重抓');
     assert.equal(store.listBooks().length, 1, '剛建立的書還在');
+});
+
+test('Supabase 資料層：大欄位（封面／錄音 base64）不會進快取，要檔案時才單筆抓', async (t) => {
+    const fake = withFake(t);
+    fake.db.dict_books.push({
+        id: 1, code: 'B1', name: 'Book 1', sort_order: 1, is_published: true,
+        cover_mime: 'image/png', cover_bytes: 1234, cover_data: 'AAAA'
+    });
+    fake.db.dict_audio.push({ id: 1, entry_id: 9, source: 'teacher', mime: 'audio/webm', bytes: 10, data: 'BBBB' });
+
+    const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k' });
+    await store.hydrate();
+
+    const reads = fake.calls.filter((c) => c.method === 'GET');
+    for (const call of reads) {
+        assert.ok(call.select, `${call.table} 應該帶 select 參數`);
+    }
+    /* 只有放大檔案的兩張表需要欄位白名單；其餘表 select=* 沒關係（都是純文字欄位） */
+    assert.equal(reads.find((c) => c.table === 'dict_books').select.includes('cover_data'), false, 'hydrate 不該抓封面 base64');
+    assert.equal(reads.find((c) => c.table === 'dict_audio').select.includes('data'), false, 'hydrate 不該抓錄音 base64');
+
+    const book = store.getBook(1);
+    assert.equal(book.cover_data, null, '快取裡的 cover_data 一律是 null（有沒有封面看 cover_bytes）');
+    assert.equal(book.cover_bytes, 1234);
+    assert.equal(store.getAudio(1).data, null);
+
+    /* 真的要檔案時：單筆、只抓需要的那個欄位 */
+    const cover = await store.getBookCoverData(1);
+    assert.equal(cover.cover_data, 'AAAA');
+    const audio = await store.getAudioData(1);
+    assert.equal(audio.data, 'BBBB');
+    const single = fake.calls.filter((c) => c.method === 'GET' && c.wanted === '1');
+    assert.equal(single.length, 2, '兩次單筆抓取，不重新 hydrate 整張表');
+});
+
+test('Supabase 資料層：同一個實例在 ttl 內只抓一次（一次頁面載入打好幾支 API 不會每次都打資料庫）', async (t) => {
+    const fake = withFake(t);
+    const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k' });
+    await store.hydrate();
+    const afterFirst = fake.calls.filter((c) => c.method === 'GET').length;
+
+    await store.hydrate();   /* 第二個請求：ttl 內 → 用快取，不再查 */
+    assert.equal(fake.calls.filter((c) => c.method === 'GET').length, afterFirst, 'ttl 內不該再查資料庫');
+
+    /* 自己寫入成功後也算「剛更新」，不該馬上去重抓 */
+    store.createBook({ code: 'B9', name: 'Book 9', sort_order: 9, is_published: true });
+    await store.flush();
+    const afterWrite = fake.calls.filter((c) => c.method === 'GET').length;
+    await store.hydrate();
+    assert.equal(fake.calls.filter((c) => c.method === 'GET').length, afterWrite, '寫入後仍不該重抓');
+});
+
+test('Supabase 資料層：ttl 設 0 就每個請求都重抓（要即時性時用）', async (t) => {
+    const fake = withFake(t);
+    const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k', hydrateTtlMs: 0 });
+    await store.hydrate();
+    const afterFirst = fake.calls.filter((c) => c.method === 'GET').length;
+    await store.hydrate();
+    assert.ok(fake.calls.filter((c) => c.method === 'GET').length > afterFirst, 'ttl=0 應該重新抓');
+});
+
+test('Supabase 後端：/api/version 不碰資料庫（原本要等 7 個查詢，一次 2～5 秒）', async (t) => {
+    const fake = withFake(t);
+    process.env.JWT_SECRET = process.env.JWT_SECRET || 'supabase-test-secret';
+    const { createApp } = require('../server');
+    const app = createApp({ backend: 'supabase', url: 'https://example.supabase.co', key: 'k' });
+    const server = app.listen(0);
+    const base = `http://127.0.0.1:${server.address().port}`;
+    t.after(() => { try { server.close(); } catch (err) { /* 已關閉 */ } });
+
+    const before = fake.calls.length;
+    const res = await fetch(`${base}/api/version`);
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).version, require('../package.json').version);
+    assert.equal(fake.calls.length, before, '/api/version 不該有任何資料庫查詢');
 });
 
 test('Supabase 後端跑起整個 app：API 寫入的資料真的進資料庫（hydrate → 同步路由 → flush）', async (t) => {

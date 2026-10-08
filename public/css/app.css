@@ -1106,6 +1106,81 @@ code {
     font-size: var(--fs-small);
 }
 
+/* ---------------- 載入指示（Loading） ----------------
+ * 規則：只動 transform／opacity（不觸發重排），並遵循 prefers-reduced-motion。
+ * 顯示時機由 public/js/ui.js 的 PDLoader 控制（有 API 在飛就顯示）。 */
+.app-loader {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    z-index: 60;
+    overflow: hidden;
+    pointer-events: none;
+}
+.app-loader-bar {
+    display: block;
+    height: 100%;
+    width: 40%;
+    background: var(--accent);
+    transform: translate3d(-120%, 0, 0);
+    animation: pd-loader-slide 1.15s cubic-bezier(.4, 0, .2, 1) infinite;
+}
+@keyframes pd-loader-slide {
+    0% { transform: translate3d(-120%, 0, 0); }
+    70% { transform: translate3d(160%, 0, 0); }
+    100% { transform: translate3d(280%, 0, 0); }
+}
+
+/* 書架骨架屏：資料還沒回來時先佔位，比空白畫面穩定 */
+.skeleton-shelf {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+.skeleton-card {
+    width: 9.5rem;
+    aspect-ratio: 3 / 4;
+    border-radius: var(--radius, 12px);
+    background: var(--card);
+    border: 1px solid var(--border);
+    animation: pd-skeleton-pulse 1.5s ease-in-out infinite;
+}
+@keyframes pd-skeleton-pulse {
+    0%, 100% { opacity: .5; }
+    50% { opacity: 1; }
+}
+
+/* 螢幕閱讀器專用文字（視覺隱藏但會被唸出來） */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-loader-bar {
+        animation: none;
+        width: 100%;
+        transform: none;
+        opacity: .75;
+    }
+    .skeleton-card {
+        animation: none;
+        opacity: .65;
+    }
+}
+
 /* ---------------- 三個畫面：書架 → 目錄 → 生字表（v0.2.0） ---------------- */
 .view {
     display: flex;

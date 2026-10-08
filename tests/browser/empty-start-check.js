@@ -62,6 +62,22 @@ async function main() {
         const overflow = await browser.evaluate(`return document.documentElement.scrollWidth - window.innerWidth;`);
         check('畫面沒有橫向溢出', overflow <= 1, `溢出 ${overflow}px`);
 
+        /* 載入指示：書架是空的 → 重新載入時要先顯示骨架屏（不是空白畫面） */
+        const skeletonFlow = await browser.evaluate(`
+            const realFetch = window.fetch;
+            window.fetch = (url, init) => String(url).includes('/api/books')
+                ? new Promise((resolve) => setTimeout(() => resolve(realFetch(url, init)), 400))
+                : realFetch(url, init);
+            const done = window.PDApp.reloadBooks();
+            const shownDuringLoad = document.getElementById('shelfSkeleton').hidden === false;
+            return done.then(() => {
+                window.fetch = realFetch;
+                return { shownDuringLoad, hiddenAfter: document.getElementById('shelfSkeleton').hidden === true };
+            });
+        `);
+        check('載入書架時先顯示骨架屏（不是空白畫面）', skeletonFlow.shownDuringLoad === true);
+        check('載入完成後骨架屏收起', skeletonFlow.hiddenAfter === true);
+
         console.log('\n【2】登入視窗可以開也可以關（使用者：關不掉）');
         await loginViaUi(browser, { username: 'manager', expectText: 'Web administrator' });
         check('登入成功，標題列顯示角色', true);

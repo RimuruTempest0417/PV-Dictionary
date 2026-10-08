@@ -10,6 +10,7 @@
 (function () {
     const DICT = {
         en: {
+            'a11y.loading': 'Loading…',
             'app.subtitle': 'English Vocabulary Dictionary',
             'app.search': 'Search words, Chinese or English…',
             'app.footerVersion': 'PV_Dictionary {version}',
@@ -348,6 +349,7 @@
             'errors.DB_WRITE_FAILED': 'Your change could not be saved ({message}) — please try again'
         },
         zh: {
+            'a11y.loading': '載入中…',
             'app.subtitle': '英文生字字典',
             'app.search': '搜尋生字、中文或英文解釋…',
             'app.footerVersion': 'PV_Dictionary {version}',

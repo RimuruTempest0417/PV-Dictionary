@@ -507,6 +507,43 @@ async function main() {
         const audit = await browser.evaluate(`return document.getElementById('auditList').textContent;`);
         check('稽核紀錄看得到剛才的操作（英文動作標籤）', /Approve word|Add word|Import words/.test(audit), audit.slice(0, 120));
 
+        /* ---- 載入指示（Loading）：頂部進度條 + 骨架屏 ---- */
+        const loader = await browser.evaluate(`
+            const bar = document.getElementById('appLoader');
+            return {
+                bar: Boolean(bar && bar.querySelector('.app-loader-bar')),
+                skeleton: Boolean(document.getElementById('shelfSkeleton'))
+            };
+        `);
+        check('有頂部載入條（#appLoader）', loader.bar === true);
+        check('有書架骨架屏（#shelfSkeleton）', loader.skeleton === true);
+        /* 不在同一個瞬間斷言：最短顯示時間是 350ms，剛載完時它可能還在。
+         * 要驗的是「載入結束後它會自己收起」。 */
+        let hiddenAfterLoad = false;
+        try {
+            await browser.waitFor(`document.getElementById('appLoader').hidden === true`, { timeout: 3000 });
+            hiddenAfterLoad = true;
+        } catch (err) {
+            hiddenAfterLoad = false;
+        }
+        check('載入完成後載入條會自己收起', hiddenAfterLoad === true);
+
+        const loaderLogic = await browser.evaluate(`
+            window.PDLoader.show();
+            const visible = document.getElementById('appLoader').hidden === false;
+            window.PDLoader.hide();
+            return visible;
+        `);
+        check('PDLoader.show() 會顯示載入條', loaderLogic === true);
+        let loaderHid = false;
+        try {
+            await browser.waitFor(`document.getElementById('appLoader').hidden === true`, { timeout: 3000 });
+            loaderHid = true;
+        } catch (err) {
+            loaderHid = false;
+        }
+        check('PDLoader.hide() 之後載入條收起（最短顯示時間過後）', loaderHid);
+
         const downloads = await browser.evaluate(`return window.__downloads || [];`);
         check('檢查過程沒有觸發任何下載', downloads.length === 0, JSON.stringify(downloads));
         const shot = await browser.screenshot(path.join(dir, 'should-not-exist.png'));

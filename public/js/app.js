@@ -188,8 +188,21 @@
     }
 
     async function reloadBooks() {
-        const data = await api.get('/api/books');
-        state.books = data.books || [];
+        /* 第一次載入（還沒有任何資料）先顯示骨架屏，不要給使用者空白畫面 */
+        const skeleton = document.getElementById('shelfSkeleton');
+        const shelf = document.getElementById('bookShelf');
+        const firstLoad = !state.books.length;
+        if (skeleton && shelf && firstLoad) {
+            skeleton.hidden = false;
+            shelf.hidden = true;
+        }
+        try {
+            const data = await api.get('/api/books');
+            state.books = data.books || [];
+        } finally {
+            if (skeleton) skeleton.hidden = true;
+            if (shelf) shelf.hidden = false;
+        }
         renderShelf();
     }
 
