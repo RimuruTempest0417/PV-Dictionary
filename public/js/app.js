@@ -132,10 +132,12 @@
             ? t('count.units', { n: state.units.length })
             : '';
         document.getElementById('unitsEmpty').hidden = state.units.length > 0;
+        /* 老師以上在每一列多一顆 ✏️（修改單元名稱／編號）；學生與科代表看不到（後端也會再擋） */
+        const canEditUnits = window.PDAuth.atLeast('teacher');
         for (const unit of state.units) {
             const words = t('unit.words', { n: unit.published_count });
             const pending = unit.pending_count ? ` · ${t('unit.pending', { n: unit.pending_count })}` : '';
-            box.appendChild(el('li', { class: 'unit-row' }, [
+            const row = el('li', { class: 'unit-row' }, [
                 el('button', {
                     class: 'unit-row-btn',
                     attrs: { type: 'button', 'data-unit-id': unit.id },
@@ -145,7 +147,22 @@
                     el('span', { class: 'unit-row-title', text: unit.title || '' }),
                     el('span', { class: 'unit-row-count', text: `${words}${pending}` })
                 ])
-            ]));
+            ]);
+            if (canEditUnits) {
+                row.appendChild(el('button', {
+                    class: 'unit-row-edit',
+                    text: '✏️',
+                    attrs: {
+                        type: 'button',
+                        'data-action': 'edit-unit',
+                        'data-unit-id': unit.id,
+                        'aria-label': t('unit.editTitle'),
+                        title: t('unit.editTitle')
+                    },
+                    on: { click: () => window.PDAdmin.openUnitEdit(unit.id) }
+                }));
+            }
+            box.appendChild(row);
         }
     }
 

@@ -1447,6 +1447,46 @@ code {
     white-space: nowrap;
 }
 
+/* 目錄每一列右邊的「✏️ 修改單元」（只有老師以上看得到） */
+.unit-row {
+    display: flex;
+    align-items: stretch;
+}
+
+.unit-row-btn {
+    flex: 1 1 auto;
+}
+
+.unit-row-edit {
+    flex: 0 0 auto;
+    width: 52px;
+    min-height: 56px;
+    border: 0;
+    border-left: 1px solid var(--line);
+    background: none;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.unit-row-edit:hover {
+    background-color: var(--accent-soft);
+    color: var(--text);
+}
+
+.unit-row-edit:active {
+    background-color: var(--accent-soft);
+    transform: scale(0.94);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .unit-row-edit {
+        transition: none;
+    }
+}
+
 /* 管理選單：按哪個才顯示哪一塊（使用者：管理頁面太長了） */
 .admin-nav {
     display: flex;

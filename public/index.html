@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="PV_Dictionary — an online English vocabulary dictionary: browse words by book and unit, with pronunciation, part of speech, Chinese and English meanings.">
-    <title>PV_Dictionary v0.4.0</title>
-    <link rel="icon" href="/img/favicon.svg?v=0.4.0" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.4.0">
-    <link rel="stylesheet" href="/css/tokens.css?v=0.4.0">
-    <link rel="stylesheet" href="/css/app.css?v=0.4.0">
-    <link rel="stylesheet" href="/css/print.css?v=0.4.0" media="print">
-    <script src="/js/analytics.js?v=0.4.0"></script>
+    <title>PV_Dictionary v0.4.1</title>
+    <link rel="icon" href="/img/favicon.svg?v=0.4.1" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.4.1">
+    <link rel="stylesheet" href="/css/tokens.css?v=0.4.1">
+    <link rel="stylesheet" href="/css/app.css?v=0.4.1">
+    <link rel="stylesheet" href="/css/print.css?v=0.4.1" media="print">
+    <script src="/js/analytics.js?v=0.4.1"></script>
     <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
@@ -116,6 +116,7 @@
             <button id="newEntryBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="entry" data-i18n="admin.newEntry">➕ New word</button>
             <button id="importToggleBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="import" data-i18n="admin.import">📋 Paste a list</button>
             <button id="newUnitBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="unit" data-i18n="admin.newUnit">🏗 New unit</button>
+            <button id="navUnitEditBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="unitEdit" data-i18n="admin.editUnit">✏️ Edit unit</button>
             <button id="newBookBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="book" data-i18n="admin.newBook">📗 New book</button>
             <button id="navCoverBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="cover" data-i18n="admin.cover">🖼 Book cover</button>
             <button id="navAuditBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="audit" data-i18n="audit.title">🧾 Recent activity</button>
@@ -176,12 +177,35 @@
                 <label class="field"><span class="field-label" data-i18n="unitForm.no">Unit number *</span>
                     <input id="fUnitNo" type="number" min="1" max="99" value="1" required></label>
                 <label class="field"><span class="field-label" data-i18n="unitForm.titleField">Unit title</span>
-                    <input id="fUnitTitle" type="text" maxlength="120" placeholder="Unit 1 My Community"></label>
+                    <input id="fUnitTitle" type="text" maxlength="120" data-i18n-placeholder="unitForm.titlePlaceholder" placeholder="My Community"></label>
             </div>
             <div class="form-actions">
                 <button class="btn btn-primary" type="submit" data-i18n="unitForm.create">Create unit</button>
                 <button id="unitCancelBtn" class="btn btn-ghost" type="button" data-i18n="entry.cancel">Cancel</button>
                 <span id="unitMsg" class="form-msg" role="status"></span>
+            </div>
+        </form>
+
+        <form id="unitEditForm" class="panel form" hidden>
+            <div class="panel-head">
+                <h2 class="panel-title" data-i18n="unitEdit.title">✏️ Edit unit</h2>
+                <p class="panel-note" data-i18n="unitEdit.note">Changing the number also changes the order students see.</p>
+            </div>
+            <input type="hidden" id="unitEditId">
+            <div class="field" id="unitEditPickField">
+                <label class="field-label" for="fUnitEditPick" data-i18n="unitEdit.pick">Unit</label>
+                <select id="fUnitEditPick"></select>
+            </div>
+            <div class="field-grid">
+                <label class="field"><span class="field-label" data-i18n="unitEdit.no">Unit number *</span>
+                    <input id="fUnitEditNo" type="number" min="1" max="99" required></label>
+                <label class="field"><span class="field-label" data-i18n="unitEdit.titleField">Unit title</span>
+                    <input id="fUnitEditTitle" type="text" maxlength="120" data-i18n-placeholder="unitEdit.titlePlaceholder" placeholder="My Community"></label>
+            </div>
+            <p class="form-msg" id="unitEditMsg" role="status"></p>
+            <div class="form-actions">
+                <button class="btn btn-primary" type="submit" data-i18n="unitEdit.save">Save changes</button>
+                <button class="btn btn-ghost" type="button" id="unitEditCancelBtn" data-i18n="unitEdit.cancel">Cancel</button>
             </div>
         </form>
 
@@ -328,7 +352,7 @@
 </main>
 
 <footer class="footer">
-    <span>PV_Dictionary <span id="versionLabel">v0.4.0</span></span>
+    <span>PV_Dictionary <span id="versionLabel">v0.4.1</span></span>
     <span class="footer-sep">·</span>
     <span id="backendLabel" class="footer-muted"></span>
     <span class="footer-sep">·</span>
@@ -391,14 +415,14 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="/js/i18n.js?v=0.4.0"></script>
-<script src="/js/api.js?v=0.4.0"></script>
-<script src="/js/ui.js?v=0.4.0"></script>
-<script src="/js/audio.js?v=0.4.0"></script>
-<script src="/js/auth.js?v=0.4.0"></script>
-<script src="/js/vocab.js?v=0.4.0"></script>
-<script src="/js/admin.js?v=0.4.0"></script>
-<script src="/js/users.js?v=0.4.0"></script>
-<script src="/js/app.js?v=0.4.0"></script>
+<script src="/js/i18n.js?v=0.4.1"></script>
+<script src="/js/api.js?v=0.4.1"></script>
+<script src="/js/ui.js?v=0.4.1"></script>
+<script src="/js/audio.js?v=0.4.1"></script>
+<script src="/js/auth.js?v=0.4.1"></script>
+<script src="/js/vocab.js?v=0.4.1"></script>
+<script src="/js/admin.js?v=0.4.1"></script>
+<script src="/js/users.js?v=0.4.1"></script>
+<script src="/js/app.js?v=0.4.1"></script>
 </body>
 </html>

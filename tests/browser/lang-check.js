@@ -57,7 +57,8 @@ async function main() {
             bookLabel: document.querySelector('#shelfView .view-title').textContent,
             printBtn: document.getElementById('printBtn').textContent,
             emptyMsg: document.getElementById('vocabEmpty').textContent,
-            footerNote: document.querySelector('.footer .footer-muted:last-child').textContent
+            footerNote: document.querySelector('.footer .footer-muted:last-child').textContent,
+            unitTitlePlaceholder: document.getElementById('fUnitTitle').placeholder
         };`);
         check('<html lang> 是 en', initial.lang === 'en', initial.lang);
         check('標題副標是英文', initial.subtitle.includes('English'), initial.subtitle);
@@ -68,6 +69,11 @@ async function main() {
         check('單元空訊息是英文', initial.emptyMsg.includes('No vocabulary'), initial.emptyMsg);
         check('頁腳說明是英文', initial.footerNote.includes('Pronunciations'), initial.footerNote);
         check('還沒有選擇語言時不寫 localStorage（預設就是英文）', initial.stored === null || initial.stored === 'en', String(initial.stored));
+        /* 使用者指定：新增單元的「單元名稱」提示不要出現「Unit 1」（編號已經有獨立欄位，
+         * 提示裡再寫 Unit 1 會讓人以為名稱要自己加上編號，存進去就會變成「Unit 1 Unit 1 …」） */
+        check('單元名稱的提示不含「Unit 1」', !/Unit\s*1/i.test(initial.unitTitlePlaceholder), initial.unitTitlePlaceholder);
+        check('單元名稱的提示是英文（走 i18n，不是寫死在 HTML）',
+            initial.unitTitlePlaceholder === 'e.g. My Community', initial.unitTitlePlaceholder);
 
         console.log('\n【2】按「中文」：整個介面切換');
         await browser.evaluate(`document.querySelector('#langSwitch [data-lang="zh"]').click(); return true;`);
@@ -81,7 +87,8 @@ async function main() {
             bookLabel: document.querySelector('#shelfView .view-title').textContent,
             printBtn: document.getElementById('printBtn').textContent,
             emptyMsg: document.getElementById('vocabEmpty').textContent,
-            unitMeta: document.getElementById('unitMeta').textContent
+            unitMeta: document.getElementById('unitMeta').textContent,
+            unitTitlePlaceholder: document.getElementById('fUnitTitle').placeholder
         };`);
         check('<html lang> 變成 zh-Hant', zhState.lang === 'zh-Hant', zhState.lang);
         check('語言選擇寫進 localStorage', zhState.stored === 'zh', String(zhState.stored));
@@ -89,6 +96,7 @@ async function main() {
         check('靜態文字切成中文', zhState.subtitle.includes('英文生字字典') && zhState.bookLabel === '選擇書本'
             && zhState.printBtn.includes('列印'), JSON.stringify([zhState.subtitle, zhState.bookLabel, zhState.printBtn]));
         check('動態文字（單元空訊息）切成中文', zhState.emptyMsg.includes('還沒有生字'), zhState.emptyMsg);
+        check('單元名稱的提示跟著切成中文', zhState.unitTitlePlaceholder === '例如：My Community', zhState.unitTitlePlaceholder);
 
         console.log('\n【3】中文介面下的動態內容（登入 + 三層導覽：封面 → 目錄 → 生字表）');
         await loginViaUi(browser, { username: 'classrep', expectText: '科代表' });

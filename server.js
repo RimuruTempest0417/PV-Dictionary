@@ -914,11 +914,37 @@ function createApp(options = {}) {
         const body = req.body || {};
         const patch = {};
         if (body.title !== undefined) patch.title = str(body.title, LIMITS.title);
-        if (body.unit_no !== undefined) patch.unit_no = num(body.unit_no, unit.unit_no);
+        if (body.unit_no !== undefined) {
+            /* 改單元編號（老師可以改，例如把 Unit 3 換成 Unit 2）：
+             * 規則與「新增單元」一致 —— 1~99 的整數，且同一本書不能有兩個同編號
+             * （否則學生的目錄會出現兩個 Unit 3，而且排序會變成不確定的）。 */
+            const unitNo = Number(body.unit_no);
+            if (!Number.isFinite(unitNo) || unitNo < 1 || unitNo > 99) {
+                return res.status(400).json({ error: msg('UNIT_NUMBER'), code: 'UNIT_NUMBER' });
+            }
+            const clash = store.findUnitByNo(unit.book_id, unitNo);
+            if (clash && String(clash.id) !== String(unit.id)) {
+                const book = store.getBook(unit.book_id);
+                const bookName = book ? book.name : '';
+                return res.status(409).json({
+                    error: msg('DUPLICATE_UNIT', { book: bookName, n: unitNo }),
+                    code: 'DUPLICATE_UNIT',
+                    details: { book: bookName, n: unitNo }
+                });
+            }
+            patch.unit_no = unitNo;
+        }
         if (body.sort_order !== undefined) patch.sort_order = num(body.sort_order, unit.sort_order);
         if (body.is_published !== undefined) patch.is_published = boolish(body.is_published, true);
         const updated = store.updateUnit(unit.id, patch);
-        logAudit(store, { user: req.user, action: 'UNIT_UPDATE', targetId: unit.id, details: `Unit ${updated.unit_no}`, ip: req.ip });
+        const book = store.getBook(unit.book_id);
+        logAudit(store, {
+            user: req.user,
+            action: 'UNIT_UPDATE',
+            targetId: unit.id,
+            details: `${book ? `${book.name} ` : ''}Unit ${updated.unit_no}${updated.title ? ` ${updated.title}` : ''}`,
+            ip: req.ip
+        });
         return res.json({ unit: updated });
     });
 

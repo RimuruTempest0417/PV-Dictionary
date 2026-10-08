@@ -812,3 +812,79 @@ test('快取標頭：未登入的讀取可公開快取，登入的一律 private
     assert.equal(teacherUnit.status, 200);
     assert.equal(teacherUnit.headers.get('cache-control'), 'private, no-store');
 });
+
+/* ---- v0.4.1：修改單元（名稱與編號） ---- */
+
+test('修改單元：老師可以改名稱與編號，學生看到的目錄與生字表標題都跟著變', async (t) => {
+    const { base, ids, store } = startServer(t);
+    const teacher = await login(base, 'teacher');
+
+    /* 改名稱 */
+    const renamed = await api(base, `/api/units/${ids.unit.id}`, {
+        method: 'PATCH', cookie: teacher.cookie, body: { title: 'My New School (new)' }
+    });
+    assert.equal(renamed.status, 200);
+    assert.equal(renamed.data.unit.title, 'My New School (new)');
+    assert.equal(store.getUnit(ids.unit.id).title, 'My New School (new)');
+
+    /* 訪客看到的也跟著變（同一份資料，沒有前端快取過期問題） */
+    const anon = await api(base, `/api/units/${ids.unit.id}`);
+    assert.equal(anon.data.unit.title, 'My New School (new)');
+
+    /* 改編號：1 → 7（同時改變排序） */
+    const renumbered = await api(base, `/api/units/${ids.unit.id}`, {
+        method: 'PATCH', cookie: teacher.cookie, body: { unit_no: 7, title: 'Unit seven' }
+    });
+    assert.equal(renumbered.status, 200);
+    assert.equal(renumbered.data.unit.unit_no, 7);
+    const book = await api(base, `/api/books/${ids.book.id}/units`);
+    assert.equal(book.data.units.find((u) => u.id === ids.unit.id).unit_no, 7);
+
+    /* 稽核要留下「書名 + Unit N + 名稱」，之後追查才知道改了什麼 */
+    const audit = store.listAuditLogs({ limit: 5 }).items.find((row) => row.action === 'UNIT_UPDATE');
+    assert.ok(audit, '改單元要留稽核紀錄');
+    assert.match(audit.details, /Book 5A Unit 7 Unit seven/);
+
+    /* 再改回原本的編號，避免影響其他測試的預期 */
+    await api(base, `/api/units/${ids.unit.id}`, { method: 'PATCH', cookie: teacher.cookie, body: { unit_no: 1 } });
+});
+
+test('修改單元：編號的驗證與重複檢查（不能出現兩個 Unit N）', async (t) => {
+    const { base, ids } = startServer(t);
+    const teacher = await login(base, 'teacher');
+    const patch = (body, options = {}) => api(base, `/api/units/${ids.unit.id}`, {
+        method: 'PATCH', cookie: options.cookie || teacher.cookie, body
+    });
+
+    for (const bad of [0, 100, -1, 'abc', null]) {
+        const res = await patch({ unit_no: bad });
+        assert.equal(res.status, 400, `unit_no=${JSON.stringify(bad)} 應該被擋`);
+        assert.equal(res.data.code, 'UNIT_NUMBER');
+    }
+
+    /* 這本書已經有 Unit 9（草稿單元）→ 不能把 Unit 1 改成 9 */
+    const clash = await patch({ unit_no: 9 });
+    assert.equal(clash.status, 409);
+    assert.equal(clash.data.code, 'DUPLICATE_UNIT');
+    assert.equal(clash.data.details.n, 9);
+    assert.match(clash.data.error, /Book 5A/);
+
+    /* 改成自己原本的編號不算衝突 */
+    assert.equal((await patch({ unit_no: 1 })).status, 200);
+});
+
+test('修改單元：未登入 401、科代表 403（科代表與被授權者可以改生字，但不能改單元本身）', async (t) => {
+    const { base, ids } = startServer(t);
+    const anon = await api(base, `/api/units/${ids.unit.id}`, { method: 'PATCH', body: { title: 'x' } });
+    assert.equal(anon.status, 401);
+
+    const rep = await login(base, 'classrep');
+    const denied = await api(base, `/api/units/${ids.unit.id}`, { method: 'PATCH', cookie: rep.cookie, body: { title: 'x' } });
+    assert.equal(denied.status, 403);
+
+    /* 不存在的單元 */
+    const teacher = await login(base, 'teacher');
+    const missing = await api(base, '/api/units/999999', { method: 'PATCH', cookie: teacher.cookie, body: { title: 'x' } });
+    assert.equal(missing.status, 404);
+    assert.equal(missing.data.code, 'UNIT_NOT_FOUND');
+});

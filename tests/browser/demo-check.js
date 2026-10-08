@@ -212,6 +212,69 @@ async function main() {
         await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
         await browser.waitFor(`document.getElementById('adminSection').hidden === true`);
 
+        console.log('\n【5c】修改單元：目錄的 ✏️ → 改名稱與編號 → 目錄與生字表都更新（使用者指定）');
+        await browser.evaluate(`document.getElementById('vocabBackBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('unitsView').hidden === false`);
+        const editUi = await browser.evaluate(`return {
+            buttons: document.querySelectorAll('#unitList [data-action="edit-unit"]').length,
+            rows: document.querySelectorAll('#unitList .unit-row').length,
+            aria: (document.querySelector('#unitList [data-action="edit-unit"]') || {}).getAttribute
+                ? document.querySelector('#unitList [data-action="edit-unit"]').getAttribute('aria-label') : ''
+        };`);
+        check('目錄每一列都有「修改單元」（老師以上才看得到）', editUi.buttons === editUi.rows && editUi.buttons > 0,
+            JSON.stringify(editUi));
+        check('修改鈕有無障礙標籤（aria-label）', (editUi.aria || '').length > 0, editUi.aria);
+
+        await browser.evaluate(`document.querySelector('#unitList [data-action="edit-unit"]').click(); return true;`);
+        await browser.waitFor(`document.getElementById('unitEditForm').hidden === false`, { timeout: 6000 });
+        const prefilled = await browser.evaluate(`return {
+            sectionOpen: document.getElementById('adminSection').hidden === false,
+            activeTab: document.querySelector('#adminNav [data-admin-tab="unitEdit"]').getAttribute('aria-selected'),
+            no: document.getElementById('fUnitEditNo').value,
+            title: document.getElementById('fUnitEditTitle').value,
+            others: document.getElementById('unitForm').hidden === true && document.getElementById('bookForm').hidden === true
+        };`);
+        check('按 ✏️ 會自動打開管理區並切到「修改單元」分頁',
+            prefilled.sectionOpen === true && prefilled.activeTab === 'true' && prefilled.others === true,
+            JSON.stringify(prefilled));
+        check('表單帶入那一列的單元（不是空白）', prefilled.no === '1' && prefilled.title === 'My New School',
+            JSON.stringify([prefilled.no, prefilled.title]));
+
+        await browser.evaluate(`
+            document.getElementById('fUnitEditNo').value = '3';
+            document.getElementById('fUnitEditTitle').value = 'Renamed Unit';
+            document.forms.unitEditForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('unitList').textContent.includes('Renamed Unit')`, { timeout: 8000 });
+        const renamedRow = await browser.evaluate(`return {
+            row: document.querySelector('#unitList [data-action="edit-unit"]').closest('.unit-row').textContent,
+            msg: document.getElementById('unitEditMsg').textContent
+        };`);
+        check('目錄那一列的名稱與編號都更新了', renamedRow.row.includes('Renamed Unit') && renamedRow.row.includes('Unit 3'),
+            renamedRow.row);
+        check('表單顯示成功訊息（含新的編號）', renamedRow.msg.includes('Unit 3'), renamedRow.msg);
+        check('資料庫（權威狀態）也是新的名稱與編號',
+            store.getUnit(ids.unit.id).title === 'Renamed Unit' && store.getUnit(ids.unit.id).unit_no === 3,
+            JSON.stringify([store.getUnit(ids.unit.id).title, store.getUnit(ids.unit.id).unit_no]));
+
+        /* 改回來，讓後面的檢查維持原本的預期（Unit 1 / My New School） */
+        await browser.evaluate(`
+            document.getElementById('fUnitEditNo').value = '1';
+            document.getElementById('fUnitEditTitle').value = 'My New School';
+            document.forms.unitEditForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('unitList').textContent.includes('My New School')`, { timeout: 8000 });
+        check('改回原本的名稱與編號也成功', store.getUnit(ids.unit.id).unit_no === 1 && store.getUnit(ids.unit.id).title === 'My New School',
+            JSON.stringify([store.getUnit(ids.unit.id).unit_no, store.getUnit(ids.unit.id).title]));
+
+        /* 回到生字表並收起管理區，維持下面流程的起點 */
+        await browser.evaluate(`document.querySelector('#unitList [data-unit-id="${ids.unit.id}"]').click(); return true;`);
+        await browser.waitFor(`document.getElementById('unitSection').hidden === false`, { timeout: 8000 });
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('adminSection').hidden === true`);
+
         console.log('\n【5-7】管理員：新增生字 → 批次貼上 → 刪除（管理區在編輯後已收起）');
         await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
         await browser.waitFor(`document.getElementById('adminSection').hidden === false`);

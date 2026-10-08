@@ -22,6 +22,7 @@
         entry: 'entryForm',
         import: 'importForm',
         unit: 'unitForm',
+        unitEdit: 'unitEditForm',
         book: 'bookForm',
         cover: 'coverPanel',
         audit: 'auditBlock',
@@ -31,7 +32,7 @@
 
     function tabAllowed(tab) {
         if (tab === 'pending' || tab === 'entry' || tab === 'import') return window.PDAuth.can('can_edit');
-        if (tab === 'unit' || tab === 'book' || tab === 'cover') return window.PDAuth.atLeast('teacher');
+        if (tab === 'unit' || tab === 'unitEdit' || tab === 'book' || tab === 'cover') return window.PDAuth.atLeast('teacher');
         if (tab === 'audit') return window.PDAuth.can('can_view_audit');
         if (tab === 'users' || tab === 'grants') return window.PDAuth.can('can_manage_users');
         return false;
@@ -53,6 +54,7 @@
             if (tab === 'audit') loadAudit();
             if (tab === 'users' || tab === 'grants') window.PDUsers.refresh();
             if (tab === 'cover') renderCoverPanel();
+            if (tab === 'unitEdit') fillUnitEditOptions();
         }
         return open ? panelId : null;
     }
@@ -71,7 +73,7 @@
             const allowed = tabAllowed(tab);
             button.hidden = !allowed;
             button.disabled = !allowed
-                || ((tab === 'unit' || tab === 'cover') && !hasBook)
+                || ((tab === 'unit' || tab === 'unitEdit' || tab === 'cover') && !hasBook)
                 || ((tab === 'entry' || tab === 'import') && !hasUnit);
         }
 
@@ -672,6 +674,75 @@
     }
 
     /* ---------------- 初始化 ---------------- */
+    /* ---------------- 修改單元（v0.4.1） ----------------
+     * 使用者指定：要有修改單元名稱的功能。
+     * 從「目錄」每一列的 ✏️ 進來會直接帶入那一本單元；從管理選單自己點進來則預設目前選到的單元。
+     * 編號與名稱都可以改（編號會影響學生看到的順序），後端一樣會重新驗證權限與編號合法性。 */
+    function unitById(id) {
+        return (window.PDState.units || []).find((unit) => String(unit.id) === String(id)) || null;
+    }
+
+    function fillUnitEditOptions(preferId) {
+        const select = document.getElementById('fUnitEditPick');
+        if (!select) return;
+        const units = window.PDState.units || [];
+        const wanted = preferId !== undefined && preferId !== null
+            ? String(preferId)
+            : (window.PDState.currentUnitId ? String(window.PDState.currentUnitId) : (units[0] ? String(units[0].id) : ''));
+        clear(select);
+        for (const unit of units) {
+            select.appendChild(el('option', {
+                text: `Unit ${unit.unit_no}${unit.title ? ` · ${unit.title}` : ''}`,
+                attrs: { value: unit.id }
+            }));
+        }
+        select.value = wanted;
+        fillUnitEditFields(select.value);
+    }
+
+    /* 注意：這裡**不要**清訊息 —— 存檔成功後會再呼叫一次這個函式（把下拉與欄位重填），
+     * 清了就會把「已儲存：Unit 3」蓋掉，使用者看不到成功回饋。清訊息只在真正切換單元時做。 */
+    function fillUnitEditFields(unitId) {
+        const unit = unitById(unitId);
+        document.getElementById('unitEditId').value = unit ? unit.id : '';
+        document.getElementById('fUnitEditNo').value = unit ? unit.unit_no : '';
+        document.getElementById('fUnitEditTitle').value = unit ? (unit.title || '') : '';
+    }
+
+    function openUnitEdit(unitId) {
+        ensureAdminOpen('unitEdit');
+        fillUnitEditOptions(unitId);
+        setFormMessage(document.getElementById('unitEditMsg'), '');
+        document.getElementById('fUnitEditNo').focus();
+    }
+
+    async function submitUnitEdit(event) {
+        event.preventDefault();
+        const msg = document.getElementById('unitEditMsg');
+        const id = document.getElementById('unitEditId').value;
+        if (!id) {
+            setFormMessage(msg, t('unitEdit.pick'), 'error');
+            return;
+        }
+        const body = {
+            unit_no: Number(document.getElementById('fUnitEditNo').value),
+            title: document.getElementById('fUnitEditTitle').value.trim()
+        };
+        try {
+            const result = await api.patch(`/api/units/${id}`, body);
+            setFormMessage(msg, t('unitEdit.done', { n: result.unit.unit_no }), 'ok');
+            toast(t('unitEdit.toast'));
+            /* 畫面要跟著更新：目錄那一列、以及（如果改的就是目前這本）生字表的標題 */
+            await window.PDApp.reloadUnits(window.PDState.currentBookId);
+            if (String(window.PDState.currentUnitId) === String(result.unit.id)) {
+                await window.PDApp.reloadUnit({ keepForm: true });
+            }
+            fillUnitEditOptions(result.unit.id);
+        } catch (err) {
+            setFormMessage(msg, errText(err), 'error');
+        }
+    }
+
     function init() {
         document.getElementById('entryForm').addEventListener('submit', submitEntry);
         document.getElementById('cancelEntryBtn').addEventListener('click', closeEntryForm);
@@ -679,6 +750,13 @@
         document.getElementById('importToggleBtn').addEventListener('click', openImport);
         document.getElementById('importCancelBtn').addEventListener('click', () => showPanel(null));
         document.getElementById('unitForm').addEventListener('submit', submitUnit);
+        document.getElementById('unitEditForm').addEventListener('submit', submitUnitEdit);
+        document.getElementById('fUnitEditPick').addEventListener('change', (event) => {
+            fillUnitEditFields(event.target.value);
+            setFormMessage(document.getElementById('unitEditMsg'), '');
+        });
+        document.getElementById('navUnitEditBtn').addEventListener('click', () => openUnitEdit(window.PDState.currentUnitId));
+        document.getElementById('unitEditCancelBtn').addEventListener('click', () => showPanel(null));
         document.getElementById('bookForm').addEventListener('submit', submitBook);
         document.getElementById('newEntryBtn').addEventListener('click', () => openEntryForm(null));
         document.getElementById('newUnitBtn').addEventListener('click', () => {
@@ -750,6 +828,7 @@
         closeEntryForm,
         renderPending,
         renderCoverPanel,
+        openUnitEdit,
         openAudioModal,
         closeAudioModal
     };
