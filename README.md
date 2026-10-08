@@ -288,3 +288,6 @@ tests/fixtures/             # 路由快照等測試基準檔
 版號同時出現在 `package.json`、`public/index.html` 的 `<title>`／`#versionLabel` 與所有資產的 `?v=`；
 `tests/version-consistency.test.js` 會擋住任何一處忘了改（含 `/api/version` 與 `README.md`）。
 發版流程：`npm run check:syntax && npm test && npm run check:browser` → commit → annotated tag → push → GitHub Release。
+
+**版本說明檔一律放在 `docs/release/`**（`docs/release/release-vX.Y.Z.md`，使用者指定：集中放比較整齊），
+發 Release 時用 `node scripts/gh-release.js <tag> docs/release/release-vX.Y.Z.md "<標題後半>"`。
