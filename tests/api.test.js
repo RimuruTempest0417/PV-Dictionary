@@ -72,6 +72,7 @@ async function api(base, url, options = {}) {
     if (options.body !== undefined) headers['Content-Type'] = 'application/json';
     if (options.cookie) headers.Cookie = options.cookie;
     if (options.origin) headers.Origin = options.origin;
+    if (options.headers) Object.assign(headers, options.headers);
     const res = await fetch(`${base}${url}`, {
         method: options.method || 'GET',
         headers,
@@ -887,4 +888,130 @@ test('修改單元：未登入 401、科代表 403（科代表與被授權者可
     const missing = await api(base, '/api/units/999999', { method: 'PATCH', cookie: teacher.cookie, body: { title: 'x' } });
     assert.equal(missing.status, 404);
     assert.equal(missing.data.code, 'UNIT_NOT_FOUND');
+});
+
+/* ---- v0.4.2：錯誤日誌、節流、自動化檢查標記 ---- */
+
+const SelfTest = require('../lib/selftest');
+
+test('錯誤日誌：公開回報端點會記錄／空內容被擋／超過節流回 429', async (t) => {
+    const { app, base } = startServer(t);
+
+    const empty = await api(base, '/api/logs/error', { method: 'POST', body: {} });
+    assert.equal(empty.status, 400);
+    assert.equal(empty.data.code, 'ERROR_REPORT_EMPTY');
+
+    const ok = await api(base, '/api/logs/error', {
+        method: 'POST',
+        body: { code: 'UNCAUGHT_ERROR', message: 'boom', path: '/index.html', version: '0.4.2', context: { line: 3, junk: 'x' } }
+    });
+    assert.equal(ok.status, 201);
+    assert.ok(ok.data.id > 0);
+
+    const rows = await app.locals.errorLog.list({ limit: 5 });
+    assert.equal(rows.total, 1, '訪客也能回報（前端出錯時通常還沒登入）');
+    assert.equal(rows.rows[0].source, 'client');
+    assert.equal(rows.rows[0].resolved, false);
+    assert.equal(rows.rows[0].context.line, '3', 'context 只留白名單欄位');
+
+    /* 節流（A-4）：預設 20 次／分鐘，超過一定要擋 */
+    let limited = 0;
+    for (let i = 0; i < 25; i += 1) {
+        const res = await api(base, '/api/logs/error', { method: 'POST', body: { code: 'NOISE', message: `noise ${i}` } });
+        if (res.status === 429) limited += 1;
+    }
+    assert.ok(limited > 0, '被灌的時候一定要擋（429）');
+    assert.equal((await app.locals.errorLog.list({ limit: 1 })).total > 0, true);
+});
+
+test('錯誤日誌：只有 admin 以上看得到、可以標記已處理（會留稽核）', async (t) => {
+    const { app, base } = startServer(t);
+    await api(base, '/api/logs/error', { method: 'POST', body: { code: 'BOOM', message: 'something broke' } });
+
+    assert.equal((await api(base, '/api/admin/error-logs')).status, 401);
+    const teacher = await login(base, 'teacher');
+    assert.equal((await api(base, '/api/admin/error-logs', { cookie: teacher.cookie })).status, 403, '老師看不到錯誤紀錄');
+
+    const manager = await login(base, 'manager');
+    const list = await api(base, '/api/admin/error-logs', { cookie: manager.cookie });
+    assert.equal(list.status, 200);
+    assert.equal(list.data.rows.length, 1);
+    assert.equal(list.data.open_count, 1);
+    assert.equal(list.data.rows[0].code, 'BOOM');
+
+    const id = list.data.rows[0].id;
+    const done = await api(base, `/api/admin/error-logs/${id}`, {
+        method: 'PATCH', cookie: manager.cookie, body: { resolved: true, note: '已修正' }
+    });
+    assert.equal(done.status, 200);
+    assert.equal(done.data.entry.resolved, true);
+    assert.equal(done.data.entry.resolved_note, '已修正');
+    assert.equal(app.locals.store.listAuditLogs({ limit: 10 }).items.some((row) => row.action === 'ERROR_LOG_UPDATE'), true,
+        '標記已處理要留稽核');
+
+    assert.equal((await api(base, `/api/admin/error-logs/${id}`, { method: 'PATCH', cookie: manager.cookie, body: { resolved: false } })).data.entry.resolved, false);
+    const missing = await api(base, '/api/admin/error-logs/99999', { method: 'PATCH', cookie: manager.cookie, body: { resolved: true } });
+    assert.equal(missing.status, 404);
+    assert.equal(missing.data.code, 'ERROR_LOG_NOT_FOUND');
+
+    /* 篩選：狀態與等級 */
+    assert.equal((await api(base, '/api/admin/error-logs?level=warn', { cookie: manager.cookie })).data.rows.length, 0);
+    assert.equal((await api(base, '/api/admin/error-logs?source=server', { cookie: manager.cookie })).data.rows.length, 0);
+    assert.equal((await api(base, '/api/admin/error-logs?resolved=true', { cookie: manager.cookie })).data.rows.length, 0);
+});
+
+test('伺服器 500：錯誤處理會寫進錯誤日誌（畫面只看到英文 code，後台看得到原因）', async (t) => {
+    const { app, base } = startServer(t);
+    const original = app.locals.store.listBooks;
+    app.locals.store.listBooks = () => { throw new Error('boom from the store'); };
+    const res = await api(base, '/api/books');
+    assert.equal(res.status, 500);
+    assert.equal(res.data.code, 'SERVER');
+    assert.equal(String(res.data.error).includes('boom'), false, '回應不能把內部細節吐出去');
+    app.locals.store.listBooks = original;
+
+    const rows = await app.locals.errorLog.list({ limit: 10 });
+    assert.equal(rows.rows.length, 1);
+    assert.equal(rows.rows[0].source, 'server');
+    assert.equal(rows.rows[0].code, 'SERVER');
+    assert.match(rows.rows[0].message, /boom from the store/);
+});
+
+test('自動化檢查的流量（E-4）：稽核標成 is_self_test，預設檢視看不到', async (t) => {
+    const { app, base, ids } = startServer(t);
+    const teacher = await login(base, 'teacher');
+    const secret = process.env.JWT_SECRET;
+
+    /* 真人操作：改單元名稱（沒有帶簽章標頭） */
+    await api(base, `/api/units/${ids.unit.id}`, { method: 'PATCH', cookie: teacher.cookie, body: { title: 'Real edit' } });
+
+    /* 自動化檢查：同一件事，但帶了簽章標頭 */
+    await api(base, `/api/units/${ids.unit.id}`, {
+        method: 'PATCH',
+        cookie: teacher.cookie,
+        headers: { 'X-PV-Self-Test': SelfTest.makeHeader(secret) },
+        body: { title: 'Automated edit' }
+    });
+
+    /* 簽錯的標頭 → 一律當成真人操作（不能因為標頭就放行或標記） */
+    await api(base, `/api/units/${ids.unit.id}`, {
+        method: 'PATCH',
+        cookie: teacher.cookie,
+        headers: { 'X-PV-Self-Test': '123.deadbeef' },
+        body: { title: 'Fake automated edit' }
+    });
+
+    const rows = app.locals.store.listAuditLogs({ limit: 20 }).items.filter((row) => row.action === 'UNIT_UPDATE');
+    assert.equal(rows.length, 3);
+    assert.equal(rows.filter((row) => row.is_self_test === true).length, 1, '只有簽章正確的那一筆要被標記');
+
+    const manager = await login(base, 'manager');
+    const hidden = await api(base, '/api/admin/audit-logs', { cookie: manager.cookie });
+    assert.equal(hidden.data.logs.some((row) => row.is_self_test === true), false, '預設要把自動化檢查濾掉');
+    assert.equal(hidden.data.logs.filter((row) => row.action === 'UNIT_UPDATE').length, 2);
+    assert.equal(hidden.data.filters.hide_self_test, true);
+
+    const shown = await api(base, '/api/admin/audit-logs?hide_self_test=0', { cookie: manager.cookie });
+    assert.equal(shown.data.logs.some((row) => row.is_self_test === true), true, '想看就看得到');
+    assert.equal(shown.data.filters.hide_self_test, false);
 });

@@ -21,6 +21,20 @@ const BASE = (() => {
     return (i > -1 && process.argv[i + 1]) || process.env.LIVE_BASE || 'https://pv-dictionary-mylearning.vercel.app';
 })();
 const HOST = new URL(BASE).origin;
+
+/* 自動化檢查的簽章標頭（E-4）：這一輪跑出來的稽核紀錄會被標成 is_self_test，
+ * 你在後台看稽核紀錄時預設不會看到這十幾筆假動作（想看可以取消勾選）。 */
+const SelfTest = require('../lib/selftest');
+const SELF_TEST_HEADER = process.env.JWT_SECRET ? SelfTest.makeHeader(process.env.JWT_SECRET) : '';
+const selfTestCount = { sent: 0 };
+async function pvFetch(url, options = {}) {
+    const headers = Object.assign({}, options.headers);
+    if (SELF_TEST_HEADER && String(url).startsWith(HOST)) {
+        headers['X-PV-Self-Test'] = SELF_TEST_HEADER;
+        selfTestCount.sent += 1;
+    }
+    return fetch(url, Object.assign({}, options, { headers }));
+}
 const TEST_CODE = '__live_verify__';
 const NO_AUTH = process.argv.includes('--no-auth');
 const EPHEMERAL = process.argv.includes('--ephemeral-teacher') || process.env.VERIFY_EPHEMERAL_TEACHER === '1';
@@ -42,7 +56,7 @@ async function supabase(path, options) {
     const url = String(process.env.SUPABASE_URL).replace(/\/+$/, '');
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key) throw new Error('缺少 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY');
-    const res = await fetch(`${url}/rest/v1/${path}`, {
+    const res = await pvFetch(`${url}/rest/v1/${path}`, {
         method: (options && options.method) || 'GET',
         headers: {
             apikey: key,
@@ -61,7 +75,7 @@ async function supabaseOpenApi() {
     const url = String(process.env.SUPABASE_URL || '').replace(/\/+$/, '');
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key) return null;
-    const res = await fetch(`${url}/rest/v1/`, {
+    const res = await pvFetch(`${url}/rest/v1/`, {
         headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/openapi+json' }
     });
     if (!res.ok) return null;
@@ -69,7 +83,7 @@ async function supabaseOpenApi() {
 }
 
 async function counts() {
-    const health = await (await fetch(`${BASE}/api/health`)).json();
+    const health = await (await pvFetch(`${BASE}/api/health`)).json();
     return health.counts || {};
 }
 
@@ -104,16 +118,16 @@ async function main() {
     const createdIds = [];
 
     console.log('1. 靜態與標頭');
-    const home = await fetch(`${BASE}/`);
+    const home = await pvFetch(`${BASE}/`);
     const html = await home.text();
-    const version = (await (await fetch(`${BASE}/api/version`)).json()).version;
+    const version = (await (await pvFetch(`${BASE}/api/version`)).json()).version;
     check('首頁 HTTP 200', home.status === 200);
     check(`頁面標的是 v${version}`, html.includes(`v${version}`), `v${version}`);
     const csp = home.headers.get('content-security-policy') || '';
     check("CSP 有 script-src 'self'", /script-src 'self'/.test(csp));
     check('CSP 沒有 unsafe-inline', !/unsafe-inline/.test(csp), csp.slice(0, 120));
     check('HTML 沒有行內 script', !/<script(?![^>]*\bsrc=)[^>]*>/.test(html));
-    const analytics = await fetch(`${BASE}/js/analytics.js`);
+    const analytics = await pvFetch(`${BASE}/js/analytics.js`);
     check('/js/analytics.js 是同源檔案（200）', analytics.status === 200);
     check('analytics 走 /_vercel/insights（Vercel 服務）', /\/_vercel\/insights\/script\.js/.test(html));
 
@@ -159,9 +173,9 @@ async function main() {
         check('資料庫收得下封面欄位（INSERT 成功）', Boolean(directId), `id=${directId}`);
         /* 等 App 的快取過期（3 秒）再讀，驗的是「真的寫進資料庫」，不是快取行為 */
         await sleep(3500);
-        const cover = await fetch(`${BASE}/api/covers/${directId}`);
+        const cover = await pvFetch(`${BASE}/api/covers/${directId}`);
         check('GET /api/covers/<id> 回圖片', cover.status === 200 && /image\/png/.test(cover.headers.get('content-type') || ''), `HTTP ${cover.status}`);
-        const books = await (await fetch(`${BASE}/api/books`)).json();
+        const books = await (await pvFetch(`${BASE}/api/books`)).json();
         const row = (books.books || []).find((b) => b.code === TEST_CODE);
         check('書本清單看得到它有封面（has_cover）', Boolean(row && row.has_cover));
         check('清單沒有把 base64 一起回傳', JSON.stringify(row || {}).indexOf(PNG_1PX.slice(0, 40)) === -1);
@@ -188,7 +202,7 @@ async function main() {
                     password_hash: hashPassword(tempPassword)
                 }
             });
-            let login = await fetch(`${BASE}/api/auth/login`, {
+            let login = await pvFetch(`${BASE}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Origin: HOST },
                 body: JSON.stringify({ username: TEMP_USER, password: tempPassword })
@@ -196,7 +210,7 @@ async function main() {
             if (login.status !== 200) {
                 /* 帳號是直接寫進資料庫的：等一下讓 App 的快取過期再試一次 */
                 await sleep(3500);
-                login = await fetch(`${BASE}/api/auth/login`, {
+                login = await pvFetch(`${BASE}/api/auth/login`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Origin: HOST },
                     body: JSON.stringify({ username: TEMP_USER, password: tempPassword })
@@ -227,7 +241,7 @@ async function main() {
                 });
                 const uploadText = await upload.text();
                 check('上傳書本封面 HTTP 201（＝你回報的那個 500）', upload.status === 201, uploadText.slice(0, 200));
-                const cover = await fetch(`${BASE}/api/covers/${bookId}`);
+                const cover = await pvFetch(`${BASE}/api/covers/${bookId}`);
                 check('封面讀得回來（圖片）', cover.status === 200 && /image\/png/.test(cover.headers.get('content-type') || ''), `HTTP ${cover.status}`);
                 const removed = await authed(`/api/books/${bookId}/cover`, { method: 'DELETE' });
                 check('刪除封面 HTTP 200', removed.status === 200);
@@ -243,7 +257,7 @@ async function main() {
     if (NO_AUTH || !password) {
         skip('登入相關檢查', NO_AUTH ? '--no-auth' : '沒有可用的密碼（.env 的 VERIFY_PASSWORD 或 SEED_WEB_MANAGER_PASSWORD）');
     } else {
-        const login = await fetch(`${BASE}/api/auth/login`, {
+        const login = await pvFetch(`${BASE}/api/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Origin: HOST },
             body: JSON.stringify({ username, password })
@@ -280,7 +294,7 @@ async function main() {
             if (apiId) createdIds.push(apiId);
 
             if (apiId) {
-                const books = await (await fetch(`${BASE}/api/books`)).json();
+                const books = await (await pvFetch(`${BASE}/api/books`)).json();
                 check('書本清單看得到它（＝真的寫進 Supabase）', (books.books || []).some((b) => b.code === TEST_CODE));
                 const upload = await authed(`/api/books/${apiId}/cover`, {
                     method: 'POST',
@@ -289,7 +303,7 @@ async function main() {
                 });
                 const uploadText = await upload.text();
                 check('上傳書本封面 HTTP 201（你回報的那個 500）', upload.status === 201, uploadText.slice(0, 160));
-                const covered = (await (await fetch(`${BASE}/api/books`)).json()).books || [];
+                const covered = (await (await pvFetch(`${BASE}/api/books`)).json()).books || [];
                 check('上傳後清單顯示 has_cover', Boolean((covered.find((b) => b.code === TEST_CODE) || {}).has_cover));
                 const removed = await authed(`/api/books/${apiId}/cover`, { method: 'DELETE' });
                 check('刪除封面 HTTP 200', removed.status === 200, (await removed.text()).slice(0, 120));
@@ -308,7 +322,8 @@ async function main() {
     const after = await counts();
     check('筆數回到開始前的水準', JSON.stringify(after) === JSON.stringify(baseline), `before=${JSON.stringify(baseline)} after=${JSON.stringify(after)}`);
 
-    console.log(`\n===== 線上驗收：${pass} 通過 / ${fail} 失敗${skipped ? ` / ${skipped} 略過` : ''} =====`);
+    console.log(`\n自動化檢查簽章：${SELF_TEST_HEADER ? `已送出 ${selfTestCount.sent} 個請求` : '未啟用（沒有 JWT_SECRET）'}`);
+console.log(`\n===== 線上驗收：${pass} 通過 / ${fail} 失敗${skipped ? ` / ${skipped} 略過` : ''} =====`);
     process.exitCode = fail ? 1 : 0;
 }
 

@@ -26,6 +26,7 @@
         book: 'bookForm',
         cover: 'coverPanel',
         audit: 'auditBlock',
+        errors: 'errorsBlock',
         users: 'usersBlock',
         grants: 'grantsBlock'
     };
@@ -33,7 +34,7 @@
     function tabAllowed(tab) {
         if (tab === 'pending' || tab === 'entry' || tab === 'import') return window.PDAuth.can('can_edit');
         if (tab === 'unit' || tab === 'unitEdit' || tab === 'book' || tab === 'cover') return window.PDAuth.atLeast('teacher');
-        if (tab === 'audit') return window.PDAuth.can('can_view_audit');
+        if (tab === 'audit' || tab === 'errors') return window.PDAuth.can('can_view_audit');
         if (tab === 'users' || tab === 'grants') return window.PDAuth.can('can_manage_users');
         return false;
     }
@@ -52,6 +53,7 @@
         }
         if (open) {
             if (tab === 'audit') loadAudit();
+            if (tab === 'errors') loadErrors();
             if (tab === 'users' || tab === 'grants') window.PDUsers.refresh();
             if (tab === 'cover') renderCoverPanel();
             if (tab === 'unitEdit') fillUnitEditOptions();
@@ -85,9 +87,28 @@
         document.getElementById('importToggleBtn').title = entryBtn.title;
         document.getElementById('navCoverBtn').title = hasBook ? '' : t('admin.titleNeedBook');
 
+        /* 提示要分清三種情況（使用者回報：目錄明明有單元，卻顯示「這本書還沒有單元」）：
+         *   1. 連書本都沒有        → 警告色：先建立書本
+         *   2. 這本書真的沒有單元  → 警告色：先建立單元
+         *   3. 有單元、只是還沒點進去 → 中性色：點開其中一個就能加入生字（這不是問題，不該用警告色）
+         * 判斷「這本書有沒有單元」要用 PDState.units（書本層級的資料），不是 currentUnitId。 */
+        const bookUnitCount = (window.PDState.units || []).length;
         const hint = document.getElementById('adminHint');
-        hint.hidden = hasUnit || !canEdit;
-        if (!hint.hidden) hint.textContent = !hasBook ? t('admin.hintNoBook') : t('admin.hintNoUnit');
+        let hintKey = '';
+        let hintTone = 'warn';
+        if (canEdit && !hasUnit) {
+            if (!hasBook) hintKey = 'admin.hintNoBook';
+            else if (bookUnitCount === 0) hintKey = 'admin.hintNoUnit';
+            else {
+                hintKey = 'admin.hintPickUnit';
+                hintTone = 'info';
+            }
+        }
+        hint.hidden = !hintKey;
+        if (hintKey) {
+            hint.textContent = t(hintKey, { n: bookUnitCount });
+            hint.dataset.tone = hintTone;
+        }
 
         /* 開著的分頁若已經不該顯示（換了單元、資料被刪光），把它關掉，不要停在做不了事的表單上 */
         const openBtn = document.querySelector('#adminNav [data-admin-tab][aria-selected="true"]');
@@ -743,6 +764,90 @@
         }
     }
 
+    /* ---------------- 錯誤紀錄（v0.4.2, A-5） ----------------
+     * 後端把前端回報的錯誤與伺服器自己的 500 記在 dict_error_logs（不進 hydrate 快取）。
+     * 這裡只做四件事：列出、篩選、標記已處理、重新載入。不提供刪除 ——
+     * 要清舊資料用 scripts/cleanup-logs.js（有 dry-run），避免在畫面上誤刪。 */
+    function readErrorFilters() {
+        return {
+            level: document.getElementById('errorsLevelFilter').value,
+            source: document.getElementById('errorsSourceFilter').value,
+            resolved: document.getElementById('errorsResolvedFilter').value,
+            from: document.getElementById('errorsFromFilter').value,
+            to: document.getElementById('errorsToFilter').value
+        };
+    }
+
+    async function loadErrors() {
+        const list = document.getElementById('errorsList');
+        const count = document.getElementById('errorsCount');
+        const filters = readErrorFilters();
+        const params = new URLSearchParams({ limit: '50' });
+        for (const key of Object.keys(filters)) if (filters[key]) params.set(key, filters[key]);
+        try {
+            const data = await api.get(`/api/admin/error-logs?${params.toString()}`);
+            renderErrors(data.rows || []);
+            count.textContent = t('errorLog.count', { shown: (data.rows || []).length, total: data.total || 0, open: data.open_count || 0 });
+        } catch (err) {
+            count.textContent = errText(err);
+        }
+    }
+
+    function renderErrors(rows) {
+        const list = document.getElementById('errorsList');
+        clear(list);
+        if (!rows.length) {
+            list.appendChild(el('li', { class: 'empty', text: t('errorLog.empty') }));
+            return;
+        }
+        for (const row of rows) {
+            const tone = row.level === 'warn' ? 'update' : 'remove';
+            const when = row.created_at ? formatDateTime(row.created_at) : '';
+            const chips = [
+                el('span', { class: 'audit-chip', text: row.level === 'warn' ? 'warn' : 'error' }),
+                el('span', { class: 'audit-chip', text: row.source === 'server' ? t('errorLog.sourceServer') : t('errorLog.sourceClient') })
+            ];
+            if (row.code) chips.push(el('span', { class: 'audit-chip', text: row.code }));
+            if (row.is_self_test) chips.push(el('span', { class: 'audit-chip', text: t('errorLog.selfTest') }));
+            if (row.resolved) chips.push(el('span', { class: 'audit-chip', text: t('errorLog.statusDone') }));
+            list.appendChild(el('li', { class: 'audit-item', dataset: { tone, action: row.level } }, [
+                el('div', { class: 'audit-main' }, [
+                    el('span', { class: 'audit-chip', text: when }),
+                    ...chips
+                ]),
+                el('p', { class: 'audit-detail', text: `${row.message}${row.path ? `  ·  ${row.path}` : ''}${row.version ? `  ·  v${row.version}` : ''}` }),
+                el('div', { class: 'error-actions' }, [
+                    el('button', {
+                        class: 'btn btn-ghost btn-small',
+                        text: row.resolved ? t('errorLog.markOpen') : t('errorLog.markHandled'),
+                        attrs: { type: 'button', 'data-action': 'toggle-error', 'data-error-id': row.id, 'data-resolved': row.resolved ? '1' : '0' }
+                    })
+                ])
+            ]));
+        }
+    }
+
+    async function toggleError(button) {
+        const id = button.dataset.errorId;
+        const resolved = button.dataset.resolved !== '1';
+        try {
+            await api.patch(`/api/admin/error-logs/${id}`, { resolved });
+            toast(resolved ? t('errorLog.handled') : t('errorLog.reopened'));
+            await loadErrors();
+        } catch (err) {
+            toast(errText(err), 'error');
+        }
+    }
+
+    function clearErrorFilters() {
+        document.getElementById('errorsLevelFilter').value = '';
+        document.getElementById('errorsSourceFilter').value = '';
+        document.getElementById('errorsResolvedFilter').value = '';
+        document.getElementById('errorsFromFilter').value = '';
+        document.getElementById('errorsToFilter').value = '';
+        loadErrors();
+    }
+
     function init() {
         document.getElementById('entryForm').addEventListener('submit', submitEntry);
         document.getElementById('cancelEntryBtn').addEventListener('click', closeEntryForm);
@@ -790,6 +895,15 @@
         document.getElementById('bookCancelBtn').addEventListener('click', () => showPanel(null));
         document.getElementById('auditRefreshBtn').addEventListener('click', loadAudit);
         bindAuditFilters();
+        document.getElementById('errorsReloadBtn').addEventListener('click', loadErrors);
+        for (const id of ['errorsLevelFilter', 'errorsSourceFilter', 'errorsResolvedFilter', 'errorsFromFilter', 'errorsToFilter']) {
+            document.getElementById(id).addEventListener('change', loadErrors);
+        }
+        document.getElementById('errorsClearBtn').addEventListener('click', clearErrorFilters);
+        document.getElementById('errorsList').addEventListener('click', (event) => {
+            const button = event.target.closest('[data-action="toggle-error"]');
+            if (button) toggleError(button);
+        });
 
         document.getElementById('audioPickFileBtn').addEventListener('click', pickAudioFile);
         document.getElementById('audioFileInput').addEventListener('change', onAudioFileChosen);
@@ -822,6 +936,7 @@
     window.PDAdmin = {
         init,
         loadAudit,
+        loadErrors,
         refreshAvailability,
         showPanel,
         openEntryForm,

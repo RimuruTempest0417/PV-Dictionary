@@ -17,6 +17,10 @@ const Roles = require('./lib/roles');
 const Auth = require('./lib/auth');
 const { logAudit, AUDIT_ACTION_LABELS, actionLabel, normalizeAuditFilters } = require('./lib/audit');
 const { msg } = require('./lib/messages');
+const { createErrorLog } = require('./lib/errorlog');
+const { createThrottle } = require('./lib/throttle');
+const SelfTest = require('./lib/selftest');
+const RequestContext = require('./lib/requestcontext');
 const { verifyPassword, hashPassword, needsPasswordUpgrade } = require('./lib/passwords');
 
 const PACKAGE = require('./package.json');
@@ -167,11 +171,51 @@ function createApp(options = {}) {
         key: options.key
     });
 
+    /* 錯誤日誌（A-5）：獨立於 7 張表之外，不進 hydrate 快取（它會一直長大，見 lib/errorlog.js） */
+    const errorLog = options.errorLog || createErrorLog({
+        backend: options.backend,
+        url: options.url,
+        key: options.key,
+        dataDir: options.dataFile ? path.dirname(options.dataFile) : undefined
+    });
+    /* 公開寫入端點的節流（A-4）：記憶體計數，只用於「未登入也能寫」的端點 */
+    const throttle = createThrottle();
+
     const app = express();
     app.disable('x-powered-by');
     app.use(Auth.securityHeaders);
     app.use(Auth.corsMiddleware);
     app.use(express.json({ limit: '4mb' }));
+
+    /* 自動化檢查的簽章標頭（E-4）：整條請求鏈都在這個上下文裡，
+     * 稽核紀錄與錯誤日誌才知道要標成 is_self_test（預設檢視會濾掉）。
+     * 驗簽失敗＝當成真人操作，絕不因此放行任何權限。 */
+    app.use((req, res, next) => {
+        let secret = '';
+        try { secret = Auth.resolveJwtSecret(); } catch (err) { secret = ''; }
+        const isSelfTest = secret ? SelfTest.verifyRequest(secret, req) : false;
+        RequestContext.run({ isSelfTest }, next);
+    });
+
+    /* 寫一筆錯誤日誌（永遠不影響主要流程：失敗只印在伺服器日誌） */
+    function writeErrorLog(entry, req) {
+        const payload = Object.assign({
+            source: 'server',
+            version: PACKAGE.version,
+            is_self_test: RequestContext.isSelfTest(),
+            user_id: req && req.user ? req.user.id : null,
+            display_name: req && req.user ? (req.user.display_name || '') : '',
+            user_agent: req ? String(req.headers['user-agent'] || '') : ''
+        }, entry || {});
+        try {
+            const result = errorLog.append(payload);
+            if (result && typeof result.catch === 'function') {
+                result.catch((err) => console.error('[errorlog] 寫入失敗：', err.message));
+            }
+        } catch (err) {
+            console.error('[errorlog] 寫入失敗：', err.message);
+        }
+    }
 
     /* Supabase 版資料層：每個 /api 請求先 hydrate（抓下 7 張表）、回應送出「之前」flush（寫回異動）。
      * 為什麼要這樣做，見 lib/store/supabase.js 開頭的說明；json 版沒有 hydrate()，直接放行。 */
@@ -179,13 +223,14 @@ function createApp(options = {}) {
         /* 不需要資料庫的路由直接放行（例如 /api/version）：這支原本也要等 7 個查詢才回，
          * 一次 2～5 秒。注意：app.use('/api') 裡的 req.path 是相對於掛載點的路徑（沒有 /api 前綴），
          * 所以拿 originalUrl 來比對才不會判斷錯。 */
-        const DB_FREE = /^\/api\/version\/?$/;
+        const DB_FREE = /^\/(api\/version|api\/logs\/error|api\/admin\/error-logs)\/?$/;
         app.use('/api', async (req, res, next) => {
             if (DB_FREE.test(String(req.originalUrl || '').split('?')[0])) return next();
             try {
                 await store.hydrate();
             } catch (err) {
                 console.error('[store] 讀取 Supabase 失敗：', err.message);
+                writeErrorLog({ source: 'server', code: 'DB_UNAVAILABLE', message: err.message, path: String(req.originalUrl || '').split('?')[0] }, req);
                 return res.status(503).json({
                     error: msg('DB_UNAVAILABLE', { message: err.message }),
                     code: 'DB_UNAVAILABLE',
@@ -1164,7 +1209,10 @@ function createApp(options = {}) {
             action: str(req.query.action, 40),
             user: str(req.query.user, 40),
             from: str(req.query.from, 10),
-            to: str(req.query.to, 10)
+            to: str(req.query.to, 10),
+            /* 自動化檢查（E-4）：預設濾掉，否則每次驗收都在你的稽核紀錄裡多十幾筆假動作。
+             * 想看就帶 hide_self_test=0。 */
+            hide_self_test: req.query.hide_self_test === undefined ? true : boolish(req.query.hide_self_test, true)
         };
         const result = store.listAuditLogs(Object.assign({ limit, offset }, filters));
         const normalized = normalizeAuditFilters(filters);
@@ -1174,9 +1222,83 @@ function createApp(options = {}) {
             limit,
             offset,
             has_more: result.has_more,
-            filters: { q: normalized.q, action: normalized.action, user: normalized.user, from: normalized.fromDate, to: normalized.toDate },
+            filters: {
+                q: normalized.q, action: normalized.action, user: normalized.user,
+                from: normalized.fromDate, to: normalized.toDate,
+                hide_self_test: normalized.hide_self_test
+            },
             actions: Object.keys(AUDIT_ACTION_LABELS).map((action) => ({ value: action, label: AUDIT_ACTION_LABELS[action] }))
         });
+    });
+
+    /* ---------------- 錯誤日誌（A-5） ----------------
+     * 前端（還有未來的任何前端）遇到未預期例外時把一筆摘要送上來，後台「🐞 錯誤紀錄」看得到。
+     * 設計重點：
+     *   - 公開寫入端點 → 一定要節流（A-4）＋ 欄位白名單與長度上限（lib/errorlog.js）
+     *   - 不收截圖、不收個資（使用者指定）；只留瀏覽器版本（user-agent）與頁面路徑
+     *   - 寫入失敗不影響前端（回 201 但帶 ok:false 不是好主意 → 直接讓它失敗，前端本來就不等結果）
+     */
+    const ERROR_REPORT_LIMIT = 20;
+    const ERROR_REPORT_WINDOW_MS = 60 * 1000;
+
+    app.post('/api/logs/error', async (req, res) => {
+        const gate = throttle.allow(`error-report|${req.ip || ''}`, ERROR_REPORT_LIMIT, ERROR_REPORT_WINDOW_MS);
+        if (!gate.allowed) {
+            res.setHeader('Retry-After', String(Math.ceil(gate.retryAfterMs / 1000)));
+            return res.status(429).json({ error: msg('RATE_LIMITED'), code: 'RATE_LIMITED' });
+        }
+        const body = req.body || {};
+        const code = str(body.code, 60);
+        const message = str(body.message, 500);
+        if (!code && !message) {
+            return res.status(400).json({ error: msg('ERROR_REPORT_EMPTY'), code: 'ERROR_REPORT_EMPTY' });
+        }
+        const row = await errorLog.append({
+            source: 'client',
+            level: body.level === 'warn' ? 'warn' : 'error',
+            code,
+            message,
+            path: str(body.path, 200),
+            version: str(body.version, 20),
+            context: body.context,
+            user_agent: String(req.headers['user-agent'] || ''),
+            user_id: req.user ? req.user.id : null,
+            display_name: req.user ? (req.user.display_name || '') : '',
+            is_self_test: RequestContext.isSelfTest()
+        });
+        return res.status(201).json({ ok: true, id: row && row.id !== undefined ? row.id : null });
+    });
+
+    app.get('/api/admin/error-logs', requireRole('admin'), async (req, res) => {
+        const result = await errorLog.list({
+            level: str(req.query.level, 10),
+            source: str(req.query.source, 10),
+            resolved: req.query.resolved,
+            from: str(req.query.from, 10),
+            to: str(req.query.to, 10),
+            hide_self_test: req.query.hide_self_test === undefined ? true : boolish(req.query.hide_self_test, true),
+            limit: req.query.limit,
+            offset: req.query.offset
+        });
+        res.json(result);
+    });
+
+    app.patch('/api/admin/error-logs/:id', requireRole('admin'), async (req, res) => {
+        const body = req.body || {};
+        const updated = await errorLog.resolve(req.params.id, {
+            resolved: body.resolved === undefined ? true : boolish(body.resolved, true),
+            by: req.user.id,
+            note: str(body.note, 200)
+        });
+        if (!updated) return res.status(404).json({ error: msg('ERROR_LOG_NOT_FOUND'), code: 'ERROR_LOG_NOT_FOUND' });
+        logAudit(store, {
+            user: req.user,
+            action: 'ERROR_LOG_UPDATE',
+            targetId: req.params.id,
+            details: `錯誤紀錄 #${req.params.id} ${updated.resolved ? '標記已處理' : '標記未處理'}`,
+            ip: req.ip
+        });
+        return res.json({ entry: updated });
     });
 
     /* ================= 靜態檔與錯誤處理 ================= */
@@ -1196,7 +1318,7 @@ function createApp(options = {}) {
     });
 
     // eslint-disable-next-line no-unused-vars
-    app.use((err, req, res, next) => {
+    app.use(async (err, req, res, next) => {
         if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError)) {
             return res.status(400).json({ error: msg('BAD_JSON'), code: 'BAD_JSON' });
         }
@@ -1204,10 +1326,29 @@ function createApp(options = {}) {
             return res.status(413).json({ error: msg('TOO_LARGE'), code: 'TOO_LARGE' });
         }
         console.error('[pv-dictionary] 未預期錯誤：', err);
+        /* 先寫進錯誤日誌再回覆：serverless 在回應送出後會凍結實例，之後才寫就來不及了 */
+        try {
+            await errorLog.append(Object.assign({
+                source: 'server',
+                level: 'error',
+                code: 'SERVER',
+                message: (err && err.message) || 'unknown error',
+                path: String(req.originalUrl || '').split('?')[0],
+                version: PACKAGE.version,
+                is_self_test: RequestContext.isSelfTest(),
+                user_id: req.user ? req.user.id : null,
+                display_name: req.user ? (req.user.display_name || '') : '',
+                user_agent: String(req.headers['user-agent'] || ''),
+                context: { stack: (err && err.stack) ? String(err.stack).split('\n').slice(0, 4).join(' | ') : '' }
+            }));
+        } catch (logErr) {
+            console.error('[errorlog] 寫入失敗：', logErr.message);
+        }
         return res.status(500).json({ error: msg('SERVER'), code: 'SERVER' });
     });
 
     app.locals.store = store;
+    app.locals.errorLog = errorLog;
     return app;
 }
 

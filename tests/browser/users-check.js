@@ -43,6 +43,16 @@ async function waitForStore(predicate, timeout = 8000) {
     return predicate();
 }
 
+/* 等後端寫出的檔案內容（錯誤日誌是本機 JSON 檔，不是頁面狀態） */
+async function waitForFile(predicate, timeout = 8000) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+        if (predicate()) return true;
+        await sleep(150);
+    }
+    return predicate();
+}
+
 /* 頁面內用的小工具：靠帳號文字找到那一列（避免依賴列序） */
 const ROW_HELPERS = `
     window.__rowFor = (username) => [...document.querySelectorAll('#usersTableBody tr')]
@@ -325,6 +335,75 @@ async function main() {
         );
         check('按「清除篩選」回到全部紀錄', true);
 
+        console.log('\n【7b】錯誤紀錄（v0.4.2）：前端例外自動記錄 → 後台看得到 → 標記已處理');
+        const errorFile = path.join(app.dir, 'error-logs.json');
+        /* 真的在頁面裡製造一個沒有被捕捉的例外（不是假造資料） */
+        await browser.evaluate(`setTimeout(() => { throw new Error('__check_error__ 前端例外測試'); }, 0); return true;`);
+        const logged = await waitForFile(() => {
+            try {
+                return JSON.parse(fs.readFileSync(errorFile, 'utf8'))
+                    .some((row) => String(row.message).includes('__check_error__'));
+            } catch (err) {
+                return false;
+            }
+        });
+        check('前端例外會自動回報到錯誤日誌（未登入也能回報）', logged === true, logged ? '' : 'error-logs.json 沒有寫入');
+
+        await browser.evaluate(`document.getElementById('navErrorsBtn').click(); return true;`);
+        await browser.waitFor(`getComputedStyle(document.getElementById('errorsBlock')).display !== 'none'`, { timeout: 8000 });
+        /* ★ 一定要等「資料回來」再取樣：分頁打開是同步的，但清單要等 API 回應才會有內容。
+         * 少了這個等待，機器忙的時候就會取到「還沒渲染」的空清單（先前誤判過一次）。 */
+        await browser.waitFor(`document.querySelectorAll('#errorsList .audit-item').length > 0`, { timeout: 8000 });
+        /* 額外證明一次：從頁面直接查管理 API 也拿得到同一筆（不是只有畫面好看） */
+        const errorProbe = await browser.evaluate(`
+            return fetch('/api/admin/error-logs?limit=50', { credentials: 'same-origin', cache: 'no-store' })
+                .then((r) => r.json().then((d) => ({ status: r.status, total: d.total, rows: (d.rows || []).length, err: d.error || d.code || null })))
+                .catch((err) => ({ status: 0, err: String(err) }));
+        `);
+        check('管理 API 直接查也拿得到同一筆（畫面不是唯一來源）',
+            errorProbe.status === 200 && errorProbe.rows >= 1, JSON.stringify(errorProbe));
+        const errorsUi = await browser.evaluate(`return {
+            items: document.querySelectorAll('#errorsList .audit-item').length,
+            text: document.getElementById('errorsList').textContent,
+            count: document.getElementById('errorsCount').textContent,
+            chips: Array.from(document.querySelectorAll('#errorsList .audit-chip')).map((c) => c.textContent),
+            othersClosed: document.getElementById('auditBlock').hidden === true && document.getElementById('usersBlock').hidden === true
+        };`);
+        check('錯誤紀錄分頁打得開，而且列出剛才那一筆',
+            errorsUi.items >= 1 && errorsUi.text.includes('__check_error__') && errorsUi.othersClosed === true,
+            JSON.stringify([errorsUi.items, errorsUi.text.slice(0, 60), errorsUi.count, errorProbe]));
+        check('每一筆都標出等級與來源（error／Browser）',
+            errorsUi.chips.includes('error') && errorsUi.chips.includes('Browser'), JSON.stringify(errorsUi.chips));
+        check('標題列顯示筆數與未處理數量', /\d/.test(errorsUi.count), errorsUi.count);
+
+        /* 篩選：只看已處理時，這一筆（未處理）不該出現 */
+        await browser.evaluate(`
+            const select = document.getElementById('errorsResolvedFilter');
+            select.value = 'true';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('errorsList').textContent.includes('No errors')`, { timeout: 8000 });
+        check('篩選「已處理」時看不到未處理的那一筆', true);
+        await browser.evaluate(`
+            document.getElementById('errorsClearBtn').click();
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('errorsList').textContent.includes('__check_error__')`, { timeout: 8000 });
+
+        await browser.evaluate(`document.querySelector('#errorsList [data-action="toggle-error"]').click(); return true;`);
+        const marked = await waitForFile(() => {
+            try {
+                return JSON.parse(fs.readFileSync(errorFile, 'utf8')).some((row) => row.resolved === true);
+            } catch (err) {
+                return false;
+            }
+        });
+        check('按「標記已處理」之後資料庫也標成已處理', marked === true);
+
+        const auditAfter = store.listAuditLogs({ limit: 20 }).items.map((row) => row.action);
+        check('標記動作也留了稽核紀錄（ERROR_LOG_UPDATE）', auditAfter.includes('ERROR_LOG_UPDATE'), auditAfter.slice(0, 5).join(','));
+
         console.log('\n【8】切中文後新面板跟著翻譯 + 版面不溢出');
         await browser.evaluate(`document.getElementById('navUsersBtn').click(); return true;`);
         await browser.evaluate(`document.querySelector('#langSwitch [data-lang="zh"]').click(); return true;`);
@@ -403,7 +482,9 @@ async function main() {
         console.log('\n【9】收尾：沒有 CSP 違規、例外、下載、截圖');
         const csp = await browser.evaluate(`return window.__cspViolations || [];`);
         check('沒有 CSP 違規', csp.length === 0, JSON.stringify(csp));
-        check('沒有前端例外', browser.pageErrors.length === 0, browser.pageErrors.join(' | '));
+        /* 【7b】故意製造的那個例外不算（那是被驗收的對象，不是意外） */
+        const unexpected = browser.pageErrors.filter((line) => !String(line).includes('__check_error__'));
+        check('沒有前端例外（第 7b 節故意製造的那個除外）', unexpected.length === 0, unexpected.join(' | '));
         const shot = await browser.screenshot(path.join(app.dir, 'should-not-exist.png'));
         check('截圖預設不寫檔', shot === null && !fs.existsSync(path.join(app.dir, 'should-not-exist.png')));
         check('檢查過程沒有觸發任何下載', (await browser.evaluate(`return (window.__downloads || []).length;`)) === 0);

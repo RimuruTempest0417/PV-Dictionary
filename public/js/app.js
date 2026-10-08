@@ -292,6 +292,9 @@
         showView('units');
         renderUnitList();
         renderVocab();
+        /* 回到目錄＝沒有選取任何單元：管理區的按鈕與提示要立刻跟著變，
+         * 不能等到使用者下次打開管理區才更新（不然會停在「已選單元」的狀態）。 */
+        window.PDAdmin.refreshAvailability();
     }
 
     /* ---------------- 登入狀態 ---------------- */
@@ -546,6 +549,9 @@
 
     /* 供其他模組（admin.js）在動作完成後要求重新載入畫面。
      * 沒有把這幾個函式掛出來時，症狀是「API 成功、畫面沒更新」——而且不會有任何例外。 */
+    /* 錯誤回報要在最早期安裝（後面的程式出錯才抓得到） */
+    if (window.PDErrorLog && typeof window.PDErrorLog.install === 'function') window.PDErrorLog.install();
+
     window.PDApp = {
         reloadBooks,
         reloadUnits,

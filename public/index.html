@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="PV_Dictionary — an online English vocabulary dictionary: browse words by book and unit, with pronunciation, part of speech, Chinese and English meanings.">
-    <title>PV_Dictionary v0.4.1</title>
-    <link rel="icon" href="/img/favicon.svg?v=0.4.1" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.4.1">
-    <link rel="stylesheet" href="/css/tokens.css?v=0.4.1">
-    <link rel="stylesheet" href="/css/app.css?v=0.4.1">
-    <link rel="stylesheet" href="/css/print.css?v=0.4.1" media="print">
-    <script src="/js/analytics.js?v=0.4.1"></script>
+    <title>PV_Dictionary v0.4.2</title>
+    <link rel="icon" href="/img/favicon.svg?v=0.4.2" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.4.2">
+    <link rel="stylesheet" href="/css/tokens.css?v=0.4.2">
+    <link rel="stylesheet" href="/css/app.css?v=0.4.2">
+    <link rel="stylesheet" href="/css/print.css?v=0.4.2" media="print">
+    <script src="/js/analytics.js?v=0.4.2"></script>
     <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
@@ -120,6 +120,7 @@
             <button id="newBookBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="book" data-i18n="admin.newBook">📗 New book</button>
             <button id="navCoverBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="cover" data-i18n="admin.cover">🖼 Book cover</button>
             <button id="navAuditBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="audit" data-i18n="audit.title">🧾 Recent activity</button>
+            <button id="navErrorsBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="errors" data-i18n="errorLog.title">🐞 Error log</button>
             <button id="navUsersBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="users" data-i18n="users.title">👥 Accounts</button>
             <button id="navGrantsBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="grants" data-i18n="grants.title">🔑 Permissions</button>
         </nav>
@@ -266,6 +267,41 @@
             <ul id="auditList" class="audit-list"></ul>
         </div>
 
+        <div id="errorsBlock" class="panel" hidden>
+            <div class="panel-head">
+                <h2 class="panel-title" data-i18n="errorLog.title">🐞 Error log</h2>
+                <button id="errorsReloadBtn" class="btn btn-ghost" type="button" data-i18n="errorLog.reload">Reload</button>
+            </div>
+            <p class="panel-note" data-i18n="errorLog.note"></p>
+            <div class="audit-filters">
+                <label class="field"><span class="field-label" data-i18n="errorLog.filterLevel">Level</span>
+                    <select id="errorsLevelFilter">
+                        <option value="" data-i18n="errorLog.levelAll">All levels</option>
+                        <option value="error" data-i18n="errorLog.levelError">Errors only</option>
+                        <option value="warn" data-i18n="errorLog.levelWarn">Warnings only</option>
+                    </select></label>
+                <label class="field"><span class="field-label" data-i18n="errorLog.filterSource">Source</span>
+                    <select id="errorsSourceFilter">
+                        <option value="" data-i18n="errorLog.sourceAll">All sources</option>
+                        <option value="client" data-i18n="errorLog.sourceClient">Browser</option>
+                        <option value="server" data-i18n="errorLog.sourceServer">Server</option>
+                    </select></label>
+                <label class="field"><span class="field-label" data-i18n="errorLog.filterResolved">Status</span>
+                    <select id="errorsResolvedFilter">
+                        <option value="" data-i18n="errorLog.statusAll">All</option>
+                        <option value="false" data-i18n="errorLog.statusOpen">Unhandled</option>
+                        <option value="true" data-i18n="errorLog.statusDone">Handled</option>
+                    </select></label>
+                <label class="field"><span class="field-label" data-i18n="audit.filterFrom">From</span>
+                    <input id="errorsFromFilter" type="date"></label>
+                <label class="field"><span class="field-label" data-i18n="audit.filterTo">To</span>
+                    <input id="errorsToFilter" type="date"></label>
+                <button id="errorsClearBtn" class="btn btn-ghost btn-small" type="button" data-i18n="audit.filterClear">Clear filters</button>
+            </div>
+            <p class="panel-note" id="errorsCount" role="status"></p>
+            <ul id="errorsList" class="audit-list"></ul>
+        </div>
+
         <div id="usersBlock" class="panel" hidden>
             <div class="panel-head">
                 <h2 class="panel-title" data-i18n="users.title">👥 Accounts</h2>
@@ -352,7 +388,7 @@
 </main>
 
 <footer class="footer">
-    <span>PV_Dictionary <span id="versionLabel">v0.4.1</span></span>
+    <span>PV_Dictionary <span id="versionLabel">v0.4.2</span></span>
     <span class="footer-sep">·</span>
     <span id="backendLabel" class="footer-muted"></span>
     <span class="footer-sep">·</span>
@@ -415,14 +451,15 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="/js/i18n.js?v=0.4.1"></script>
-<script src="/js/api.js?v=0.4.1"></script>
-<script src="/js/ui.js?v=0.4.1"></script>
-<script src="/js/audio.js?v=0.4.1"></script>
-<script src="/js/auth.js?v=0.4.1"></script>
-<script src="/js/vocab.js?v=0.4.1"></script>
-<script src="/js/admin.js?v=0.4.1"></script>
-<script src="/js/users.js?v=0.4.1"></script>
-<script src="/js/app.js?v=0.4.1"></script>
+<script src="/js/errorlog.js?v=0.4.2"></script>
+<script src="/js/i18n.js?v=0.4.2"></script>
+<script src="/js/api.js?v=0.4.2"></script>
+<script src="/js/ui.js?v=0.4.2"></script>
+<script src="/js/audio.js?v=0.4.2"></script>
+<script src="/js/auth.js?v=0.4.2"></script>
+<script src="/js/vocab.js?v=0.4.2"></script>
+<script src="/js/admin.js?v=0.4.2"></script>
+<script src="/js/users.js?v=0.4.2"></script>
+<script src="/js/app.js?v=0.4.2"></script>
 </body>
 </html>

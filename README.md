@@ -3,7 +3,7 @@
 線上英文生字字典：學生**點書本封面 → 選單元 → 看生字表**（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.4.1（本機 Demo ＋ 線上版已上線）**
+- 目前版本：**v0.4.2（本機 Demo ＋ 線上版已上線）**
 - 規劃書（**待完成的事都在這**）：`docs/規劃書-待完成.md`｜決策與各版結果：`docs/規劃書-v0.0.1.md`｜部署：`docs/deploy-vercel.md`
 - 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie、介面預設英文可切中文
 - 線上：**已上線** https://pv-dictionary-mylearning.vercel.app （Vercel `pv-dictionary` ＋ Supabase；環境變數已設好）
@@ -130,7 +130,7 @@ Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-sout
   （不放外部圖床、CSP 不用放寬）。書本清單本身不夾帶圖片內容。
 - **讀音**：有老師錄音 → 播錄音；沒有 → 用瀏覽器語音合成（TTS）。同一顆 🔊，使用者不必理解差異。
 - **搜尋**：即時過濾生字、中文、英文解釋、音標、詞性。
-- **管理選單（老師以上）**：管理區分成 `⏳ 待審核｜➕ 新增生字｜📋 批次貼上｜🏗 新增單元｜✏️ 修改單元｜📗 新增書本｜🖼 書本封面｜🧾 稽核紀錄｜👥 帳號管理｜🔑 授權管理`，
+- **管理選單（老師以上）**：管理區分成 `⏳ 待審核｜➕ 新增生字｜📋 批次貼上｜🏗 新增單元｜✏️ 修改單元｜📗 新增書本｜🖼 書本封面｜🧾 稽核紀錄｜🐞 錯誤紀錄｜👥 帳號管理｜🔑 授權管理`，
   **按哪個才顯示哪一塊**；沒有權限的分頁不會出現，待審核數量顯示在按鈕上。
   從生字卡按「✏️ 編輯」時，管理區沒開會**自動打開並帶到那張表單**。
 - **修改單元**（v0.4.1）：目錄每一列右邊的 ✏️（老師以上）→ 自動打開管理區並帶入該單元的編號與名稱，
@@ -142,6 +142,10 @@ Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-sout
 - **審核流程**：科代表新增 → 「待審核」（學生看不到）→ 老師核准 → 學生才看得到。
 - **列印**：單元頁可列印成生字表（`public/css/print.css`）。
 - **稽核**：登入／登出、生字與書本的每一次新增、修改、刪除、發佈、核准、帳號與授權、封面上傳都有紀錄。
+  可以依動作／帳號／日期篩選，每個動作有顏色分類（新增綠、修改黃、刪除紅、審核藍、登入灰）；
+  **自動化檢查的動作預設會濾掉**，不會混在你的操作紀錄裡。
+- **錯誤紀錄**（v0.4.2）：前端例外與伺服器 500 會自動記到後台「🐞 錯誤紀錄」，可依等級／來源／狀態／日期篩選，
+  修好後按「標記已處理」。不保存截圖與個資；詳見 `docs/監控與錯誤追查.md`。
 
 ## 批次貼上格式
 
@@ -208,6 +212,10 @@ npm run check:schema   # 程式要用的欄位 vs migrations/*.sql（不用網�
 npm test               # 83 項：角色權限矩陣、資料層（JSON 與 Supabase）、schema 守門、路由快照與覆蓋、版本一致、i18n、API 端到端
 npm run check:browser  # 四支真 Chrome 檢查（劇本 59 ＋ 空白起步 33 ＋ 語言切換 28 ＋ 帳號管理 58）
 npm run check:deps     # 依賴套件弱點掃描（需要網路；--all 才含開發依賴）
+npm run uptime         # 線上健康檢查（版本／資料庫／公開讀取／首頁），失敗 exit 1
+npm run triage         # 巡檢錯誤日誌（唯讀，依出現次數分組）
+npm run usage          # 各表筆數與用量提醒
+npm run cleanup:logs   # 清理舊日誌（預設只預覽，--apply 才真的刪）
 npm run routes         # 列出所有後端路由與註冊順序（路由快照的來源）
 npm run routes:snapshot  # 更新 tests/fixtures/route-inventory.json（新增／移除路由後要跑）
 npm run check:schema:live        # 同一份欄位清單 vs 線上 Supabase 實際 schema
@@ -255,6 +263,7 @@ migrations/                 # Supabase schema（v0.1.0 使用）
 docs/規劃書-待完成.md        # 待完成任務與版本計畫（只放還沒做的事）
 docs/規劃書-v0.0.1.md        # 規劃書（決策與各版實作結果）
 docs/金鑰輪替.md            # 金鑰輪替步驟與紀錄
+docs/監控與錯誤追查.md      # 監控設定、錯誤追查、保留政策與清理
 lib/schema.js               # 資料庫欄位唯一清單（schema 守門用）
 lib/store/supabase.js       # Supabase adapter（hydrate → 路由 → 回應前 flush）
 scripts/route-inventory.js  # 路由清單快照（npm run routes）

@@ -33,10 +33,13 @@
         "GET /api/admin/grants",
         "POST /api/admin/grants",
         "DELETE /api/admin/grants/:id",
-        "GET /api/admin/audit-logs"
+        "GET /api/admin/audit-logs",
+        "POST /api/logs/error",
+        "GET /api/admin/error-logs",
+        "PATCH /api/admin/error-logs/:id"
     ],
     "counts": {
-        "routes": 34,
-        "layers": 42
+        "routes": 37,
+        "layers": 46
     }
 }

@@ -215,8 +215,23 @@ async function main() {
         await browser.waitFor(`document.getElementById('adminSection').hidden === true`);
 
         console.log('\n【5c】修改單元：目錄的 ✏️ → 改名稱與編號 → 目錄與生字表都更新（使用者指定）');
-        await browser.evaluate(`document.getElementById('vocabBackBtn').click(); return true;`);
-        await browser.waitFor(`document.getElementById('unitsView').hidden === false`);
+        /* 先回到書架再點進同一本書：這次不選任何單元（＝使用者的情境：目錄有單元但還沒點進去） */
+        await browser.evaluate(`document.getElementById('unitsBackBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('shelfView').hidden === false`);
+        await browser.evaluate(`document.querySelector('#bookShelf [data-book-id]').click(); return true;`);
+        await browser.waitFor(`document.getElementById('unitsView').hidden === false && document.getElementById('unitList').children.length > 0`);
+        const hintState = await browser.evaluate(`return {
+            hidden: document.getElementById('adminHint').hidden,
+            text: document.getElementById('adminHint').textContent,
+            tone: document.getElementById('adminHint').dataset.tone || '',
+            unitRows: document.querySelectorAll('#unitList .unit-row').length,
+            addWordDisabled: document.getElementById('newEntryBtn').disabled
+        };`);
+        check('目錄已經有單元時，提示不會說「這本書還沒有單元」（使用者回報的錯誤訊息）',
+            hintState.hidden === false && !/no units/i.test(hintState.text) && /already has/i.test(hintState.text),
+            JSON.stringify(hintState));
+        check('這種提示是中性的（不是警告色）', hintState.tone === 'info', hintState.tone);
+        check('還沒選單元時「新增生字」確實是停用的（只是提示文字不再誤導）', hintState.addWordDisabled === true);
         const editUi = await browser.evaluate(`return {
             buttons: document.querySelectorAll('#unitList [data-action="edit-unit"]').length,
             rows: document.querySelectorAll('#unitList .unit-row').length,
