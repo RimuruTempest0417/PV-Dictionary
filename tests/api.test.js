@@ -1270,6 +1270,74 @@ test('錯誤日誌（同類一次處理）：同 code+message 的未處理紀錄
     assert.equal(empty.status, 400);
 });
 
+test('角色與能力對照表（C-4）：公開、DB-free、六個角色與能力都在', async (t) => {
+    const { base } = startServer(t);
+    const res = await fetch(`${base}/api/roles`);
+    assert.equal(res.status, 200, '沒登入也要看得到（說明頁用）');
+    const data = await res.json();
+    assert.equal(data.roles.length, 6);
+    assert.equal(data.capabilities.length, 7);
+    assert.deepEqual(data.roles.map((role) => role.level), [0, 1, 2, 3, 4, 5], '由低到高');
+    for (const role of data.roles) {
+        assert.ok(role.label_zh && role.label_en, `${role.key} 要有中英標籤`);
+    }
+    for (const item of data.capabilities) {
+        assert.ok(item.label_zh && item.label_en && item.note_zh && item.note_en, `${item.key} 要有中英標籤與說明`);
+        assert.ok(data.roles.some((role) => role.key === item.min_role), `${item.key} 的 min_role 要存在`);
+    }
+    /* 能力表不可以洩漏任何個資或內部欄位（說明的文字可以有「密碼」這個詞，但不能有真實欄位或值） */
+    assert.equal(/password_hash|totp_secret|backup_codes|"secret"|jwt/i.test(JSON.stringify(data)), false);
+});
+
+test('權限物件由能力表產生（C-2 種子）：每個角色的 permissions 與 min_role 一致', async (t) => {
+    const { base } = startServer(t);
+    const table = (await (await fetch(`${base}/api/roles`)).json()).capabilities;
+    const minRoleOf = {};
+    for (const item of table) minRoleOf[item.key] = item.min_role;
+    const levels = { guest: 0, student: 1, class_rep: 2, teacher: 3, admin: 4, web_manager: 5 };
+    for (const name of ['teacher', 'manager', 'webmanager']) {
+        const me = await api(base, '/api/auth/me', { cookie: (await login(base, name)).cookie });
+        assert.equal(me.status, 200);
+        const role = me.data.user.role;
+        for (const [key, allowed] of Object.entries(me.data.permissions)) {
+            const min = minRoleOf[key];
+            assert.ok(min, `${key} 不在能力表裡（前端會拿到後端不認得的能力）`);
+            const expected = key === 'can_force_logout' ? role === 'web_manager' : levels[role] >= levels[min];
+            assert.equal(allowed, expected, `${name} 的 ${key} 應為 ${expected}`);
+        }
+    }
+});
+
+test('我的單元（C-1）：老師看到全部、科代表只看被授權的、訪客 401', async (t) => {
+    const { base, store } = startServer(t);
+    assert.equal((await api(base, '/api/my/units')).status, 401);
+
+    const teacher = await login(base, 'teacher');
+    const mine = await api(base, '/api/my/units', { cookie: teacher.cookie });
+    assert.equal(mine.status, 200);
+    assert.equal(mine.data.total, mine.data.all, '老師可以編輯全部單元');
+    assert.equal(mine.data.units.length, 2);
+    const first = mine.data.units[0];
+    assert.ok(first.book_name, '要帶書名（老師才知道是哪一本）');
+    assert.equal(first.can_publish, true);
+    assert.equal(typeof first.entries, 'number');
+    assert.equal(typeof first.pending, 'number', '要能顯示有幾筆待審核');
+
+    /* 科代表：沒有授權時預設可以編輯（但新增會進待審核） */
+    const rep = await login(base, 'classrep');
+    const repMine = await api(base, '/api/my/units', { cookie: rep.cookie });
+    assert.equal(repMine.status, 200);
+    assert.equal(repMine.data.units[0].can_publish, false, '科代表不能直接發佈');
+
+    /* 給科代表只授權其中一個單元 → 清單只剩那一個（有限縮授權時以授權為準） */
+    const hidden = store.listUnits({ includeUnpublished: true }).find((unit) => unit.is_published === false);
+    const repUser = store.listUsers().find((user) => user.username === 'classrep');
+    store.createGrant({ user_id: repUser.id, book_id: null, unit_id: hidden.id, can_edit: true, can_publish: false });
+    const scoped = await api(base, '/api/my/units', { cookie: rep.cookie });
+    assert.equal(scoped.data.total, 1, '有限縮授權時只看得到被授權的單元');
+    assert.equal(scoped.data.units[0].id, hidden.id);
+});
+
 test('稽核匯出（A-3）：CSV 帶 BOM、公式注入被中和、篩選條件一起套用', async (t) => {
     const { base, store } = startServer(t);
     const manager = await login(base, 'manager');

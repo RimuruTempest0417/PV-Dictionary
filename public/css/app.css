@@ -1550,3 +1550,57 @@ code {
     border: 1px solid var(--line);
     display: block;
 }
+
+/* ---------------- 我的單元（C-1）與使用說明（B-1） ---------------- */
+.my-units {
+    margin-bottom: 1.25rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--card);
+}
+
+.my-units-title {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+}
+
+.my-units-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.6rem 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.my-units-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--fg);
+    font: inherit;
+    cursor: pointer;
+    transition: transform 120ms ease, border-color 120ms ease;
+}
+
+.my-units-chip:hover { border-color: var(--accent); }
+.my-units-chip:active { transform: translateY(1px); }
+.my-units-book { color: var(--muted); }
+.my-units-empty { color: var(--muted); list-style: none; }
+
+.guide-section { margin-bottom: 1.1rem; }
+.guide-title { margin: 0 0 0.35rem; font-size: 1rem; }
+.guide-steps { margin: 0; padding-left: 1.2rem; color: var(--fg); }
+.guide-steps li { margin-bottom: 0.3rem; }
+
+.guide-table { border-collapse: collapse; font-size: 0.9rem; }
+.guide-table th,
+.guide-table td { border: 1px solid var(--border); padding: 0.3rem 0.55rem; text-align: center; }
+.guide-table th:first-child { text-align: left; }
+.guide-yes { color: var(--accent); font-weight: 600; }
+.guide-no { color: var(--muted); }

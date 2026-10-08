@@ -75,7 +75,13 @@
         ]);
 
         const actions = [];
-        if (opts.canEdit) {
+        /* 已發佈的生字只有能發佈的人（老師以上）能改／刪 —— 後端就是這樣判斷的，
+         * 所以前端也不要顯示按鈕，否則會變成「看得到按鈕、按下去被拒」（C-2 的一致性）。 */
+        const lockedPublished = entry.status === 'published' && opts.canEdit && !opts.canPublish;
+        if (lockedPublished) {
+            actions.push(el('span', { class: 'tag-badge', text: t('entry.publishedLocked'), attrs: { title: t('entry.publishedLockedHint') } }));
+        }
+        if (opts.canEdit && !lockedPublished) {
             actions.push(el('button', {
                 class: 'btn btn-secondary btn-small',
                 text: t('action.edit'),

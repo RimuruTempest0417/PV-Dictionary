@@ -94,7 +94,7 @@
                 }));
             }
             /* 只有 web_manager 能讓別人的所有裝置一起登出（使用者指定） */
-            if (!user.is_self && window.PDAuth.atLeast('web_manager')) {
+            if (!user.is_self && window.PDAuth.can('can_force_logout')) {
                 const isForcing = forcingLogout === user.id;
                 buttons.push(el('button', {
                     class: isForcing ? 'btn btn-danger btn-small' : 'btn btn-ghost btn-small',
@@ -546,7 +546,7 @@
     function syncLogoutAllButton() {
         const button = document.getElementById('logoutAllBtn');
         if (!button) return;
-        const allowed = window.PDAuth.isLoggedIn() && window.PDAuth.atLeast('web_manager');
+        const allowed = window.PDAuth.isLoggedIn() && window.PDAuth.can('can_force_logout');
         button.hidden = !allowed;
         if (!allowed) {
             logoutAllArmed = false;

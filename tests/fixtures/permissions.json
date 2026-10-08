@@ -1,0 +1,396 @@
+{
+    "_readme": [
+        "前後端權限一致性對照表（C-2）。每次新增角色、新增端點或改動權限，都要在這裡補一列，",
+        "tests/permissions.test.js 會拿每一列去打真實端點（依 min_role 驗證放行／拒絕），",
+        "並掃描 public/js 不得出現硬寫的角色判斷（一律用 PDAuth.can(能力)）。"
+    ],
+    "rows": [
+        {
+            "id": "roles-table",
+            "capability": null,
+            "method": "GET",
+            "path": "/api/roles",
+            "min_role": "guest",
+            "ui": {
+                "element": "guidePanel",
+                "gate": null
+            },
+            "why": "公開：說明頁的角色對照表"
+        },
+        {
+            "id": "my-units",
+            "capability": null,
+            "method": "GET",
+            "path": "/api/my/units",
+            "min_role": "student",
+            "ui": {
+                "element": "myUnitsBlock",
+                "gate": "can('can_edit')"
+            },
+            "why": "「我的單元」清單：任何登入的人都進得去，學生與沒有編輯權的人會拿到空清單"
+        },
+        {
+            "id": "entry-create",
+            "capability": "can_edit",
+            "method": "POST",
+            "path": "/api/units/:unit/entries",
+            "min_role": "class_rep",
+            "ui": {
+                "element": "entryForm",
+                "gate": "can('can_edit')"
+            },
+            "why": "新增生字"
+        },
+        {
+            "id": "entry-import",
+            "capability": "can_edit",
+            "method": "POST",
+            "path": "/api/units/:unit/entries/import",
+            "min_role": "class_rep",
+            "ui": {
+                "element": "importText",
+                "gate": "can('can_edit')"
+            },
+            "why": "批次貼上"
+        },
+        {
+            "id": "entry-update",
+            "capability": "can_publish",
+            "method": "PATCH",
+            "path": "/api/entries/:entry",
+            "min_role": "teacher",
+            "ui": {
+                "element": "entryForm",
+                "gate": "can('can_edit')"
+            },
+            "why": "修改【已發佈】的生字：後端要求 can_publish（老師以上）；科代表只能改自己的待審核生字"
+        },
+        {
+            "id": "entry-delete",
+            "capability": "can_publish",
+            "method": "DELETE",
+            "path": "/api/entries/:entry",
+            "min_role": "teacher",
+            "ui": {
+                "element": "vocabList",
+                "gate": "can('can_edit')"
+            },
+            "why": "刪除【已發佈】的生字：後端要求 can_publish（老師以上）；科代表見 entry-delete-pending"
+        },
+        {
+            "id": "entry-update-pending",
+            "capability": "can_edit",
+            "method": "PATCH",
+            "path": "/api/entries/:pending",
+            "min_role": "class_rep",
+            "ui": {
+                "element": "vocabList",
+                "gate": "can('can_edit')"
+            },
+            "why": "科代表改自己新增的待審核生字"
+        },
+        {
+            "id": "entry-delete-pending",
+            "capability": "can_edit",
+            "method": "DELETE",
+            "path": "/api/entries/:pending2",
+            "min_role": "class_rep",
+            "ui": {
+                "element": "vocabList",
+                "gate": "can('can_edit')"
+            },
+            "why": "科代表刪自己新增的待審核生字（刪掉就沒了，所以用另一筆 :pending2）"
+        },
+        {
+            "id": "entry-review",
+            "capability": "can_publish",
+            "method": "POST",
+            "path": "/api/entries/:entry/review",
+            "min_role": "teacher",
+            "ui": {
+                "element": "pendingList",
+                "gate": "can('can_publish')"
+            },
+            "why": "審核科代表的新增"
+        },
+        {
+            "id": "unit-publish",
+            "capability": "can_publish",
+            "method": "POST",
+            "path": "/api/units/:unit/publish",
+            "min_role": "teacher",
+            "ui": {
+                "element": "pendingList",
+                "gate": "can('can_publish')"
+            },
+            "why": "發佈單元"
+        },
+        {
+            "id": "unit-unpublish",
+            "capability": "can_publish",
+            "method": "POST",
+            "path": "/api/units/:unit/unpublish",
+            "min_role": "teacher",
+            "ui": {
+                "element": "pendingList",
+                "gate": "can('can_publish')"
+            },
+            "why": "下架單元"
+        },
+        {
+            "id": "audio-upload",
+            "capability": "can_upload_audio",
+            "method": "POST",
+            "path": "/api/entries/:entry/audio",
+            "min_role": "teacher",
+            "ui": {
+                "element": "audioFileInput",
+                "gate": "can('can_upload_audio')"
+            },
+            "why": "上傳老師錄音"
+        },
+        {
+            "id": "audio-delete",
+            "capability": "can_upload_audio",
+            "method": "DELETE",
+            "path": "/api/audio/:audio",
+            "min_role": "teacher",
+            "ui": {
+                "element": "audioFileInput",
+                "gate": "can('can_upload_audio')"
+            },
+            "why": "刪除錄音"
+        },
+        {
+            "id": "book-create",
+            "capability": "can_manage_content",
+            "method": "POST",
+            "path": "/api/books",
+            "min_role": "teacher",
+            "ui": {
+                "element": "bookForm",
+                "gate": "can('can_manage_content')"
+            },
+            "why": "新增書本"
+        },
+        {
+            "id": "book-update",
+            "capability": "can_manage_content",
+            "method": "PATCH",
+            "path": "/api/books/:book",
+            "min_role": "teacher",
+            "ui": {
+                "element": "bookForm",
+                "gate": "can('can_manage_content')"
+            },
+            "why": "修改書本"
+        },
+        {
+            "id": "unit-create",
+            "capability": "can_manage_content",
+            "method": "POST",
+            "path": "/api/books/:book/units",
+            "min_role": "teacher",
+            "ui": {
+                "element": "unitForm",
+                "gate": "can('can_manage_content')"
+            },
+            "why": "新增單元"
+        },
+        {
+            "id": "unit-update",
+            "capability": "can_manage_content",
+            "method": "PATCH",
+            "path": "/api/units/:unit",
+            "min_role": "teacher",
+            "ui": {
+                "element": "unitEditForm",
+                "gate": "can('can_manage_content')"
+            },
+            "why": "修改單元名稱與編號"
+        },
+        {
+            "id": "cover-upload",
+            "capability": "can_manage_content",
+            "method": "POST",
+            "path": "/api/books/:book/cover",
+            "min_role": "teacher",
+            "ui": {
+                "element": "coverFileInput",
+                "gate": "can('can_manage_content')"
+            },
+            "why": "上傳封面"
+        },
+        {
+            "id": "users-list",
+            "capability": "can_manage_users",
+            "method": "GET",
+            "path": "/api/admin/users",
+            "min_role": "admin",
+            "ui": {
+                "element": "usersBlock",
+                "gate": "can('can_manage_users')"
+            },
+            "why": "帳號管理"
+        },
+        {
+            "id": "users-create",
+            "capability": "can_manage_users",
+            "method": "POST",
+            "path": "/api/admin/users",
+            "min_role": "admin",
+            "ui": {
+                "element": "newUserBtn",
+                "gate": "can('can_manage_users')"
+            },
+            "why": "新增帳號"
+        },
+        {
+            "id": "users-update",
+            "capability": "can_manage_users",
+            "method": "PATCH",
+            "path": "/api/admin/users/:user",
+            "min_role": "admin",
+            "ui": {
+                "element": "usersBlock",
+                "gate": "can('can_manage_users')"
+            },
+            "why": "改角色／停用／改密碼"
+        },
+        {
+            "id": "password-reset",
+            "capability": "can_manage_users",
+            "method": "POST",
+            "path": "/api/admin/users/:user/reset-password",
+            "min_role": "admin",
+            "ui": {
+                "element": "usersBlock",
+                "gate": "can('can_manage_users')"
+            },
+            "why": "重設密碼"
+        },
+        {
+            "id": "totp-reset",
+            "capability": "can_manage_users",
+            "method": "POST",
+            "path": "/api/admin/users/:user/reset-2fa",
+            "min_role": "admin",
+            "ui": {
+                "element": "usersBlock",
+                "gate": "can('can_manage_users')"
+            },
+            "why": "重設兩步驟驗證"
+        },
+        {
+            "id": "grants-list",
+            "capability": "can_manage_users",
+            "method": "GET",
+            "path": "/api/admin/grants",
+            "min_role": "admin",
+            "ui": {
+                "element": "grantsList",
+                "gate": "can('can_manage_users')"
+            },
+            "why": "授權管理"
+        },
+        {
+            "id": "audit-list",
+            "capability": "can_view_audit",
+            "method": "GET",
+            "path": "/api/admin/audit-logs",
+            "min_role": "admin",
+            "ui": {
+                "element": "auditList",
+                "gate": "can('can_view_audit')"
+            },
+            "why": "稽核紀錄"
+        },
+        {
+            "id": "audit-export",
+            "capability": "can_view_audit",
+            "method": "GET",
+            "path": "/api/admin/audit-logs/export",
+            "min_role": "admin",
+            "ui": {
+                "element": "auditExportBtn",
+                "gate": "can('can_view_audit')"
+            },
+            "why": "匯出稽核 CSV"
+        },
+        {
+            "id": "audit-cleanup",
+            "capability": "can_view_audit",
+            "method": "POST",
+            "path": "/api/admin/audit-logs/cleanup",
+            "min_role": "admin",
+            "ui": {
+                "element": "auditCleanupBtn",
+                "gate": "can('can_view_audit')"
+            },
+            "why": "清理舊稽核"
+        },
+        {
+            "id": "stats",
+            "capability": "can_view_audit",
+            "method": "GET",
+            "path": "/api/admin/stats",
+            "min_role": "admin",
+            "ui": {
+                "element": "statsList",
+                "gate": "can('can_view_audit')"
+            },
+            "why": "概況"
+        },
+        {
+            "id": "errors-list",
+            "capability": "can_view_audit",
+            "method": "GET",
+            "path": "/api/admin/error-logs",
+            "min_role": "admin",
+            "ui": {
+                "element": "errorsList",
+                "gate": "can('can_view_audit')"
+            },
+            "why": "錯誤紀錄"
+        },
+        {
+            "id": "force-logout",
+            "capability": "can_force_logout",
+            "method": "PATCH",
+            "path": "/api/admin/users/:user",
+            "min_role": "web_manager",
+            "body": {
+                "force_logout": true
+            },
+            "ui": {
+                "element": "usersBlock",
+                "gate": "can('can_force_logout')"
+            },
+            "why": "讓某人所有裝置登出（同一個端點，只有 force_logout 欄位要求網站管理員）"
+        },
+        {
+            "id": "users-delete",
+            "capability": "can_manage_users",
+            "method": "DELETE",
+            "path": "/api/admin/users/:victim",
+            "min_role": "admin",
+            "ui": {
+                "element": "usersBlock",
+                "gate": "can('can_manage_users')"
+            },
+            "why": "刪除帳號：admin 以上（放在最後，因為它會真的刪掉那個臨時帳號）"
+        },
+        {
+            "id": "logout-all",
+            "capability": "can_force_logout",
+            "method": "POST",
+            "path": "/api/admin/users/logout-all",
+            "min_role": "web_manager",
+            "ui": {
+                "element": "logoutAllBtn",
+                "gate": "can('can_force_logout')"
+            },
+            "why": "所有帳號所有裝置一起登出（放最後：它會讓所有人的權杖失效，包含自己）"
+        }
+    ]
+}

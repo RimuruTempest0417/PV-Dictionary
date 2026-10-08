@@ -19,6 +19,28 @@ function tempDir() {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'pv-errorlog-'));
 }
 
+test('錯誤紀錄（A-5）：CSP 違規會保留來源檔名，超長會截斷', () => {
+    const dir = tempDir();
+    const log = createErrorLog({ backend: 'json', dataDir: dir });
+
+    const long = '/js/' + 'a'.repeat(500) + '.js';
+    const entry = log.append({
+        code: 'CSP_VIOLATION', message: "script-src 'self' blocked https://example.com/x.js", level: 'warn',
+        path: '/', context: { directive: 'script-src-elem', blocked: 'https://example.com/x.js', source: long, line: 42 }
+    });
+    assert.ok(entry.context.source.startsWith('/js/'), '來源檔名要留下來（追查時要知道是哪個檔案）');
+    assert.ok(entry.context.source.length <= 300, `source 要截斷（實際 ${entry.context.source.length}）`);
+    assert.equal(entry.context.line, '42');
+    assert.equal(entry.context.directive, 'script-src-elem');
+
+    /* 沒有 source 的時候不能變成 "undefined" 這種字串 */
+    const bare = log.append({ code: 'OTHER', message: 'x', context: { line: 7 } });
+    assert.equal(bare.context.source, undefined);
+    assert.equal(bare.context.line, '7');
+
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('錯誤日誌：欄位會被削乾淨，多餘的欄位與超長內容都進不來', () => {
     const entry = normalizeEntry({
         source: 'hacker',

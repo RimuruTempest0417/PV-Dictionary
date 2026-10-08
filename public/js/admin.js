@@ -36,7 +36,7 @@
 
     function tabAllowed(tab) {
         if (tab === 'pending' || tab === 'entry' || tab === 'import') return window.PDAuth.can('can_edit');
-        if (tab === 'unit' || tab === 'unitEdit' || tab === 'book' || tab === 'cover') return window.PDAuth.atLeast('teacher');
+        if (tab === 'unit' || tab === 'unitEdit' || tab === 'book' || tab === 'cover') return window.PDAuth.can('can_manage_content');
         if (tab === 'audit' || tab === 'errors' || tab === 'stats') return window.PDAuth.can('can_view_audit');
         if (tab === 'users' || tab === 'grants') return window.PDAuth.can('can_manage_users');
         return false;
@@ -428,7 +428,7 @@
         const count = document.getElementById('pendingCount');
         const note = document.getElementById('pendingNote');
         const pending = (entries || []).filter((entry) => entry.status === 'pending');
-        const canReview = window.PDAuth.atLeast('teacher');
+        const canReview = window.PDAuth.can('can_publish');
         const canEdit = window.PDAuth.can('can_edit');
         clear(list);
         count.textContent = String(pending.length);

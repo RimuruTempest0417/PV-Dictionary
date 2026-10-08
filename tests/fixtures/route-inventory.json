@@ -9,6 +9,8 @@
         "POST /api/auth/login",
         "POST /api/auth/login/2fa",
         "POST /api/auth/logout",
+        "GET /api/roles",
+        "GET /api/my/units",
         "GET /api/auth/me",
         "POST /api/auth/2fa/setup",
         "POST /api/auth/2fa/enable",
@@ -50,7 +52,7 @@
         "PATCH /api/admin/error-logs/:id"
     ],
     "counts": {
-        "routes": 48,
-        "layers": 57
+        "routes": 50,
+        "layers": 59
     }
 }

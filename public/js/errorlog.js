@@ -116,11 +116,29 @@
          *   會擋掉任何行內 style 與 style 屬性，所以這種違規不可能來自本專案的程式碼。
          *   真的自己寫了行內樣式時，守門測試會先紅燈，不會被這裡默默吃掉。 */
         const EXTENSION_INLINE_STYLE = /^style-src-(elem|attr)$/;
+        /* 被擋下來的來源檔名：只留「同源、去查詢字串」的路徑（例：/js/app.js），
+         * 外部網域一律記成 external —— 追查時知道是我們自己的哪個檔案就夠了，
+         * 不要把學生的瀏覽器外掛網址整串記進資料庫。 */
+        function violationSource(raw) {
+            try {
+                const url = new URL(String(raw || ''), location.href);
+                if (url.origin !== location.origin) return 'external';
+                return url.pathname;
+            } catch (err) {
+                return '';
+            }
+        }
+
         document.addEventListener('securitypolicyviolation', (event) => {
             const directive = event.effectiveDirective || event.violatedDirective || '';
             const blocked = event.blockedURI || '';
             if (EXTENSION_INLINE_STYLE.test(directive) && blocked === 'inline') return;
-            report('CSP_VIOLATION', `${directive} blocked ${blocked}`, { directive, blocked });
+            report('CSP_VIOLATION', `${directive} blocked ${blocked}`, {
+                directive,
+                blocked,
+                source: violationSource(event.sourceFile),
+                line: Number(event.lineNumber) || ''
+            });
         });
     }
 

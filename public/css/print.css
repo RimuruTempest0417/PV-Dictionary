@@ -69,3 +69,27 @@ body {
     border: 1px solid #999;
     padding: 0 4px;
 }
+
+/* ---------------- 列印「使用說明」（B-1） ----------------
+ * 說明頁按列印時，body 會掛上 data-print-view="guide"：
+ * 這時候只印 #guidePanel，其他畫面與按鈕全部隱藏。
+ */
+@media print {
+    body[data-print-view="guide"] > header,
+    body[data-print-view="guide"] #shelfView,
+    body[data-print-view="guide"] #unitsView,
+    body[data-print-view="guide"] #unitSection,
+    body[data-print-view="guide"] #adminSection,
+    body[data-print-view="guide"] #guidePrintBtn,
+    body[data-print-view="guide"] #guideCloseBtn {
+        display: none !important;
+    }
+
+    body[data-print-view="guide"] #guidePanel {
+        display: block !important;
+    }
+
+    body[data-print-view="guide"] .guide-section {
+        break-inside: avoid;
+    }
+}

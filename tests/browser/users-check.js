@@ -143,7 +143,7 @@ async function main() {
             grantsVisible.length === 1 && (await browser.evaluate(`return document.getElementById('usersBlock').hidden === true;`)) === true);
         await browser.evaluate(`document.getElementById('navUsersBtn').click(); return true;`);
         await sleep(300);
-        const tableInfo = await browser.evaluate(`
+        const usersTableInfo = await browser.evaluate(`
             return {
                 rows: [...document.querySelectorAll('#usersTableBody tr')].length,
                 accounts: [...document.querySelectorAll('#usersTableBody td strong')].map((n) => n.textContent),
@@ -152,10 +152,10 @@ async function main() {
                 headers: [...document.querySelectorAll('#usersBlock thead th')].map((th) => th.textContent)
             };
         `);
-        check('五個種子帳號都列出來', tableInfo.rows === 5 && tableInfo.accounts.includes('teacher'), JSON.stringify(tableInfo.accounts));
-        check('自己的那一列有標記（you）', tableInfo.hasSelfBadge);
-        check('比自己低的角色可以行內改（admin 不能改自己／同級／網站管理員）', tableInfo.roleSelects === 3, String(tableInfo.roleSelects));
-        check('表頭是英文', tableInfo.headers.includes('Account') && tableInfo.headers.includes('Role'), tableInfo.headers.join(','));
+        check('五個種子帳號都列出來', usersTableInfo.rows === 5 && usersTableInfo.accounts.includes('teacher'), JSON.stringify(usersTableInfo.accounts));
+        check('自己的那一列有標記（you）', usersTableInfo.hasSelfBadge);
+        check('比自己低的角色可以行內改（admin 不能改自己／同級／網站管理員）', usersTableInfo.roleSelects === 3, String(usersTableInfo.roleSelects));
+        check('表頭是英文', usersTableInfo.headers.includes('Account') && usersTableInfo.headers.includes('Role'), usersTableInfo.headers.join(','));
 
         console.log('\n【3】建立帳號（畫面操作 → 表格出現 → 新帳號可登入）');
         await browser.evaluate(`document.getElementById('newUserBtn').click(); return true;`);
@@ -450,6 +450,77 @@ async function main() {
         check('錯誤紀錄每一列都有「同類全部標為已處理」的按鈕',
             (await browser.evaluate(`return document.querySelectorAll('#errorsList [data-action="resolve-similar"]').length;`)) >= 1);
 
+        console.log('\n【7e】科代表看到的按鈕 = 後端真的允許的（C-2）：已發佈的只給老師改');
+        /* 直接建一個科代表帳號，避免動到前面測試用過的帳號 */
+        const repUser = store.createUser({
+            username: 'repcheck', display_name: 'Rep Check', role: 'class_rep',
+            password_hash: require('../../lib/passwords').hashPassword(PASSWORD), is_active: true
+        });
+        /* 一筆已發佈（老師的）+ 一筆待審核（科代表的） */
+        const repUnits = store.listUnits({ includeUnpublished: true });
+        const repUnit = repUnits[0];
+        const repPublished = store.listEntries({ unitId: repUnit.id }).find((entry) => entry.status === 'published');
+        const repPending = store.createEntry({
+            unit_id: repUnit.id, headword: 'repword', headword_norm: 'repword', status: 'pending',
+            sort_order: 99, created_by: 'repcheck', zh_meaning: '科代表新增的', en_definition: 'added by a class rep'
+        });
+
+        await logoutViaUi(browser);
+        await loginViaUi(browser, { username: 'repcheck' });
+        await browser.evaluate(`window.PDApp.backToShelf(); return true;`);
+        await browser.waitFor(`document.querySelectorAll('#bookShelf [data-book-id]').length > 0`, { timeout: 8000 });
+        await browser.evaluate(`document.querySelector('#bookShelf [data-book-id]').click(); return true;`);
+        await browser.waitFor(`document.getElementById('unitList').hidden === false`, { timeout: 8000 });
+        await browser.evaluate(`document.querySelector('#unitList [data-unit-id]').click(); return true;`);
+        await browser.waitFor(`document.querySelectorAll('#vocabList .vocab-item').length > 0`, { timeout: 8000 });
+
+        const repView = await browser.evaluate(`
+            const cards = Array.from(document.querySelectorAll('#vocabList .vocab-item'));
+            const find = (id) => cards.find((card) => String(card.dataset.entryId) === String(id));
+            const published = find(${repPublished.id});
+            const pending = find(${repPending.id});
+            return {
+                publishedButtons: published ? published.querySelectorAll('[data-action="edit-entry"], [data-action="delete-entry"]').length : -1,
+                publishedLocked: published ? /已發佈|Published/.test(published.textContent) : false,
+                pendingButtons: pending ? pending.querySelectorAll('[data-action="edit-entry"], [data-action="delete-entry"]').length : -1,
+                pendingEdit: pending ? Boolean(pending.querySelector('[data-action="edit-entry"]')) : false
+            };`);
+        check('科代表看不到「已發佈生字」的編輯／刪除按鈕（後端也是拒絕的）',
+            repView.publishedButtons === 0, JSON.stringify(repView));
+        check('已發佈的生字對科代表顯示「🔒 已發佈」而不是按鈕', repView.publishedLocked === true, JSON.stringify(repView));
+        check('科代表看得到自己新增的待審核生字可以編輯',
+            repView.pendingButtons === 2 && repView.pendingEdit === true, JSON.stringify(repView));
+
+        /* 按下編輯真的能打開表單（不是看得到卻按不下去） */
+        await browser.evaluate(`
+            const card = Array.from(document.querySelectorAll('#vocabList .vocab-item')).find((node) => String(node.dataset.entryId) === '${repPending.id}');
+            card.querySelector('[data-action="edit-entry"]').click();
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('entryForm') && document.getElementById('fHeadword').value === 'repword'`, { timeout: 8000 });
+        check('按下編輯會載入那一筆待審核生字', (await browser.evaluate(`return document.getElementById('fHeadword').value;`)) === 'repword');
+
+        /* 後端複驗：在頁面內帶 cookie 呼叫（科代表改已發佈生字一定要被拒） */
+        const blocked = await browser.evaluate(`
+            return fetch('/api/entries/${repPublished.id}', {
+                method: 'PATCH', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ headword: 'hacked' })
+            }).then((res) => res.status);
+        `);
+        check('科代表直接呼叫 API 改已發佈生字會被擋（403）', blocked === 403, String(blocked));
+
+        store.deleteEntry(repPending.id);
+        store.deleteUser(repUser.id);
+
+        /* 交還給管理員：後面的【8】要按帳號管理（科代表看不到那顆按鈕）。
+         * ★ 重新登入後管理區是收起的，而【8】是在「已經打開」的前提下按分頁 → 這裡要把它打開，
+         *   否則分頁會在收起的容器裡（量到 0×0 的寬度，v0.4.5 踩過一次）。 */
+        await logoutViaUi(browser);
+        await loginViaUi(browser, { username: 'manager' });
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('adminSection').hidden === false`, { timeout: 8000 });
+
         console.log('\n【8】切中文後新面板跟著翻譯 + 版面不溢出');
         await browser.evaluate(`document.getElementById('navUsersBtn').click(); return true;`);
         await browser.evaluate(`document.querySelector('#langSwitch [data-lang="zh"]').click(); return true;`);
@@ -475,11 +546,18 @@ async function main() {
         await sleep(400);
         const overflow = await browser.evaluate(`return document.documentElement.scrollWidth - window.innerWidth;`);
         check('手機版（402px）帳號管理也不會橫向溢出', overflow <= 1, `溢出 ${overflow}px`);
-        const tableScrolls = await browser.evaluate(`
+        const usersWrapInfo = await browser.evaluate(`
             const wrap = document.querySelector('#usersBlock .table-wrap');
-            return wrap ? wrap.scrollWidth > wrap.clientWidth : false;
+            return {
+                has: Boolean(wrap),
+                scrollWidth: wrap ? wrap.scrollWidth : -1,
+                clientWidth: wrap ? wrap.clientWidth : -1,
+                rows: document.querySelectorAll('#usersTableBody tr').length,
+                cells: document.querySelectorAll('#usersTableBody tr:first-child td').length
+            };
         `);
-        check('窄螢幕時表格自己在框內橫向捲動（不是把整頁撐開）', tableScrolls === true);
+        check('窄螢幕時表格自己在框內橫向捲動（不是把整頁撐開）',
+            usersWrapInfo.has && usersWrapInfo.scrollWidth > usersWrapInfo.clientWidth, JSON.stringify(usersWrapInfo));
         await browser.setViewport(1360, 1000, false);
         await sleep(300);
 

@@ -14,6 +14,7 @@ const fs = require('fs');
 
 const { createStore, normalizeHeadword, DATA_BACKEND_LABEL } = require('./lib/store');
 const Roles = require('./lib/roles');
+const Capabilities = require('./lib/capabilities');
 const Auth = require('./lib/auth');
 const { logAudit, AUDIT_ACTION_LABELS, actionLabel, normalizeAuditFilters, toCsv } = require('./lib/audit');
 const { msg } = require('./lib/messages');
@@ -556,18 +557,48 @@ function createApp(options = {}) {
         return res.json({ ok: true });
     });
 
+    /* 角色與能力對照表（C-4）：公開、DB-free —— 說明頁與「角色與權限」表格都讀這一份，
+     * 所以在任何登入狀態下都能看（訪客也需要知道「登入後能做什麼」）。 */
+    app.get('/api/roles', (req, res) => {
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        return res.json(Capabilities.describe());
+    });
+
+    /* 「我的單元」（C-1）：登入後一眼看到「我可以編輯的單元」+ 各單元待審核數量 */
+    app.get('/api/my/units', requireAuth, (req, res) => {
+        const allGrants = grants();
+        const books = store.listBooks({ includeUnpublished: true });
+        const bookNameOf = (unit) => {
+            const book = books.find((item) => String(item.id) === String(unit.book_id));
+            return book ? book.name : '';
+        };
+        const units = store.listUnits({ includeUnpublished: true });
+        const entries = store.listEntries({});
+        const mine = units.filter((unit) => Roles.canEditUnit(req.user, unit, allGrants));
+        return res.json({
+            total: mine.length,
+            all: units.length,
+            units: mine.map((unit) => ({
+                id: unit.id,
+                book_id: unit.book_id,
+                book_name: bookNameOf(unit),
+                unit_no: unit.unit_no,
+                title: unit.title || '',
+                is_published: unit.is_published !== false,
+                entries: entries.filter((entry) => entry.unit_id === unit.id && entry.status === 'published').length,
+                pending: entries.filter((entry) => entry.unit_id === unit.id && entry.status === 'pending').length,
+                can_publish: Roles.canPublishUnit(req.user, unit, allGrants)
+            }))
+        });
+    });
+
     app.get('/api/auth/me', (req, res) => {
         if (!req.user) return res.status(401).json({ error: msg('AUTH_REQUIRED'), code: 'AUTH_REQUIRED' });
         const scoped = Roles.grantsFor(req.user, grants());
         return res.json({
             user: publicUser(req.user),
-            permissions: {
-                can_manage_users: Roles.canManageUsers(req.user),
-                can_view_audit: Roles.canViewAudit(req.user),
-                can_upload_audio: Roles.canUploadAudio(req.user),
-                can_publish: Roles.atLeast(req.user.role, 'teacher'),
-                can_edit: Roles.atLeast(req.user.role, 'class_rep')
-            },
+            /* ★ 從 lib/capabilities.js 產生（唯一來源）：新增能力時不會再忘了補前端 */
+            permissions: Capabilities.permissionsFor(req.user),
             grants: scoped
         });
     });

@@ -192,6 +192,33 @@ async function main() {
         check('搜尋「圖書館」只剩 1 個生字（比對中英文與 IPA）', search.shown === 1 && search.headword === 'librarian', JSON.stringify(search));
         check('清空搜尋後恢復全部生字', search.restored === 3, String(search.restored));
 
+        console.log('\n【4b】訪客的站內說明（B-1）：看得到「怎麼查生字」、看不到管理員的步驟');
+        await browser.evaluate(`document.getElementById('guideBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('guidePanel').hidden === false`, { timeout: 8000 });
+        await browser.waitFor(`document.querySelectorAll('#guideSections .guide-section').length > 0`, { timeout: 8000 });
+        await browser.waitFor(`document.querySelectorAll('#guideRoles table tr').length > 1`, { timeout: 8000 });
+        const guestGuide = await browser.evaluate(`return {
+            sections: document.querySelectorAll('#guideSections .guide-section').length,
+            firstTitle: (document.querySelector('#guideSections .guide-title') || {}).textContent || '',
+            text: document.getElementById('guideSections').textContent,
+            roleRows: document.querySelectorAll('#guideRoles table tr').length,
+            roleCols: document.querySelectorAll('#guideRoles table tr:first-child th').length,
+            printBtn: Boolean(document.getElementById('guidePrintBtn')),
+            overflow: document.documentElement.scrollWidth - window.innerWidth,
+            downloads: (window.__downloads || []).length
+        };`);
+        check('訪客按 ❓ 打得開說明頁', guestGuide.sections >= 1, JSON.stringify(guestGuide.sections));
+        check('訪客第一眼看到的是「怎麼查生字」', /look up a word|查一個生字/i.test(guestGuide.firstTitle), guestGuide.firstTitle);
+        check('訪客看不到管理員的步驟（帳號管理／稽核不在裡面）',
+            !/New account|新增帳號|Audit log|稽核紀錄/i.test(guestGuide.text));
+        check('角色與權限對照表由後端產生（6 個角色 + 7 項能力）',
+            guestGuide.roleRows === 8 && guestGuide.roleCols === 7, JSON.stringify([guestGuide.roleRows, guestGuide.roleCols]));
+        check('說明頁有列印按鈕（不按，按了會開列印視窗）', guestGuide.printBtn === true);
+        check('說明頁沒有橫向溢出、也沒有下載', guestGuide.overflow <= 1 && guestGuide.downloads === 0, JSON.stringify([guestGuide.overflow, guestGuide.downloads]));
+        await browser.evaluate(`document.getElementById('guideCloseBtn').click(); return true;`);
+        const afterClose = await browser.evaluate(`return { panelHidden: document.getElementById('guidePanel').hidden, view: (window.PDApp && window.PDApp.view) || '', shelfHidden: document.getElementById('shelfView').hidden };`);
+        check('關閉說明頁之後回到進來之前的畫面（不是停在說明）', afterClose.panelHidden === true && afterClose.view !== 'guide', JSON.stringify(afterClose));
+
         console.log('\n【5-7】管理員：登入 → 新增生字 → 批次貼上 → 刪除');
         await openLogin(browser);
         await typeLogin(browser, 'manager');
@@ -642,6 +669,43 @@ async function main() {
             loaderHid = false;
         }
         check('PDLoader.hide() 之後載入條收起（最短顯示時間過後）', loaderHid);
+
+        console.log('\n【13】我的單元（C-1）與角色化說明（B-1）');
+        await browser.goto(`${base}/`);
+        await browser.waitFor(`document.getElementById('bookShelf') && document.getElementById('bookShelf').children.length > 0`, { timeout: 15000 });
+        await browser.evaluate(STUBS);
+        await browser.waitFor(`document.getElementById('myUnitsBlock').hidden === false`, { timeout: 8000 });
+        const myUnits = await browser.evaluate(`return {
+            visible: document.getElementById('myUnitsBlock').hidden === false,
+            chips: document.querySelectorAll('#myUnitsList .my-units-chip').length,
+            first: (document.querySelector('#myUnitsList .my-units-chip') || {}).textContent || ''
+        };`);
+        check('管理員看得到「我可以編輯的單元」', myUnits.visible === true && myUnits.chips >= 1, JSON.stringify(myUnits));
+        check('我的單元每一項都寫出書名與單元', /Unit \d/.test(myUnits.first), myUnits.first);
+        await browser.evaluate(`document.querySelector('#myUnitsList .my-units-chip').click(); return true;`);
+        await browser.waitFor(`document.getElementById('unitSection').hidden === false`, { timeout: 8000 });
+        const jumped = await browser.evaluate(`return {
+            title: document.getElementById('unitTitle').textContent,
+            entries: document.querySelectorAll('#vocabList .vocab-item').length
+        };`);
+        check('點「我的單元」會直接跳到那個單元', /Unit \d/.test(jumped.title) && jumped.entries >= 1, JSON.stringify(jumped));
+
+        await browser.evaluate(`document.getElementById('guideBtn').click(); return true;`);
+        await browser.waitFor(`document.querySelectorAll('#guideSections .guide-section').length > 0`, { timeout: 8000 });
+        const adminGuide = await browser.evaluate(`return {
+            sections: document.querySelectorAll('#guideSections .guide-section').length,
+            text: document.getElementById('guideSections').textContent,
+            ids: Array.from(document.querySelectorAll('#guideSections .guide-section')).map((node) => node.dataset.section).join(',')
+        };`);
+        check('管理員看到比較多節（老師 + 管理員 + 網站管理員）', adminGuide.sections >= 6, JSON.stringify([adminGuide.sections, adminGuide.ids]));
+        check('管理員的說明包含帳號管理與稽核', /New account|新增帳號/.test(adminGuide.text) && /Audit log|稽核紀錄/.test(adminGuide.text));
+
+        /* 切中文：說明內容要跟著換（中英都要有） */
+        await browser.evaluate(`document.querySelector('#langSwitch button[data-lang="zh"]').click(); return true;`);
+        await browser.waitFor(`document.getElementById('guideSections').textContent.indexOf('新增帳號') >= 0`, { timeout: 8000 });
+        check('切到中文之後說明頁也變中文', (await browser.evaluate(`return document.getElementById('guideSections').textContent.indexOf('新增帳號') >= 0;`)) === true);
+        await browser.evaluate(`document.querySelector('#langSwitch button[data-lang="en"]').click(); return true;`);
+        await browser.evaluate(`document.getElementById('guideCloseBtn').click(); return true;`);
 
         const downloads = await browser.evaluate(`return window.__downloads || [];`);
         check('檢查過程沒有觸發任何下載', downloads.length === 0, JSON.stringify(downloads));

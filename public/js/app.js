@@ -1,4 +1,5 @@
 /* 應用程式主流程：載入書本／單元、切換、搜尋、登入、管理區塊開關 */
+        if (window.PDGuide) window.PDGuide.init();
 (function () {
     const api = window.PDApi;
     const { el, clear, toast, setFormMessage } = window.PDUI;
@@ -63,11 +64,53 @@
 
     /* 一次只顯示一個畫面：書架 → 目錄 → 生字表。
      * ★ 可見性只在這裡決定（其他函式只負責填內容），否則兩邊互相覆蓋會出現「畫面空白」的鬼故事。 */
+    /* 「我的單元」（C-1）：登入後一眼看到「我可以編輯的單元」，點一下直接跳過去 */
+    async function renderMyUnits() {
+        const box = document.getElementById('myUnitsBlock');
+        const list = document.getElementById('myUnitsList');
+        if (!box || !list) return;
+        if (!window.PDAuth.isLoggedIn() || !window.PDAuth.can('can_edit')) {
+            box.hidden = true;
+            list.textContent = '';
+            return;
+        }
+        try {
+            const data = await window.PDApi.get('/api/my/units');
+            list.textContent = '';
+            if (!data.units.length) {
+                const item = el('li', { class: 'my-units-empty', text: t('myUnits.empty') });
+                list.appendChild(item);
+            }
+            for (const unit of data.units) {
+                const chip = el('button', {
+                    class: 'my-units-chip',
+                    attrs: { type: 'button', 'data-unit-id': unit.id, 'data-book-id': unit.book_id, title: `${unit.book_name} · Unit ${unit.unit_no}` },
+                    dataset: { unitId: unit.id, bookId: unit.book_id }
+                }, [
+                    el('span', { class: 'my-units-book', text: unit.book_name || '' }),
+                    el('span', { text: `Unit ${unit.unit_no}${unit.title ? ` · ${unit.title}` : ''}` }),
+                    el('span', { class: 'cell-hint', text: `${unit.entries}${unit.pending ? ` · ${t('myUnits.pending', { n: unit.pending })}` : ''}` })
+                ]);
+                chip.addEventListener('click', async () => {
+                    await selectBook(unit.book_id);
+                    await selectUnit(unit.id);
+                });
+                list.appendChild(chip);
+            }
+            box.hidden = false;
+        } catch (err) {
+            box.hidden = true;
+        }
+    }
+
     function showView(name) {
         state.view = name;
         document.getElementById('shelfView').hidden = name !== 'shelf';
         document.getElementById('unitsView').hidden = name !== 'units';
         document.getElementById('unitSection').hidden = name !== 'vocab';
+        /* 使用說明（B-1）是第四個「畫面」，切過去時書架／目錄／生字表都要收起來 */
+        const guide = document.getElementById('guidePanel');
+        if (guide) guide.hidden = name !== 'guide';
         /* 搜尋只對「目前單元的生字表」有意義 */
         document.getElementById('searchWrap').hidden = name !== 'vocab';
         updateEmptyState();
@@ -135,7 +178,7 @@
             : '';
         document.getElementById('unitsEmpty').hidden = state.units.length > 0;
         /* 老師以上在每一列多一顆 ✏️（修改單元名稱／編號）；學生與科代表看不到（後端也會再擋） */
-        const canEditUnits = window.PDAuth.atLeast('teacher');
+        const canEditUnits = window.PDAuth.can('can_manage_content');   /* 修改單元＝後端 can_manage_content */
         for (const unit of state.units) {
             const words = t('unit.words', { n: unit.published_count });
             const pending = unit.pending_count ? ` · ${t('unit.pending', { n: unit.pending_count })}` : '';
@@ -191,6 +234,7 @@
     function renderVocab() {
         const result = window.PDVocab.render(state.entries, {
             canEdit: window.PDAuth.can('can_edit'),
+            canPublish: window.PDAuth.can('can_publish'),
             canUploadAudio: window.PDAuth.can('can_upload_audio'),
             query: state.query,
             total: state.entries.length
@@ -574,6 +618,7 @@
         if (!canEdit) window.PDAdmin.showPanel(null);
         /* 換人登入後，目前畫面可能已經不該顯示（例如學生看到一半被登出） */
         if (state.view === 'vocab' && !state.currentUnit) showView('units');
+        await renderMyUnits();
         renderShelf();
         renderUnitHead();
         renderVocab();
@@ -663,6 +708,7 @@
             renderUnitHead();
             renderVocab();
             window.PDAdmin.refreshAvailability();
+            await renderMyUnits();
         } catch (err) {
             toast(t('toast.loadFailed', { message: err.message }), 'error');
         }
@@ -695,6 +741,9 @@
         refreshAfterAuthChange,
         renderVocab,
         renderUnitHead,
-        setLanguage
+        setLanguage,
+        get view() {
+            return state.view;
+        }
     };
 })();
