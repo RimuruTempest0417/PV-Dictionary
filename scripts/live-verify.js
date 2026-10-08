@@ -73,18 +73,30 @@ async function counts() {
     return health.counts || {};
 }
 
-async function cleanup(bookIds) {
+/* 稽核紀錄目前的最大 id：清理時只刪「這次驗收之後才產生的」，
+ * 不要用 target_id 去刪（使用者的單元／生字 id 可能剛好等於我建立的書本 id，會誤刪他的紀錄）。 */
+async function maxAuditId() {
+    const rows = await supabase('dict_audit_logs?select=id&order=id.desc&limit=1');
+    return rows[0] ? Number(rows[0].id) : 0;
+}
+
+/* 資料層快取 3 秒：直接用 REST 從「外面」寫進去的資料，最多 3 秒後 App 才看得到（這是刻意設計）。
+ * 驗收時要等它過期，否則會誤判成「寫進去了但讀不到」。 */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function cleanup(bookIds, auditWatermark = 0) {
     for (const id of bookIds.filter((value) => value)) {
         await supabase(`dict_books?id=eq.${id}`, { method: 'DELETE', body: null });
-        await supabase(`dict_audit_logs?target_id=eq.${id}`, { method: 'DELETE', body: null });
     }
     await supabase(`dict_books?code=eq.${TEST_CODE}`, { method: 'DELETE', body: null });
-    /* 臨時帳號（--ephemeral-teacher 用的）連它的稽核一起清掉 */
-    const temp = await supabase(`dict_users?username=eq.${TEMP_USER}&select=id`);
-    for (const row of temp) {
-        await supabase(`dict_audit_logs?or=(user_id.eq.${row.id},user_id.eq.${TEMP_USER})`, { method: 'DELETE', body: null });
+    /* 只刪這次驗收之後新增的稽核列（水線以上的），使用者的舊紀錄一律不動 */
+    if (auditWatermark) {
+        await supabase(`dict_audit_logs?id=gt.${auditWatermark}`, { method: 'DELETE', body: null });
     }
+    /* 臨時帳號（--ephemeral-teacher 用的） */
+    const temp = await supabase(`dict_users?username=eq.${TEMP_USER}&select=id`);
     await supabase(`dict_users?username=eq.${TEMP_USER}`, { method: 'DELETE', body: null });
+    return temp.length;
 }
 
 async function main() {
@@ -118,7 +130,8 @@ async function main() {
     }
 
     const baseline = await counts();
-    console.log(`   （開始前的筆數：${JSON.stringify(baseline)}）`);
+    const auditWatermark = await maxAuditId();
+    console.log(`   （開始前的筆數：${JSON.stringify(baseline)}；稽核水線 id=${auditWatermark}）`);
 
     console.log('\n3. 資料庫直連往返：帶封面的書（不需要登入）');
     try {
@@ -144,6 +157,8 @@ async function main() {
         const directId = inserted && inserted[0] && inserted[0].id;
         createdIds.push(directId);
         check('資料庫收得下封面欄位（INSERT 成功）', Boolean(directId), `id=${directId}`);
+        /* 等 App 的快取過期（3 秒）再讀，驗的是「真的寫進資料庫」，不是快取行為 */
+        await sleep(3500);
         const cover = await fetch(`${BASE}/api/covers/${directId}`);
         check('GET /api/covers/<id> 回圖片', cover.status === 200 && /image\/png/.test(cover.headers.get('content-type') || ''), `HTTP ${cover.status}`);
         const books = await (await fetch(`${BASE}/api/books`)).json();
@@ -173,11 +188,20 @@ async function main() {
                     password_hash: hashPassword(tempPassword)
                 }
             });
-            const login = await fetch(`${BASE}/api/auth/login`, {
+            let login = await fetch(`${BASE}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Origin: HOST },
                 body: JSON.stringify({ username: TEMP_USER, password: tempPassword })
             });
+            if (login.status !== 200) {
+                /* 帳號是直接寫進資料庫的：等一下讓 App 的快取過期再試一次 */
+                await sleep(3500);
+                login = await fetch(`${BASE}/api/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Origin: HOST },
+                    body: JSON.stringify({ username: TEMP_USER, password: tempPassword })
+                });
+            }
             check('臨時教師帳號可以登入', login.status === 200, `HTTP ${login.status}`);
             const setCookie = login.headers.getSetCookie ? login.headers.getSetCookie() : [login.headers.get('set-cookie') || ''];
             const cookie = setCookie.map((row) => String(row).split(';')[0]).filter(Boolean).join('; ');
@@ -274,9 +298,13 @@ async function main() {
     }
 
     console.log('\n5. 清乾淨（只刪這次的測試資料）');
-    await cleanup(createdIds);
+    await cleanup(createdIds, auditWatermark);
     const left = await supabase(`dict_books?code=eq.${TEST_CODE}&select=id`);
     check('測試資料已從資料庫刪除', left.length === 0);
+    const tempLeft = await supabase(`dict_users?username=eq.${TEMP_USER}&select=id`);
+    check('臨時帳號已刪除', tempLeft.length === 0);
+    /* App 的筆數是快取來的：等它過期（3 秒）再比對，才不會拿到清理前的舊數字 */
+    await sleep(3500);
     const after = await counts();
     check('筆數回到開始前的水準', JSON.stringify(after) === JSON.stringify(baseline), `before=${JSON.stringify(baseline)} after=${JSON.stringify(after)}`);
 
