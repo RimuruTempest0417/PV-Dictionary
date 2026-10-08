@@ -135,6 +135,156 @@
         }
     }
 
+    /* ---------------- 外觀：主題與字級（F-3／F-5） ----------------
+     * 兩個選擇都記在 localStorage，重新載入後還在。
+     * 「跟隨系統」＝不設 data-theme，交給 CSS 的 prefers-color-scheme；
+     * 明確選了就設 data-theme 覆蓋它。
+     */
+    const THEME_KEY = 'pv-theme';
+    const FONT_KEY = 'pv-font';
+    const PRINT_KEY = 'pv-print';
+    const THEME_VALUES = ['auto', 'light', 'dark'];
+    const FONT_VALUES = ['s', 'm', 'l'];
+
+    function readSetting(key, allowed, fallback) {
+        try {
+            const value = window.localStorage.getItem(key);
+            return allowed.includes(value) ? value : fallback;
+        } catch (err) {
+            return fallback;                 /* 無痕模式可能禁止 localStorage：不能因此壞掉 */
+        }
+    }
+
+    function writeSetting(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+        } catch (err) {
+            /* 忽略：記不住只影響下次開啟，不影響這次使用 */
+        }
+    }
+
+    function applyTheme(value) {
+        const theme = THEME_VALUES.includes(value) ? value : 'auto';
+        if (theme === 'auto') delete document.documentElement.dataset.theme;
+        else document.documentElement.dataset.theme = theme;
+        document.querySelectorAll('#themeSwitch [data-theme-value]').forEach((button) => {
+            button.setAttribute('aria-pressed', String(button.dataset.themeValue === theme));
+        });
+        writeSetting(THEME_KEY, theme);
+    }
+
+    function applyFont(value) {
+        const font = FONT_VALUES.includes(value) ? value : 'm';
+        if (font === 'm') delete document.documentElement.dataset.font;
+        else document.documentElement.dataset.font = font;
+        document.querySelectorAll('#fontSwitch [data-font-value]').forEach((button) => {
+            button.setAttribute('aria-pressed', String(button.dataset.fontValue === font));
+        });
+        writeSetting(FONT_KEY, font);
+    }
+
+    /* 列印時要包含什麼（B-5）：用 body 上的 data 標記，交給 print.css 隱藏 */
+    function applyPrintOptions(options) {
+        const zh = options.zh !== false;
+        const example = options.example !== false;
+        if (zh) delete document.body.dataset.printNoZh;
+        else document.body.dataset.printNoZh = '1';
+        if (example) delete document.body.dataset.printNoExample;
+        else document.body.dataset.printNoExample = '1';
+        writeSetting(PRINT_KEY, zh ? (example ? 'both' : 'zh') : (example ? 'example' : 'none'));
+    }
+
+    function initAppearance() {
+        applyTheme(readSetting(THEME_KEY, THEME_VALUES, 'auto'));
+        applyFont(readSetting(FONT_KEY, FONT_VALUES, 'm'));
+        const stored = readSetting(PRINT_KEY, ['both', 'zh', 'example', 'none'], 'both');
+        const zhBox = document.getElementById('printZh');
+        const exampleBox = document.getElementById('printExample');
+        if (zhBox) zhBox.checked = stored === 'both' || stored === 'zh';
+        if (exampleBox) exampleBox.checked = stored === 'both' || stored === 'example';
+        applyPrintOptions({ zh: zhBox ? zhBox.checked : true, example: exampleBox ? exampleBox.checked : true });
+
+        for (const button of document.querySelectorAll('#themeSwitch [data-theme-value]')) {
+            button.addEventListener('click', () => applyTheme(button.dataset.themeValue));
+        }
+        for (const button of document.querySelectorAll('#fontSwitch [data-font-value]')) {
+            button.addEventListener('click', () => applyFont(button.dataset.fontValue));
+        }
+        for (const box of [zhBox, exampleBox]) {
+            if (box) {
+                box.addEventListener('change', () => applyPrintOptions({
+                    zh: document.getElementById('printZh').checked,
+                    example: document.getElementById('printExample').checked
+                }));
+            }
+        }
+    }
+
+    /* ---------------- 鍵盤操作（F-4） ----------------
+     * 1. 「/」或 Ctrl/⌘+K → 跳到搜尋框（在輸入框裡打字時不要搶）
+     * 2. Esc → 關掉最上層的東西（錄音視窗／登入視窗／說明頁／管理區）
+     * 3. 全域快捷鍵都要看得到（說明頁有寫），所以不做隱藏組合鍵。
+     */
+    function isTypingTarget(node) {
+        if (!node) return false;
+        const tag = String(node.tagName || '').toLowerCase();
+        return tag === 'input' || tag === 'textarea' || tag === 'select' || node.isContentEditable === true;
+    }
+
+    function closeTopLayer() {
+        const audioModal = document.getElementById('audioModal');
+        if (audioModal && !audioModal.hidden) {
+            window.PDAudio.stopTts();
+            window.PDAudio.stopAudio();
+            document.getElementById('audioCancelBtn').click();
+            return true;
+        }
+        const loginModal = document.getElementById('loginModal');
+        if (loginModal && !loginModal.hidden) {
+            document.getElementById('loginCancelBtn').click();
+            return true;
+        }
+        const passwordModal = document.getElementById('passwordModal');
+        if (passwordModal && !passwordModal.hidden) {
+            document.getElementById('passwordCancelBtn').click();
+            return true;
+        }
+        const guide = document.getElementById('guidePanel');
+        if (guide && !guide.hidden) {
+            window.PDGuide.close();
+            return true;
+        }
+        const admin = document.getElementById('adminSection');
+        if (admin && !admin.hidden) {
+            window.PDAdmin.showPanel(null);
+            admin.hidden = true;
+            const toggle = document.getElementById('adminToggleBtn');
+            if (toggle) toggle.setAttribute('aria-expanded', 'false');
+            return true;
+        }
+        return false;
+    }
+
+    function initKeyboard() {
+        document.addEventListener('keydown', (event) => {
+            if ((event.key === 'k' || event.key === 'K') && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                const search = document.getElementById('searchInput');
+                if (search && !search.closest('#searchWrap').hidden) search.focus();
+                return;
+            }
+            if (event.key === '/' && !isTypingTarget(event.target)) {
+                const search = document.getElementById('searchInput');
+                if (search && !search.closest('#searchWrap').hidden) {
+                    event.preventDefault();
+                    search.focus();
+                }
+                return;
+            }
+            if (event.key === 'Escape' && closeTopLayer()) event.preventDefault();
+        });
+    }
+
     /* 「▶ 播放全部」（B-2）：依畫面上的順序一個一個播，中途可以停。
      * 正在播的那一張會加上 .is-playing，讓學生知道現在播到哪裡。 */
     let playlist = null;
@@ -146,7 +296,10 @@
         if (button) button.textContent = t('unit.playAll');
     }
 
+    let playingEntryId = null;
+
     function markPlaying(entry) {
+        playingEntryId = entry ? entry.id : null;
         document.querySelectorAll('#vocabList .vocab-item.is-playing').forEach((node) => node.classList.remove('is-playing'));
         if (!entry) return;
         const card = document.querySelector(`#vocabList .vocab-item[data-entry-id="${entry.id}"]`);
@@ -369,6 +522,9 @@
             const meta = document.getElementById('unitMeta');
             if (meta.dataset.base) meta.textContent = meta.dataset.base;
         }
+        /* 如果正在連續播放，畫面重畫之後要把「正在播」的標記補回去
+         * （不然匯入／重新載入完成時剛好蓋掉，學生會以為停止播放了）。 */
+        if (playingEntryId) markPlaying({ id: playingEntryId });
     }
 
     async function reloadBooks() {
@@ -790,7 +946,15 @@
             if (!document.getElementById('usersBlock').hidden) window.PDUsers.refresh();
             toast(event.detail.lang === 'zh' ? t('toast.langChanged') : 'Language: English');
         });
-        document.getElementById('printBtn').addEventListener('click', () => window.print());
+        document.getElementById('printBtn').addEventListener('click', () => {
+            const zhBox = document.getElementById('printZh');
+            const exampleBox = document.getElementById('printExample');
+            applyPrintOptions({
+                zh: zhBox ? zhBox.checked : true,
+                example: exampleBox ? exampleBox.checked : true
+            });
+            window.print();
+        });
         document.getElementById('loginForm').addEventListener('submit', doLogin);
         document.getElementById('passwordForm').addEventListener('submit', submitPassword);
         document.getElementById('twoFactorStartBtn').addEventListener('click', startTwoFactorSetup);
@@ -813,6 +977,8 @@
             btn.setAttribute('aria-pressed', String(btn.dataset.lang === lang));
         });
         installCspRecorder();
+        initAppearance();
+        initKeyboard();
         await Promise.all([loadVersion(), loadHealth()]);
         try {
             await window.PDAuth.loadMe();
@@ -865,6 +1031,11 @@
         renderVocab,
         renderUnitHead,
         setLanguage,
+        applyTheme,
+        applyFont,
+        applyPrintOptions,
+        initAppearance,
+        initKeyboard,
         get view() {
             return state.view;
         }

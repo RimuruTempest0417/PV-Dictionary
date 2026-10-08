@@ -169,6 +169,64 @@ async function main() {
         `);
         check('中文模式下同一個錯誤變中文（後端只回 code）', errZh === '請先登入', errZh);
 
+        console.log('\n【5b】外觀（F-3／F-5）：主題與字級會記住、跟隨系統、鍵盤可用');
+        /* 主題：切深色 → 根元素的 data-theme 與實際顏色都要變 */
+        const beforeTheme = await browser.evaluate(`return {
+            theme: document.documentElement.dataset.theme || '',
+            bg: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()
+        };`);
+        await browser.evaluate(`document.querySelector('#themeSwitch [data-theme-value="dark"]').click(); return true;`);
+        await sleep(250);
+        const darkTheme = await browser.evaluate(`return {
+            theme: document.documentElement.dataset.theme || '',
+            bg: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
+            pressed: document.querySelector('#themeSwitch [data-theme-value="dark"]').getAttribute('aria-pressed')
+        };`);
+        check('切深色：data-theme 變 dark、顏色真的換了（F-3）',
+            darkTheme.theme === 'dark' && darkTheme.bg !== beforeTheme.bg && darkTheme.pressed === 'true',
+            JSON.stringify([beforeTheme, darkTheme]));
+        check('深色時按鈕的 aria-pressed 正確（F-4）',
+            (await browser.evaluate(`return document.querySelector('#themeSwitch [data-theme-value="light"]').getAttribute('aria-pressed');`)) === 'false');
+
+        /* 重新載入後要記得（localStorage） */
+        await browser.goto(`${app.base}/`);
+        await browser.waitFor(`document.getElementById('bookShelf') !== null`, { timeout: 15000 });
+        await browser.evaluate(STUBS);
+        check('重新載入後仍然是自己選的深色（F-3）',
+            (await browser.evaluate(`return document.documentElement.dataset.theme;`)) === 'dark');
+
+        /* 切回跟隨系統：data-theme 要拿掉 */
+        await browser.evaluate(`document.querySelector('#themeSwitch [data-theme-value="auto"]').click(); return true;`);
+        await sleep(200);
+        check('切回「跟隨系統」時不再覆蓋系統設定（F-3）',
+            (await browser.evaluate(`return document.documentElement.dataset.theme || 'none';`)) === 'none');
+
+        /* 字級：A+ 之後根字級真的變大，捲動寬度沒有溢出 */
+        const beforeFont = await browser.evaluate(`return parseFloat(getComputedStyle(document.documentElement).fontSize);`);
+        await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="l"]').click(); return true;`);
+        await sleep(250);
+        const afterFont = await browser.evaluate(`return {
+            size: parseFloat(getComputedStyle(document.documentElement).fontSize),
+            overflow: document.documentElement.scrollWidth - window.innerWidth
+        };`);
+        check('按 A+ 會讓整頁字級變大（F-5）', afterFont.size > beforeFont, JSON.stringify([beforeFont, afterFont.size]));
+        check('字級變大之後版面不會橫向溢出（F-5）', afterFont.overflow <= 1, `溢出 ${afterFont.overflow}px`);
+        await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="m"]').click(); return true;`);
+        await sleep(200);
+
+        /* 列印選項（B-5）：勾選狀態會反映到 body 的 data 標記（print.css 就是看這個） */
+        await browser.evaluate(`document.getElementById('printZh').checked = false; document.getElementById('printZh').dispatchEvent(new Event('change', { bubbles: true })); return true;`);
+        const printOff = await browser.evaluate(`return document.body.dataset.printNoZh || '';`);
+        check('取消「中文解釋」會標記到列印設定（B-5）', printOff === '1', printOff);
+        await browser.evaluate(`document.getElementById('printZh').checked = true; document.getElementById('printZh').dispatchEvent(new Event('change', { bubbles: true })); return true;`);
+        check('再勾回來就恢復（B-5）',
+            (await browser.evaluate(`return document.body.dataset.printNoZh || 'none';`)) === 'none');
+
+        /* 鍵盤快捷鍵（/、Esc）在生字表畫面才有意義，所以放在 demo-check 驗（那裡已經進到單元）。
+         * 這裡只確認無障礙的基本結構：有跳至內容的連結。 */
+        check('有「跳到主要內容」的連結（F-4）',
+            (await browser.evaluate(`return document.querySelector('.skip-link') !== null;`)) === true);
+
         console.log('\n【6】切換語言不會弄壞畫面');
         await browser.evaluate(`document.querySelector('#langSwitch [data-lang="en"]').click(); return true;`);
         await sleep(250);

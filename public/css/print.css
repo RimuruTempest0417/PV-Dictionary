@@ -93,3 +93,19 @@ body {
         break-inside: avoid;
     }
 }
+
+/* ---------------- 列印選項（B-5） ----------------
+ * 老師可以選擇列印時要不要中文解釋與例句：
+ *   不要中文 → body[data-print-no-zh] 時隱藏 .meaning-zh
+ *   不要例句 → body[data-print-no-example] 時隱藏 .example
+ * 兩個選項都只影響列印（畫面上一律看得到完整內容）。
+ */
+@media print {
+    body[data-print-no-zh] .meaning-zh { display: none !important; }
+    body[data-print-no-example] .example { display: none !important; }
+
+    /* 列印一律用淺色（深色主題印出來會是整片黑） */
+    :root[data-theme="dark"] {
+        color-scheme: light;
+    }
+}

@@ -29,6 +29,29 @@ function guideSections() {
     return { ids, steps, titles, capabilities, audiences };
 }
 
+test('說明頁（B-1）：每一個管理分頁都在說明裡有段落（新功能不能不寫說明）', () => {
+    /* 這條是使用者指定的規則：管理區每加一個分頁，說明頁就要有對應的段落。
+     * 做法是把「每個分頁按鈕的 id」拿去對 guide.js 裡的 covers（這一節在說明哪些入口）。 */
+    const tabs = [...HTML.matchAll(/<button id="([^"]+)"[^>]*data-admin-tab="([^"]+)"/g)]
+        .map((match) => ({ id: match[1], tab: match[2] }));
+    assert.ok(tabs.length >= 8, `index.html 的管理分頁數量不對（${tabs.length}）`);
+    const covers = new Set([...GUIDE_SOURCE.matchAll(/covers: \[([^\]]*)\]/g)]
+        .flatMap((match) => match[1].split(',').map((item) => item.trim().replace(/'/g, '')).filter(Boolean)));
+    const missing = tabs.filter((tab) => !covers.has(tab.id)).map((tab) => `${tab.id}（${tab.tab}）`);
+    assert.deepEqual(missing, [], `這些管理分頁沒有寫進使用說明：${missing.join('、')}`);
+});
+
+test('說明頁（B-1）：功能入口（分頁按鈕、播放、列印、外觀）都有人說明', () => {
+    const covers = new Set([...GUIDE_SOURCE.matchAll(/covers: \[([^\]]*)\]/g)]
+        .flatMap((match) => match[1].split(',').map((item) => item.trim().replace(/'/g, '')).filter(Boolean)));
+    /* 這幾個是「使用者一進站就看得到」的入口，一定要有段落說明 */
+    for (const id of ['playAllBtn', 'printBtn', 'themeSwitch', 'fontSwitch', 'searchInput', 'bookShelf']) {
+        const inCovers = covers.has(id);
+        const inIds = GUIDE_SOURCE.includes(`'${id}'`);
+        assert.ok(inCovers || inIds, `${id} 沒有任何說明段落提到它`);
+    }
+});
+
 test('說明頁（B-1）：每一節提到的介面元素都真的存在', () => {
     const { ids } = guideSections();
     assert.ok(ids.length >= 5, '至少要抓到幾節的 ids');
@@ -47,13 +70,21 @@ test('說明頁（B-1）：每一節提到的能力都存在，而且那一節�
     for (const key of capabilities) {
         assert.ok(Capabilities.capabilityKeys().includes(key), `說明頁提到不存在的能力 ${key}`);
     }
-    /* 每一節的對象至少要有那一節講到的能力（否則會教一個他做不到的事） */
-    const pairs = [...GUIDE_SOURCE.matchAll(/audience: '([^']+)'[\s\S]{0,400}?capability: '([^']+)'/g)]
-        .map((match) => ({ audience: match[1], capability: match[2] }));
+    /* 每一節的對象至少要有那一節講到的能力（否則會教一個他做不到的事）。
+     * ★ 一定要「同一節內」比對：用固定長度視窗會跨到下一節
+     *   （踩過一次：訪客那一節被判成擁有 can_force_logout）。 */
+    const sectionBlocks = [...GUIDE_SOURCE.matchAll(/id: '([^']+)', audience: '([^']+)'([\s\S]*?)(?=\n        \{|\n    \];)/g)]
+        .map((match) => ({ id: match[1], audience: match[2], body: match[3] }));
+    assert.ok(sectionBlocks.length >= 8, '要能解析出每一節');
+    const pairs = [];
+    for (const section of sectionBlocks) {
+        const capability = (section.body.match(/capability: '([^']+)'/) || [])[1];
+        if (capability) pairs.push({ audience: section.audience, capability, id: section.id });
+    }
     assert.ok(pairs.length >= 3, '要有幾個「對象 + 能力」的配對');
     for (const pair of pairs) {
         assert.equal(Capabilities.check(pair.capability, { role: pair.audience }), true,
-            `${pair.audience} 不具備 ${pair.capability}，那一節不該給他看`);
+            `${pair.audience} 不具備 ${pair.capability}，那一節（${pair.id}）不該給他看`);
     }
 });
 

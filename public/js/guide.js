@@ -16,49 +16,101 @@
     const SECTIONS = [
         {
             id: 'lookup', audience: 'guest',
+            covers: ['bookShelf', 'unitList', 'vocabList', 'searchInput'],
             title: 'guide.lookup.title', steps: ['guide.lookup.s1', 'guide.lookup.s2', 'guide.lookup.s3'],
             ids: ['bookShelf', 'unitList', 'vocabList']
         },
         {
             id: 'listen', audience: 'student',
+            covers: ['playAllBtn', 'vocabList'],
             title: 'guide.listen.title', steps: ['guide.listen.s1', 'guide.listen.s2'],
             ids: ['vocabList']
         },
         {
             id: 'addWords', audience: 'class_rep',
-            title: 'guide.addWords.title', steps: ['guide.addWords.s1', 'guide.addWords.s2', 'guide.addWords.s3', 'guide.addWords.s4'],
+            covers: ['newEntryBtn', 'entryForm', 'newUnitBtn'],
+            title: 'guide.addWords.title', steps: ['guide.addWords.s1', 'guide.addWords.s2', 'guide.addWords.s3', 'guide.addWords.s4', 'guide.addWords.s5'],
             ids: ['entryForm', 'importText', 'pendingList']
         },
         {
             id: 'pending', audience: 'teacher',
+            covers: ['navPendingBtn'],
             title: 'guide.pending.title', steps: ['guide.pending.s1', 'guide.pending.s2'],
             ids: ['pendingList', 'navPendingBtn']
         },
         {
             id: 'audio', audience: 'teacher',
+            covers: [],
             title: 'guide.audio.title', steps: ['guide.audio.s1', 'guide.audio.s2'],
             ids: ['audioModal', 'audioRecordBtn', 'audioFileInput']
         },
         {
             id: 'units', audience: 'teacher',
+            covers: ['newUnitBtn', 'navUnitEditBtn', 'newBookBtn', 'navCoverBtn'],
             title: 'guide.units.title', steps: ['guide.units.s1', 'guide.units.s2', 'guide.units.s3'],
             ids: ['bookForm', 'unitForm', 'unitEditForm', 'coverFileInput'],
             capability: 'can_manage_content'
         },
         {
             id: 'accounts', audience: 'admin',
+            covers: ['navUsersBtn', 'navGrantsBtn'],
             title: 'guide.accounts.title', steps: ['guide.accounts.s1', 'guide.accounts.s2', 'guide.accounts.s3'],
             ids: ['newUserBtn', 'userForm', 'logoutAllBtn'],
             capability: 'can_manage_users'
         },
         {
             id: 'monitor', audience: 'admin',
+            covers: ['navAuditBtn', 'navErrorsBtn', 'navStatsBtn'],
             title: 'guide.monitor.title', steps: ['guide.monitor.s1', 'guide.monitor.s2', 'guide.monitor.s3'],
             ids: ['auditList', 'auditExportBtn', 'errorsList', 'statsList'],
             capability: 'can_view_audit'
         },
         {
+            id: 'importFile', audience: 'class_rep',
+            title: 'guide.importFile.title', steps: ['guide.importFile.s1', 'guide.importFile.s2', 'guide.importFile.s3'],
+            ids: ['importToggleBtn', 'importFileInput', 'importPreviewTable'],
+            covers: ['importToggleBtn']
+        },
+        {
+            id: 'playAll', audience: 'student',
+            title: 'guide.playAll.title', steps: ['guide.playAll.s1', 'guide.playAll.s2'],
+            ids: ['playAllBtn', 'vocabList'],
+            covers: ['playAllBtn']
+        },
+        {
+            id: 'reviewBatch', audience: 'teacher',
+            title: 'guide.reviewBatch.title', steps: ['guide.reviewBatch.s1', 'guide.reviewBatch.s2'],
+            ids: ['pendingApproveAllBtn', 'pendingRejectAllBtn', 'pendingBatchNote'],
+            covers: ['navPendingBtn']
+        },
+        {
+            id: 'organise', audience: 'teacher',
+            title: 'guide.organise.title', steps: ['guide.organise.s1', 'guide.organise.s2'],
+            ids: ['unitList', 'bookShelf'],
+            covers: ['newUnitBtn', 'navUnitEditBtn', 'newBookBtn', 'navCoverBtn'],
+            capability: 'can_manage_content'
+        },
+        {
+            id: 'appearance', audience: 'guest',
+            title: 'guide.appearance.title', steps: ['guide.appearance.s1', 'guide.appearance.s2'],
+            ids: ['themeSwitch', 'fontSwitch'],
+            covers: []
+        },
+        {
+            id: 'printing', audience: 'guest',
+            title: 'guide.printing.title', steps: ['guide.printing.s1', 'guide.printing.s2'],
+            ids: ['printBtn', 'printZh', 'printExample'],
+            covers: []
+        },
+        {
+            id: 'keyboard', audience: 'guest',
+            title: 'guide.keyboard.title', steps: ['guide.keyboard.s1', 'guide.keyboard.s2'],
+            ids: ['searchInput', 'guidePanel'],
+            covers: []
+        },
+        {
             id: 'safety', audience: 'web_manager',
+            covers: [],
             title: 'guide.safety.title', steps: ['guide.safety.s1', 'guide.safety.s2'],
             ids: ['logoutAllBtn'],
             capability: 'can_force_logout'

@@ -867,8 +867,13 @@ async function main() {
 
         /* 播放全部（B-2）：按了會變「停止」，第一張會被標成正在播 */
         await browser.evaluate(`document.getElementById('playAllBtn').click(); return true;`);
-        await sleep(300);
-        const playing = await browser.evaluate(`return {
+        /* 標記是同步加上去的；但如果在播放途中畫面剛好重畫，我們會自動補回去，
+         * 所以這裡等一下下再讀（避免搶在重畫中間）。 */
+        let playing = { label: '', marked: 0 };
+        try {
+            await browser.waitFor(`document.querySelectorAll('#vocabList .vocab-item.is-playing').length >= 1`, { timeout: 3000 });
+        } catch (err) { /* 讀不到就照原樣斷言，讓失敗訊息帶著實際狀態 */ }
+        playing = await browser.evaluate(`return {
             label: document.getElementById('playAllBtn').textContent,
             marked: document.querySelectorAll('#vocabList .vocab-item.is-playing').length
         };`);

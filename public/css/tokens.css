@@ -53,8 +53,9 @@
     --blur: saturate(180%) blur(20px);
 }
 
+/* 跟隨系統（沒有明確選擇時用）：使用者如果明確選了淺色就不要蓋掉他的選擇 */
 @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
         --bg: #000000;
         --surface: rgba(28, 28, 30, 0.72);
         --surface-solid: #1c1c1e;
@@ -88,4 +89,35 @@
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
     }
+}
+
+/* 使用者明確選擇深色時。值必須跟上面「跟隨系統」那一段完全一樣——
+ * tests/guards.test.js 會逐條比對兩個深色區塊，所以不可能只改一邊。 */
+:root[data-theme="dark"] {
+    --bg: #000000;
+    --surface: rgba(28, 28, 30, 0.72);
+    --surface-solid: #1c1c1e;
+    --card: #16161a;
+    --text: #f5f5f7;
+    --text-muted: #a1a1a6;
+    --line: rgba(255, 255, 255, 0.12);
+    --line-strong: rgba(255, 255, 255, 0.22);
+    --field: #1f1f23;
+    --accent: #0a84ff;
+    --accent-hover: #409cff;
+    --accent-text: #ffffff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --ok: #4cd07d;
+    --ok-soft: rgba(76, 208, 125, 0.16);
+    --warn: #f0b429;
+    --warn-soft: rgba(240, 180, 41, 0.16);
+    --danger: #ff6b6b;
+    --danger-soft: rgba(255, 107, 107, 0.16);
+    --shadow-card: none;
+    --shadow-pop: 0 24px 70px rgba(0, 0, 0, 0.6);
+}
+
+/* 使用者明確選擇淺色時：只要把系統深色那段關掉就好（淺色票本來就在 :root） */
+:root[data-theme="light"] {
+    color-scheme: light;
 }

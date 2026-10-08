@@ -219,6 +219,41 @@ async function main() {
         const afterClose = await browser.evaluate(`return { panelHidden: document.getElementById('guidePanel').hidden, view: (window.PDApp && window.PDApp.view) || '', shelfHidden: document.getElementById('shelfView').hidden };`);
         check('關閉說明頁之後回到進來之前的畫面（不是停在說明）', afterClose.panelHidden === true && afterClose.view !== 'guide', JSON.stringify(afterClose));
 
+        console.log('\n【4c】鍵盤操作（F-4）：/ 跳到搜尋、Esc 關掉說明頁、有跳至內容的連結');
+        check('有「跳到主要內容」的連結（F-4）',
+            (await browser.evaluate(`return document.querySelector('.skip-link') !== null;`)) === true);
+        check('搜尋框在這個畫面是看得到的（鍵盤快捷鍵的前提）',
+            (await browser.evaluate(`return document.getElementById('searchWrap').hidden === false;`)) === true);
+        await browser.evaluate(`if (document.activeElement) document.activeElement.blur(); return true;`);
+        await browser.evaluate(`
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }));
+            return true;
+        `);
+        const slashFocus = await browser.evaluate(`return document.activeElement === document.getElementById('searchInput');`);
+        check('按 / 會把游標移到搜尋框（F-4）', slashFocus === true,
+            await browser.evaluate(`return document.activeElement ? (document.activeElement.id || document.activeElement.tagName) : 'none';`));
+        /* 在輸入框裡打 / 不能又被搶去（不然沒辦法打斜線） */
+        check('在輸入框裡打字時 / 不會被搶走（F-4）',
+            (await browser.evaluate(`
+                const input = document.getElementById('searchInput');
+                input.focus();
+                let prevented = false;
+                document.addEventListener('keydown', (event) => { if (event.key === '/') prevented = event.defaultPrevented; }, { once: true });
+                /* 事件要從輸入框送出（target 才會是輸入框）—— 從 document 送的話 target 是 document，
+                 * 那就變成「不在輸入框裡打字」，測不到我們要擋的情況。 */
+                input.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true }));
+                return { prevented, stillFocused: document.activeElement === input };
+            `)).prevented === false);
+        await browser.evaluate(`document.getElementById('searchInput').blur(); return true;`);
+        await browser.evaluate(`document.getElementById('guideBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('guidePanel').hidden === false`, { timeout: 6000 });
+        await browser.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true;`);
+        await sleep(200);
+        check('按 Esc 會關掉說明頁（F-4）',
+            (await browser.evaluate(`return document.getElementById('guidePanel').hidden;`)) === true);
+        check('Esc 關掉之後回到原本的畫面（F-4）',
+            (await browser.evaluate(`return (window.PDApp && window.PDApp.view) !== 'guide';`)) === true);
+
         console.log('\n【5-7】管理員：登入 → 新增生字 → 批次貼上 → 刪除');
         await openLogin(browser);
         await typeLogin(browser, 'manager');

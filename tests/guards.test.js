@@ -23,6 +23,34 @@ function walk(dir, out = []) {
     return out;
 }
 
+test('外觀（F-3）：跟隨系統的深色票與明確選深色的色票必須完全一樣', () => {
+    /* 兩段深色（@media prefers-color-scheme 與 [data-theme="dark"]）各自寫一份值，
+     * 難免會只改一邊 —— 那會變成「選深色」與「系統深色」長得不同。這裡逐條比對。 */
+    const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'tokens.css'), 'utf8');
+    const mediaStart = css.indexOf('@media (prefers-color-scheme: dark)');
+    const explicitStart = css.indexOf(':root[data-theme="dark"]');
+    assert.ok(mediaStart > -1 && explicitStart > -1, '兩個深色區塊都要存在');
+    const collect = (source) => {
+        const out = {};
+        for (const match of source.matchAll(/(--[a-z-]+):\s*([^;]+);/g)) out[match[1]] = match[2].trim();
+        return out;
+    };
+    const media = collect(css.slice(mediaStart, explicitStart));
+    const explicit = collect(css.slice(explicitStart));
+    const names = Object.keys(media);
+    assert.ok(names.length >= 15, `深色票太少（${names.length}）`);
+    assert.deepEqual(Object.keys(explicit).sort(), names.sort(), '兩段的變數名稱要一樣');
+    for (const name of names) {
+        assert.equal(explicit[name], media[name], `${name} 在兩段深色裡的值不一樣`);
+    }
+});
+
+test('外觀（F-3／F-5）：系統深色不會蓋掉使用者明確選的淺色', () => {
+    const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'tokens.css'), 'utf8');
+    assert.match(css, /:root:not\(\[data-theme="light"\]\)/, '跟隨系統那段要排除「明確選淺色」');
+    assert.match(css, /:root\[data-theme="light"\]/, '要有明確的淺色選擇');
+});
+
 test('稽核動作：宣告的標籤與程式實際寫入的動作完全一致', () => {
     const files = ['server.js'].concat(
         walk(path.join(ROOT, 'routes')).filter((f) => f.endsWith('.js')).map((f) => path.relative(ROOT, f))

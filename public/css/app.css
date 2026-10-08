@@ -1629,3 +1629,84 @@ code {
 
 .import-map { max-width: 12rem; }
 .panel-hr { border: 0; border-top: 1px solid var(--border); margin: 1rem 0; }
+
+/* ---------------- v0.4.7：外觀與無障礙 ---------------- */
+/* 分段切換器（主題、字級）：與語言切換同一種長相，但語意是自己的 group */
+.seg-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--field);
+}
+
+.seg-switch button {
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: transform 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.seg-switch button[aria-pressed="true"] {
+    background: var(--surface-solid);
+    color: var(--text);
+    box-shadow: var(--shadow-card);
+}
+
+.seg-switch button:active { transform: translateY(1px); }
+
+/* 字級（F-5）：只改根字級，所有版面都用相對單位，所以整體一起縮放 */
+:root[data-font="s"] { font-size: 15px; }
+:root[data-font="l"] { font-size: 18.5px; }
+
+/* 列印選項（B-5） */
+.print-options {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.check-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    cursor: pointer;
+}
+
+/* 跳到主要內容（F-4）：平常藏起來，用鍵盤 Tab 進來才出現 */
+.skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 50;
+    padding: 0.5rem 0.9rem;
+    background: var(--surface-solid);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 0 0 var(--radius) 0;
+    text-decoration: none;
+}
+
+.skip-link:focus {
+    left: 0;
+}
+
+/* 鍵盤焦點一定要看得見（F-4） */
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* 深色主題下封面卡片的陰影不要用白色調 */
+:root[data-theme="dark"] .shelf-card {
+    box-shadow: none;
+}
