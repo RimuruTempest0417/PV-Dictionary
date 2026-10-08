@@ -438,8 +438,34 @@ test('安全回應標頭：CSP 嚴格、沒有外洩框架資訊', async (t) => 
     assert.match(csp, /script-src 'self'/);
     assert.match(csp, /style-src 'self'/);
     assert.equal(csp.includes('unsafe-inline'), false);
+    /* A-7：把「不該有的東西」也一次鎖死 */
+    assert.match(csp, /object-src 'none'/, '不能載入外掛／舊式嵌入物件');
+    assert.match(csp, /frame-src 'none'/, '不能內嵌別人的頁面');
+    assert.match(csp, /worker-src 'self'/);
+    assert.match(csp, /frame-ancestors 'none'/);
+    assert.match(csp, /base-uri 'self'/);
+    assert.match(csp, /form-action 'self'/);
+    /* 本機是 http://127.0.0.1：upgrade-insecure-requests 只能在 production 出現，
+     * 否則瀏覽器會把子資源全升級成 https → 本機整站掛掉。 */
+    assert.equal(csp.includes('upgrade-insecure-requests'), false, '非 production 不該加 upgrade-insecure-requests');
+
     assert.equal(res.headers.get('x-powered-by'), null);
     assert.equal(res.headers.get('x-frame-options'), 'DENY');
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(res.headers.get('cross-origin-opener-policy'), 'same-origin');
+    const permissions = res.headers.get('permissions-policy') || '';
+    assert.match(permissions, /camera=\(self\)/, '相機只給自家');
+    assert.match(permissions, /microphone=\(self\)/, '麥克風只給自家（老師錄音要用）');
+    assert.match(permissions, /geolocation=\(\)/, '不需要定位 → 全關');
+});
+
+test('production 的 CSP 才加 upgrade-insecure-requests', () => {
+    const { buildSecurityHeaders } = require('../lib/auth');
+    const dev = buildSecurityHeaders(false)['Content-Security-Policy'];
+    const prod = buildSecurityHeaders(true)['Content-Security-Policy'];
+    assert.equal(dev.includes('upgrade-insecure-requests'), false);
+    assert.equal(prod.includes('upgrade-insecure-requests'), true);
+    assert.equal(prod.includes("default-src 'self'"), true);
 });
 
 /* ================= v0.1.0 帳號管理與授權管理 ================= */
@@ -717,4 +743,72 @@ test('改自己的密碼：管理員面板可以改，任何登入者也能用 /
 
     const actions = store.listAuditLogs({ limit: 20 }).items.map((row) => row.action);
     assert.equal(actions.includes('PASSWORD_CHANGE'), true, '改密碼要留稽核紀錄');
+});
+
+/* ---- E-1 路由覆蓋補齊：這三條路由原本沒有任何測試碰過 ---- */
+
+test('登出：只清掉自己的 cookie，之後帶舊 cookie 也等於未登入', async (t) => {
+    const { base } = startServer(t);
+    const me = await login(base, 'teacher');
+    assert.equal(me.status, 200);
+    assert.equal((await api(base, '/api/auth/me', { cookie: me.cookie })).data.user.username, 'teacher');
+
+    const out = await api(base, '/api/auth/logout', { method: 'POST', cookie: me.cookie });
+    assert.equal(out.status, 200);
+    const cleared = out.headers.getSetCookie().join('; ');
+    assert.match(cleared, /pd_token=;/, '登出要把權杖 cookie 清掉（空值 + 過期）');
+    assert.match(cleared, /Max-Age=0/);
+    assert.match(cleared, /HttpOnly/);
+
+    /* 登出後伺服器端仍會接受未過期的權杖（沒有黑名單，見規劃書 A-10 的做法），
+     * 但瀏覽器已經拿不到它了；這裡確認的是「回應本身不再帶登入狀態」。 */
+    const meAgain = await api(base, '/api/auth/me', { cookie: me.cookie });
+    assert.equal(meAgain.data.user.username, 'teacher', '權杖未到期前伺服器仍認得（A-10 會處理）');
+});
+
+test('單元發佈／下架：老師（含授權）可以做，科代表不行', async (t) => {
+    const { base, ids } = startServer(t);
+    const teacher = await login(base, 'teacher');
+    const rep = await login(base, 'classrep');
+    const anon = await api(base, `/api/units/${ids.hidden.id}/publish`, { method: 'POST' });
+    assert.equal(anon.status, 401, '未登入不能發佈');
+
+    const denied = await api(base, `/api/units/${ids.hidden.id}/publish`, { method: 'POST', cookie: rep.cookie });
+    assert.equal(denied.status, 403, '科代表不能發佈單元');
+    assert.equal(denied.data.code, 'FORBIDDEN');
+
+    const ok = await api(base, `/api/units/${ids.hidden.id}/publish`, { method: 'POST', cookie: teacher.cookie });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.data.unit.is_published, true);
+
+    /* 訪客現在看得到它了 */
+    const seen = await api(base, `/api/units/${ids.hidden.id}`);
+    assert.equal(seen.status, 200);
+
+    const back = await api(base, `/api/units/${ids.hidden.id}/unpublish`, { method: 'POST', cookie: teacher.cookie });
+    assert.equal(back.status, 200);
+    assert.equal(back.data.unit.is_published, false);
+    assert.equal((await api(base, `/api/units/${ids.hidden.id}`)).status, 404, '下架後訪客看不到');
+});
+
+test('快取標頭：未登入的讀取可公開快取，登入的一律 private no-store（A-11）', async (t) => {
+    const { base, ids, store } = startServer(t);
+    store.updateUnit(ids.unit.id, { is_published: true });
+
+    const anonBooks = await api(base, '/api/books');
+    assert.match(anonBooks.headers.get('cache-control') || '', /public, max-age=15/,
+        '未登入的書本清單可以公開快取');
+    assert.equal(anonBooks.headers.get('vary'), 'Cookie',
+        '★ 一定要有 Vary: Cookie，否則瀏覽器會拿未登入的公開回應回答已登入的請求（看不到剛新增的內容）');
+    const anonUnit = await api(base, `/api/units/${ids.unit.id}`);
+    assert.match(anonUnit.headers.get('cache-control') || '', /public, max-age=15/);
+    assert.equal(anonUnit.headers.get('vary'), 'Cookie');
+
+    /* ★ 這條是重點：登入者看得到未發佈的草稿，那種回應絕對不能進 CDN 或瀏覽器快取 */
+    const teacher = await login(base, 'teacher');
+    const teacherBooks = await api(base, '/api/books?include_unpublished=1', { cookie: teacher.cookie });
+    assert.equal(teacherBooks.headers.get('cache-control'), 'private, no-store');
+    const teacherUnit = await api(base, `/api/units/${ids.hidden.id}`, { cookie: teacher.cookie });
+    assert.equal(teacherUnit.status, 200);
+    assert.equal(teacherUnit.headers.get('cache-control'), 'private, no-store');
 });

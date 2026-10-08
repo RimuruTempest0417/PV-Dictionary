@@ -25,7 +25,13 @@
         const init = {
             method: opts.method || 'GET',
             credentials: 'same-origin',
-            headers: {}
+            headers: {},
+            /* ★ 前端一律不要用瀏覽器快取（A-11）：
+             *   後端對「未登入」的讀取回了 15 秒公開快取（省 CDN 與資料庫），但那份快取如果被瀏覽器
+             *   拿去回答「已登入」的請求，老師就會看不到自己剛新增的待審核生字。
+             *   後端已經有 Vary: Cookie，這裡再從前端關掉快取，兩層都到位。
+             *   圖片與音檔不走這裡（它們是 <img>/<audio> 的 src），長快取照舊有效。 */
+            cache: 'no-store'
         };
         if (opts.body !== undefined && opts.body !== null) {
             init.headers['Content-Type'] = 'application/json';

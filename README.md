@@ -3,7 +3,7 @@
 線上英文生字字典：學生**點書本封面 → 選單元 → 看生字表**（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.3.4（本機 Demo ＋ 線上版已上線）**
+- 目前版本：**v0.4.0（本機 Demo ＋ 線上版已上線）**
 - 規劃書（**待完成的事都在這**）：`docs/規劃書-待完成.md`｜決策與各版結果：`docs/規劃書-v0.0.1.md`｜部署：`docs/deploy-vercel.md`
 - 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie、介面預設英文可切中文
 - 線上：**已上線** https://pv-dictionary-mylearning.vercel.app （Vercel `pv-dictionary` ＋ Supabase；環境變數已設好）
@@ -82,7 +82,7 @@ grep SEED_ .env
 | 環境 | 資料層 | 狀態 |
 |---|---|---|
 | 本機 Demo | 本機 JSON（`data/store.json`，不進 Git） | 可用，內容由你手動加入 |
-| 線上（Vercel） | Supabase PostgreSQL | **adapter 已完成並實測通過**；Vercel 專案已建立，填好兩個環境變數即上線 |
+| 線上（Vercel） | Supabase PostgreSQL | **已上線運行中**（https://pv-dictionary-mylearning.vercel.app ） |
 
 Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-southeast-1`，免費方案），
 7 張表 `dict_*` 已依 `migrations/2026-10-08-v0.0.1-init.sql` 建立，RLS 全開且不加 policy、
@@ -106,6 +106,22 @@ Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-sout
 （**後兩者請自己填，不要貼在對話裡**）。
 
 ---
+
+## 安全（v0.4.0 起）
+
+| 面向 | 做法 |
+|---|---|
+| 登入憑證 | JWT 放 HttpOnly + SameSite=Strict cookie（預設 12 小時）；也接受 `Authorization: Bearer` |
+| CSRF | 不安全的方法一律檢查來源，且**只比對主機名**（反代後面 `req.protocol` 不可信，比 scheme 會誤擋自家請求） |
+| CSP | `default-src 'self'`、`script-src 'self'`、`style-src 'self'`（零行內樣式與事件）、`object-src 'none'`、`frame-src 'none'`、`worker-src 'self'`、`frame-ancestors 'none'`；`upgrade-insecure-requests` **只在 production** |
+| 其他標頭 | `X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy`、HSTS、`Cross-Origin-Opener-Policy`、`Permissions-Policy`（相機與麥克風只給自家、其餘全關） |
+| CORS | 只允許自家來源；**靜態檔也由 `vercel.json` 指定自家網域**，覆蓋 CDN 對靜態檔預設回傳的 `Access-Control-Allow-Origin: *` |
+| 資料庫 | RLS 全開、不加 policy、撤銷 anon／authenticated；只有後端用 `service_role` 進得去 |
+| 快取 | 未登入的讀取回 15 秒公開快取並帶 `Vary: Cookie`；登入者一律 `private, no-store`（登入者看得到未發佈草稿，那種回應不能進任何快取） |
+| 登入防護 | IP 與帳號雙軌鎖定：同一帳號要來自 ≥2 個 IP 才會鎖（避免一位老師打錯密碼鎖住全校） |
+| 權限 | `lib/roles.js` 是唯一權威；**每個請求都重新讀取使用者與角色**，所以停用帳號立即失效 |
+| 機密 | `JWT_SECRET`／`SUPABASE_SERVICE_ROLE_KEY` 只在 `.env` ↔ Vercel 之間流動（Vercel 以 sensitive 存放）；輪替步驟見 `docs/金鑰輪替.md` |
+| 依賴 | `npm run check:deps` 掃 production 依賴的 high／critical 弱點（發版前跑） |
 
 ## 功能（v0.0.1 起，v0.2.0 更新）
 
@@ -158,7 +174,7 @@ guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin
 | 使用者管理、稽核紀錄 | ✗ | ✗ | ✗ | ✓ | ✓ |
 
 另有**單元級授權**（`dict_grants` 表 + `/api/admin/grants`）：可以只授權某位老師編輯某本書，或只授權某位科代表編輯某個單元。
-（授權的圖形介面排在 v0.1.0；API 已完成。）
+（授權的圖形介面在右上角「✏️ 管理 → 🔑 授權管理」。）
 
 ---
 
@@ -187,14 +203,25 @@ guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin
 ```bash
 npm run check:syntax   # 所有 JS 語法檢查 + server.js 模組載入檢查
 npm run check:schema   # 程式要用的欄位 vs migrations/*.sql（不用網路）
-npm test               # 64 項：角色權限矩陣、資料層（JSON 與 Supabase）、schema 守門、匯入解析、i18n、API 端到端
-npm run check:browser  # 四支真 Chrome 檢查（劇本 54 ＋ 空白起步 31 ＋ 語言切換 28 ＋ 帳號管理 50）
+npm test               # 83 項：角色權限矩陣、資料層（JSON 與 Supabase）、schema 守門、路由快照與覆蓋、版本一致、i18n、API 端到端
+npm run check:browser  # 四支真 Chrome 檢查（劇本 59 ＋ 空白起步 33 ＋ 語言切換 28 ＋ 帳號管理 58）
+npm run check:deps     # 依賴套件弱點掃描（需要網路；--all 才含開發依賴）
+npm run routes         # 列出所有後端路由與註冊順序（路由快照的來源）
+npm run routes:snapshot  # 更新 tests/fixtures/route-inventory.json（新增／移除路由後要跑）
 npm run check:schema:live        # 同一份欄位清單 vs 線上 Supabase 實際 schema
 node scripts/supabase-smoke.js          # 線上資料庫：連線／schema／各表筆數
 node scripts/supabase-smoke.js --write  # 線上資料庫：寫入 → 新連線讀回 → 清理 → 確認乾淨
 node scripts/live-verify.js             # 線上版端到端：schema、帶封面的書往返、登入後上傳封面（不留測試資料）
 DATA_BACKEND=supabase npm run seed -- --prune-accounts   # 在正式資料庫建立／重設帳號
 ```
+
+發版的完整順序（`npm run check` 是 `check:syntax + check:schema + test`）：
+
+```bash
+npm run check && npm run check:browser && npm run check:deps
+```
+
+> `check:deps` 刻意**不在** `npm run check` 裡：`npm audit` 需要連外，而 `check` 要能離線跑完。
 
 瀏覽器驗收涵蓋：**書架（封面）→ 目錄 → 生字表的三層動線**、**上傳書本封面後書架換成封面圖**、
 訪客瀏覽與 TTS 播放、搜尋、管理員新增／批次匯入／刪除（兩段式確認）、
@@ -223,10 +250,18 @@ scripts/seed.js             # 種子帳號（預設不填任何生字；--with-s
 scripts/check-syntax.js     # 語法 + 模組載入檢查
 tests/                      # node:test 單元／API 測試、tests/browser 真 Chrome 驗收
 migrations/                 # Supabase schema（v0.1.0 使用）
-docs/規劃書-v0.0.1.md        # 規劃書
+docs/規劃書-待完成.md        # 待完成任務與版本計畫（只放還沒做的事）
+docs/規劃書-v0.0.1.md        # 規劃書（決策與各版實作結果）
+docs/金鑰輪替.md            # 金鑰輪替步驟與紀錄
+lib/schema.js               # 資料庫欄位唯一清單（schema 守門用）
+lib/store/supabase.js       # Supabase adapter（hydrate → 路由 → 回應前 flush）
+scripts/route-inventory.js  # 路由清單快照（npm run routes）
+scripts/check-deps.js       # 依賴弱點掃描（npm run check:deps）
+tests/fixtures/             # 路由快照等測試基準檔
 ```
 
 ## 發版慣例
 
-版號同時出現在 `package.json` 與 `public/index.html` 的 `<title>`；每次發版更新 `README.md`。
+版號同時出現在 `package.json`、`public/index.html` 的 `<title>`／`#versionLabel` 與所有資產的 `?v=`；
+`tests/version-consistency.test.js` 會擋住任何一處忘了改（含 `/api/version` 與 `README.md`）。
 發版流程：`npm run check:syntax && npm test && npm run check:browser` → commit → annotated tag → push → GitHub Release。

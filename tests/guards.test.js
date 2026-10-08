@@ -84,6 +84,21 @@ test('前端用到的元素 id 真的存在（getElementById 找不到就會靜�
     assert.deepEqual(missing, [], `index.html 裡找不到這些 id：${missing.join('、')}`);
 });
 
+test('vercel.json：靜態檔要指定自家 CORS，不能讓 CDN 預設的 `*` 生效（A-6）', () => {
+    /* Vercel 對靜態檔預設回 Access-Control-Allow-Origin: *（實測 /js/app.js 就是這樣），
+     * 那等於任何網站都能用 fetch 讀我們的 JS。vercel.json 的 headers 必須明確覆蓋它。 */
+    const config = JSON.parse(fs.readFileSync(path.join(ROOT, 'vercel.json'), 'utf8'));
+    assert.ok(Array.isArray(config.headers) && config.headers.length > 0, 'vercel.json 要有 headers 規則');
+
+    const staticRule = config.headers.find((rule) => String(rule.source).includes('js'));
+    assert.ok(staticRule, '找不到 /js /css /img 的標頭規則');
+    const byKey = Object.fromEntries(staticRule.headers.map((header) => [header.key, header.value]));
+    assert.match(byKey['Access-Control-Allow-Origin'] || '', /^https:\/\/pv-dictionary-mylearning\.vercel\.app$/,
+        'ACAO 必須是自家網域，不能是 *');
+    assert.equal(byKey['Cross-Origin-Resource-Policy'], 'same-origin');
+    assert.equal(byKey['Access-Control-Allow-Origin'].includes('*'), false);
+});
+
 test('前端把 data-* 或 option 的 value 交給 el() 時要用 attrs（直接給鍵會被靜默忽略）', () => {
     /* el() 只認 options.attrs / options.dataset；寫成 { 'data-tone': x } 或 { value: x } 都不會生效，
      * 而且畫面上完全看不出來（元素在、文字對，屬性就是不見了 → 選單選了卻篩不出東西）。 */

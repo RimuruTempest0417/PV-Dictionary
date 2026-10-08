@@ -4,5 +4,37 @@
             "source": "/(.*)",
             "destination": "/api/index.js"
         }
+    ],
+    "headers": [
+        {
+            "source": "/(js|css|img)/(.*)",
+            "headers": [
+                {
+                    "key": "Access-Control-Allow-Origin",
+                    "value": "https://pv-dictionary-mylearning.vercel.app"
+                },
+                {
+                    "key": "Cross-Origin-Resource-Policy",
+                    "value": "same-origin"
+                },
+                {
+                    "key": "Cache-Control",
+                    "value": "public, max-age=604800"
+                }
+            ]
+        },
+        {
+            "source": "/(favicon.ico|manifest.json|robots.txt)",
+            "headers": [
+                {
+                    "key": "Access-Control-Allow-Origin",
+                    "value": "https://pv-dictionary-mylearning.vercel.app"
+                },
+                {
+                    "key": "Cross-Origin-Resource-Policy",
+                    "value": "same-origin"
+                }
+            ]
+        }
     ]
 }

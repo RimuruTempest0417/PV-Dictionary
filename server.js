@@ -336,7 +336,24 @@ function createApp(options = {}) {
         return copy;
     }
 
+    /* 公開讀取端點的快取標頭（A-11）。
+     * ★ 只有「未登入」的回應可以公開快取：登入者會看到未發佈的草稿／待審核生字，
+     *   那種回應一旦被 CDN 或瀏覽器快取，別人就可能拿到還沒公開的內容。
+     *   所以有登入 → private, no-store；沒登入 → 15 秒公開快取（省函式與資料庫的往返）。 */
+    function setReadCache(req, res) {
+        /* ★ Vary: Cookie 是必要的（不是保險）：沒有它，瀏覽器會把「未登入時抓到的公開回應」
+         *   直接拿去回答「已登入的請求」（網址一樣、15 秒內），老師就看不到剛新增的待審核生字。
+         *   有 Vary: Cookie，帶 cookie 的請求不會命中那份公開快取，會真的打到伺服器。 */
+        res.setHeader('Vary', 'Cookie');
+        if (req.user) {
+            res.setHeader('Cache-Control', 'private, no-store');
+            return;
+        }
+        res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+    }
+
     app.get('/api/books', (req, res) => {
+        setReadCache(req, res);
         const includeHidden = canSeeUnpublished(req) && boolish(req.query.include_unpublished, false);
         const books = store.listBooks({ includeUnpublished: includeHidden }).map((book) => {
             const units = store.listUnits({ bookId: book.id, includeUnpublished: includeHidden });
@@ -370,6 +387,7 @@ function createApp(options = {}) {
     });
 
     app.get('/api/units/:id', (req, res) => {
+        setReadCache(req, res);
         const unit = store.getUnit(req.params.id);
         if (!unit) return res.status(404).json({ error: msg('UNIT_NOT_FOUND'), code: 'UNIT_NOT_FOUND' });
         const includeHidden = canSeeUnpublished(req);

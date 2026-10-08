@@ -31,6 +31,18 @@ function check(label, condition, detail) {
     }
 }
 
+/* 等「伺服器端的權威狀態」到位再斷言。
+ * 為什麼需要：有些等待條件是腳本自己設的 UI 值（恆真），等於沒等 → 斷言會跑在寫入完成之前。
+ * store 是行程內的權威狀態（後端在回應前就寫好了），對它等待才是真的等。 */
+async function waitForStore(predicate, timeout = 8000) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+        if (predicate()) return true;
+        await sleep(120);
+    }
+    return predicate();
+}
+
 /* 頁面內用的小工具：靠帳號文字找到那一列（避免依賴列序） */
 const ROW_HELPERS = `
     window.__rowFor = (username) => [...document.querySelectorAll('#usersTableBody tr')]
@@ -164,7 +176,8 @@ async function main() {
             return true;
         `);
         await browser.waitFor(`document.querySelector('#usersTableBody select[data-user-id="${teacherChanId}"]').value === 'class_rep'`, { timeout: 8000 });
-        check('改角色成功（資料庫也是新角色）', store.findUserByUsername('teacherchan').role === 'class_rep', store.findUserByUsername('teacherchan').role);
+        const roleLanded = await waitForStore(() => store.findUserByUsername('teacherchan').role === 'class_rep');
+        check('改角色成功（資料庫也是新角色）', roleLanded, store.findUserByUsername('teacherchan').role);
 
         await browser.evaluate(`
             const tr = window.__rowFor('teacherchan');
@@ -186,7 +199,8 @@ async function main() {
             return true;
         `);
         await browser.waitFor(`window.__rowFor('teacherchan').textContent.includes('Disabled')`, { timeout: 8000 });
-        check('停用後資料庫也標成停用', store.findUserByUsername('teacherchan').is_active === false);
+        const deactivated = await waitForStore(() => store.findUserByUsername('teacherchan').is_active === false);
+        check('停用後資料庫也標成停用', deactivated);
         check('停用後登不進來', (await loginAs(app.base, 'teacherchan', 'reset99999')) === 401);
 
         console.log('\n【5】刪除帳號要按兩次（防手滑）');
@@ -201,7 +215,8 @@ async function main() {
             return true;
         `);
         await browser.waitFor(`window.__rowFor('teacherchan') === null`, { timeout: 8000 });
-        check('第二次按才真的刪掉', store.findUserByUsername('teacherchan') === null);
+        const deleted = await waitForStore(() => store.findUserByUsername('teacherchan') === null);
+        check('第二次按才真的刪掉', deleted);
 
         console.log('\n【6】授權管理：授權單元 → 真的能編輯 → 移除 → 又不能');
         const studentId = store.findUserByUsername('student').id;
@@ -237,7 +252,8 @@ async function main() {
 
         await browser.evaluate(`document.querySelector('#grantsList [data-action="delete-grant"]').click(); return true;`);
         await browser.waitFor(`document.querySelector('#grantsList [data-action="delete-grant"]').textContent.includes('Press again to confirm')`, { timeout: 5000 });
-        check('移除授權也要兩段式確認', store.listGrants({}).length === 1);
+        const grantKept = await waitForStore(() => store.listGrants({}).length === 1, 1500);
+        check('移除授權也要兩段式確認', grantKept);
         await browser.evaluate(`document.querySelector('#grantsList [data-action="delete-grant"]').click(); return true;`);
         await browser.waitFor(`document.querySelectorAll('#grantsList .grant-item').length === 0`, { timeout: 8000 });
         check('移除後清單變空（顯示提示）', (await browser.evaluate(`return document.getElementById('grantsList').textContent;`)).includes('No extra permissions'), '');
