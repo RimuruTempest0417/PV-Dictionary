@@ -34,18 +34,23 @@
         "POST /api/units/:id/unpublish",
         "GET /api/admin/users",
         "POST /api/admin/users",
+        "POST /api/admin/users/logout-all",
         "PATCH /api/admin/users/:id",
         "DELETE /api/admin/users/:id",
         "GET /api/admin/grants",
         "POST /api/admin/grants",
         "DELETE /api/admin/grants/:id",
         "GET /api/admin/audit-logs",
+        "GET /api/admin/audit-logs/export",
+        "POST /api/admin/audit-logs/cleanup",
+        "GET /api/admin/stats",
         "POST /api/logs/error",
         "GET /api/admin/error-logs",
+        "POST /api/admin/error-logs/resolve-similar",
         "PATCH /api/admin/error-logs/:id"
     ],
     "counts": {
-        "routes": 43,
-        "layers": 52
+        "routes": 48,
+        "layers": 57
     }
 }

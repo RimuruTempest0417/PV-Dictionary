@@ -405,6 +405,51 @@ async function main() {
         const auditAfter = store.listAuditLogs({ limit: 20 }).items.map((row) => row.action);
         check('標記動作也留了稽核紀錄（ERROR_LOG_UPDATE）', auditAfter.includes('ERROR_LOG_UPDATE'), auditAfter.slice(0, 5).join(','));
 
+        console.log('\n【7d】概況、稽核匯出與清理、同類錯誤處理（v0.4.4）');
+        await browser.evaluate(`document.getElementById('navStatsBtn').click(); return true;`);
+        await browser.waitFor(`document.querySelectorAll('#statsList .audit-item').length > 0`, { timeout: 8000 });
+        const statsUi = await browser.evaluate(`return {
+            lines: document.querySelectorAll('#statsList .audit-item').length,
+            units: document.querySelectorAll('#statsUnits .audit-item').length,
+            text: document.getElementById('statsList').textContent,
+            note: document.getElementById('statsBlock').textContent.includes('No personal data') || document.getElementById('statsBlock').textContent.length > 0
+        };`);
+        check('概況面板載入聚合數字（不含個資）', statsUi.lines >= 5 && statsUi.units >= 1, JSON.stringify([statsUi.lines, statsUi.units]));
+        check('概況顯示已確認／待審核的數字', /confirmed|waiting/.test(statsUi.text), statsUi.text.slice(0, 80));
+
+        /* 匯出：不按按鈕（那會下載檔案），改用頁面內的 fetch 驗內容 */
+        await browser.evaluate(`document.getElementById('navAuditBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('auditExportBtn') !== null`);
+        const exportProbe = await browser.evaluate(`
+            return fetch('/api/admin/audit-logs/export', { credentials: 'same-origin', cache: 'no-store' })
+                .then((r) => r.arrayBuffer().then((buf) => {
+                    const bytes = new Uint8Array(buf);
+                    const head = new TextDecoder('utf-8').decode(bytes.slice(0, 40));
+                    return { status: r.status, type: r.headers.get('content-type'), bom: bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF, head, size: bytes.length };
+                }));
+        `);
+        check('稽核匯出回 CSV、帶 UTF-8 BOM（Excel 開中文不會亂碼）',
+            exportProbe.status === 200 && /text\/csv/.test(exportProbe.type || '') && exportProbe.bom === true,
+            JSON.stringify(exportProbe));
+        check('匯出按鈕存在但預設不會自己下載（要使用者自己按）',
+            (await browser.evaluate(`return document.getElementById('auditExportBtn').hidden === false;`)) === true);
+        check('整個檢查過程仍然沒有任何下載', (await browser.evaluate(`return (window.__downloads || []).length;`)) === 0);
+
+        /* 清理：第一次只預覽 */
+        await browser.evaluate(`document.getElementById('auditCleanupBtn').click(); return true;`);
+        await browser.waitFor(`document.body.textContent.includes('Clean up') || document.body.textContent.includes('clean') || document.querySelector('.toast')`, { timeout: 8000 });
+        const cleanupProbe = await browser.evaluate(`
+            return fetch('/api/admin/audit-logs/cleanup', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+                .then((r) => r.json()).then((d) => ({ dry: d.dry_run, days: d.keep_days, would: d.would_delete }));
+        `);
+        check('清理預設只預覽（不會一按就刪）', cleanupProbe.dry === true && cleanupProbe.days === 365, JSON.stringify(cleanupProbe));
+
+        /* 同類處理：錯誤紀錄面板上每列都有那顆按鈕 */
+        await browser.evaluate(`document.getElementById('navErrorsBtn').click(); return true;`);
+        await browser.waitFor(`document.querySelectorAll('#errorsList .audit-item').length > 0`, { timeout: 8000 });
+        check('錯誤紀錄每一列都有「同類全部標為已處理」的按鈕',
+            (await browser.evaluate(`return document.querySelectorAll('#errorsList [data-action="resolve-similar"]').length;`)) >= 1);
+
         console.log('\n【8】切中文後新面板跟著翻譯 + 版面不溢出');
         await browser.evaluate(`document.getElementById('navUsersBtn').click(); return true;`);
         await browser.evaluate(`document.querySelector('#langSwitch [data-lang="zh"]').click(); return true;`);
@@ -610,6 +655,40 @@ async function main() {
         /* 復原：把老師的密碼改回去，後面的收尾檢查才不會被影響 */
         await logoutViaUi(browser);
         await loginViaUi(browser, { username: 'manager' });
+
+        console.log('\n【8d】所有帳號、所有裝置一起登出（只有 web_manager 有這顆按鈕）');
+        /* admin 看不到這顆按鈕 */
+        await logoutViaUi(browser);
+        await loginViaUi(browser, { username: 'manager' });
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await browser.evaluate(`document.getElementById('navUsersBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('logoutAllBtn') !== null`, { timeout: 8000 });
+        check('admin 看不到「所有帳號所有裝置一起登出」', (await browser.evaluate(`return document.getElementById('logoutAllBtn').hidden;`)) === true);
+
+        /* web_manager 看得到，而且要按兩次 */
+        await logoutViaUi(browser);
+        await loginViaUi(browser, { username: 'webmanager' });
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await browser.evaluate(`document.getElementById('navUsersBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('logoutAllBtn').hidden === false`, { timeout: 8000 });
+        check('web_manager 看得到這顆按鈕，而且就在「新增帳號」旁邊',
+            (await browser.evaluate(`return document.getElementById('logoutAllBtn').previousElementSibling.id;`)) === 'newUserBtn');
+
+        const versionsBefore = store.listUsers().map((u) => Number(u.token_version) || 1);
+        await browser.evaluate(`document.getElementById('logoutAllBtn').click(); return true;`);
+        check('第一次按只進入確認狀態（沒有真的登出）',
+            (await waitForStore(() => store.listUsers().every((u, i) => (Number(u.token_version) || 1) === versionsBefore[i]), 1500)) === true);
+        await browser.evaluate(`document.getElementById('logoutAllBtn').click(); return true;`);
+        const allBumped = await waitForStore(() => store.listUsers().every((u, i) => (Number(u.token_version) || 1) > versionsBefore[i]));
+        check('第二次按：所有帳號的工作階段版本都 +1', allBumped === true);
+        await browser.waitFor(`document.getElementById('loginBtn') !== null`, { timeout: 8000 });
+        check('按下之後自己這一台也被登出（使用者指定）',
+            (await browser.evaluate(`return window.PDAuth.isLoggedIn();`)) === false);
+        check('舊權杖失效後，仍然可以用密碼重新登入（只是要重新登入一次）',
+            await (async () => {
+                const statuses = await Promise.all(['manager', 'webmanager'].map((name) => loginAs(app.base, name, PASSWORD)));
+                return statuses.every((status) => status === 200);
+            })());
 
         console.log('\n【9】收尾：沒有 CSP 違規、例外、下載、截圖');
         const csp = await browser.evaluate(`return window.__cspViolations || [];`);

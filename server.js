@@ -15,7 +15,7 @@ const fs = require('fs');
 const { createStore, normalizeHeadword, DATA_BACKEND_LABEL } = require('./lib/store');
 const Roles = require('./lib/roles');
 const Auth = require('./lib/auth');
-const { logAudit, AUDIT_ACTION_LABELS, actionLabel, normalizeAuditFilters } = require('./lib/audit');
+const { logAudit, AUDIT_ACTION_LABELS, actionLabel, normalizeAuditFilters, toCsv } = require('./lib/audit');
 const { msg } = require('./lib/messages');
 const { createErrorLog } = require('./lib/errorlog');
 const { createThrottle } = require('./lib/throttle');
@@ -727,7 +727,11 @@ function createApp(options = {}) {
             return res.status(400).json({ error: msg('CURRENT_PASSWORD_WRONG'), code: 'CURRENT_PASSWORD_WRONG' });
         }
         if (passwordProblem(next)) {
-            return res.status(400).json({ error: msg('PASSWORD_LENGTH', { min: PASSWORD_MIN }), code: 'PASSWORD_LENGTH' });
+            return res.status(400).json({
+                error: msg('PASSWORD_LENGTH', { min: PASSWORD_MIN }),
+                code: 'PASSWORD_LENGTH',
+                details: { min: PASSWORD_MIN }
+            });
         }
         /* 改密碼＝其他裝置的舊工作階段全部失效（A-10）；自己這一台換一張新權杖，不用重新登入 */
         store.updateUser(req.user.id, {
@@ -1234,7 +1238,11 @@ function createApp(options = {}) {
             return res.status(400).json({ error: msg('USERNAME_FORMAT'), code: 'USERNAME_FORMAT' });
         }
         if (passwordProblem(password)) {
-            return res.status(400).json({ error: msg('PASSWORD_LENGTH', { min: PASSWORD_MIN }), code: 'PASSWORD_LENGTH' });
+            return res.status(400).json({
+                error: msg('PASSWORD_LENGTH', { min: PASSWORD_MIN }),
+                code: 'PASSWORD_LENGTH',
+                details: { min: PASSWORD_MIN }
+            });
         }
         if (!Roles.canCreateRole(req.user, role)) {
             return res.status(403).json({ error: msg('ROLE_CREATE_FORBIDDEN'), code: 'ROLE_CREATE_FORBIDDEN' });
@@ -1251,6 +1259,25 @@ function createApp(options = {}) {
         });
         logAudit(store, { user: req.user, action: 'USER_CREATE', targetId: user.id, details: `${username}（${Roles.roleLabel(role)}）`, ip: req.ip });
         return res.status(201).json({ user: publicUser(user) });
+    });
+
+    /* 所有帳號、所有裝置一起登出（使用者指定：只有 web_manager，而且要連自己都被登出）。
+     * 做法是把每個使用者的 token_version +1 —— 之後所有舊權杖一律失效。 */
+    app.post('/api/admin/users/logout-all', requireRole('web_manager'), (req, res) => {
+        const all = store.listUsers ? store.listUsers() : [];
+        let bumped = 0;
+        for (const user of all) {
+            store.updateUser(user.id, { token_version: (Number(user.token_version) || 1) + 1 });
+            bumped += 1;
+        }
+        logAudit(store, {
+            user: req.user,
+            action: 'ALL_USERS_FORCE_LOGOUT',
+            details: `所有帳號的所有裝置（${bumped} 個帳號）`,
+            ip: req.ip
+        });
+        /* 呼叫者的權杖也已經失效：前端收到這個回應後要把自己登出 */
+        return res.json({ ok: true, users: bumped });
     });
 
     app.patch('/api/admin/users/:id', requireRole('admin'), (req, res) => {
@@ -1279,7 +1306,11 @@ function createApp(options = {}) {
         if (body.password !== undefined) {
             const password = String(body.password);
             if (passwordProblem(password)) {
-                return res.status(400).json({ error: msg('PASSWORD_LENGTH', { min: PASSWORD_MIN }), code: 'PASSWORD_LENGTH' });
+                return res.status(400).json({
+                    error: msg('PASSWORD_LENGTH', { min: PASSWORD_MIN }),
+                    code: 'PASSWORD_LENGTH',
+                    details: { min: PASSWORD_MIN }
+                });
             }
             patch.password_hash = hashPassword(password);
             patch.token_version = bumpTokenVersion(target);      /* 改別人的密碼＝把對方登出（A-10） */
@@ -1443,6 +1474,101 @@ function createApp(options = {}) {
         });
     });
 
+    /* ---------------- 稽核紀錄的匯出與清理（A-3） ---------------- */
+
+    /* CSV 匯出：吃跟列表一樣的篩選條件；有沒有帶 hide_self_test 都行（預設濾掉自動化檢查） */
+    app.get('/api/admin/audit-logs/export', requireRole('admin'), (req, res) => {
+        const filters = {
+            q: str(req.query.q, 80),
+            action: str(req.query.action, 40),
+            user: str(req.query.user, 40),
+            from: str(req.query.from, 10),
+            to: str(req.query.to, 10),
+            hide_self_test: req.query.hide_self_test === undefined ? true : boolish(req.query.hide_self_test, true)
+        };
+        /* 匯出上限：一次最多 5000 筆（再多請縮小日期範圍），避免拉爆記憶體與瀏覽器 */
+        const result = store.listAuditLogs(Object.assign({ limit: 5000, offset: 0 }, filters));
+        const rows = result.items.slice().reverse();      /* CSV 由舊到新，跟紙本紀錄的習慣一致 */
+        const csv = toCsv(rows);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename="pv-dictionary-audit.csv"');
+        res.setHeader('Cache-Control', 'private, no-store');
+        logAudit(store, {
+            user: req.user, action: 'AUDIT_EXPORT', details: `匯出 ${rows.length} 筆稽核紀錄`, ip: req.ip
+        });
+        return res.send(csv);
+    });
+
+    /* 清理舊稽核紀錄：預設只預覽（dry_run），要真的刪必須明確帶 dry_run=0，天數下限 30 */
+    app.post('/api/admin/audit-logs/cleanup', requireRole('admin'), (req, res) => {
+        const body = req.body || {};
+        const keepDays = Math.max(Number(body.keep_days) || 365, 30);
+        const dryRun = body.dry_run === undefined ? true : boolish(body.dry_run, true);
+        const cutoff = new Date(Date.now() - keepDays * 24 * 60 * 60 * 1000).toISOString();
+        /* ★ 不可以只用大 limit：store 對 limit 有上限（50~200），最舊的紀錄會被切掉，
+         *   所以要**用日期篩選**讓資料層先把範圍縮小（這裡傳 YYYY-MM-DD，跟列表頁同一套規則）。 */
+        const cutoffDate = cutoff.slice(0, 10);
+        const candidate = store.listAuditLogs({ limit: 200, offset: 0, to: cutoffDate, hide_self_test: false }).items;
+        const targets = candidate.filter((row) => String(row.created_at || '') < cutoff);
+        if (!dryRun && targets.length) {
+            for (const row of targets) {
+                if (typeof store.deleteAuditLog === 'function') store.deleteAuditLog(row.id);
+            }
+            logAudit(store, {
+                user: req.user, action: 'AUDIT_CLEANUP', targetId: null,
+                details: `刪除 ${targets.length} 筆（保留 ${keepDays} 天）`, ip: req.ip
+            });
+        }
+        return res.json({
+            dry_run: dryRun,
+            keep_days: keepDays,
+            cutoff,
+            would_delete: targets.length,
+            total: store.listAuditLogs({ limit: 1, offset: 0, hide_self_test: false }).total
+        });
+    });
+
+    /* 使用統計（B-7）：只回聚合數字，不含任何個資 */
+    app.get('/api/admin/stats', requireRole('admin'), (req, res) => {
+        const books = store.listBooks({ includeUnpublished: true });
+        const units = store.listUnits({ includeUnpublished: true });
+        const publishedUnits = units.filter((unit) => unit.is_published !== false);
+        const entries = store.listEntries({});                       /* 全部（含未發佈與待審核） */
+        const audioRows = store.listAudio ? store.listAudio({}) : [];
+        const published = entries.filter((entry) => entry.status === 'published');
+        const pending = entries.filter((entry) => entry.status === 'pending');
+        const users = store.listUsers();
+        const grants = store.listGrants({});
+        const audio = audioRows.filter((row) => row.source === 'teacher').length;
+        const byRole = {};
+        for (const user of users) byRole[user.role] = (byRole[user.role] || 0) + 1;
+        const last7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const recent = store.listAuditLogs({ limit: 100000, offset: 0, hide_self_test: true }).items
+            .filter((row) => String(row.created_at || '') >= last7);
+        const recentByAction = {};
+        for (const row of recent) recentByAction[row.action] = (recentByAction[row.action] || 0) + 1;
+        /* 每個單元的生字數：找出「空單元」與「最多生字」的單元，老師最需要這兩個數字 */
+        const perUnit = units.map((unit) => ({
+            id: unit.id,
+            label: `Unit ${unit.unit_no}${unit.title ? ` · ${unit.title}` : ''}`,
+            book: unit.book_name || '',
+            published: entries.filter((entry) => entry.unit_id === unit.id && entry.status === 'published').length,
+            pending: entries.filter((entry) => entry.unit_id === unit.id && entry.status === 'pending').length
+        }));
+        const emptyUnits = perUnit.filter((unit) => unit.published === 0 && unit.pending === 0);
+        return res.json({
+            books: { total: books.length, published: books.filter((book) => book.is_published !== false).length },
+            units: { total: units.length, published: publishedUnits.length, empty: emptyUnits.length },
+            entries: { total: entries.length, published: published.length, pending: pending.length },
+            audio: { total: audio, missing: published.length - audio },
+            users: { total: users.length, active: users.filter((user) => user.is_active !== false).length, by_role: byRole, two_factor: users.filter((user) => user.totp_enabled_at).length },
+            grants: { total: grants.length },
+            recent: { days: 7, total: recent.length, by_action: recentByAction },
+            per_unit: perUnit.slice().sort((a, b) => b.published - a.published),
+            empty_units: emptyUnits.slice(0, 10)
+        });
+    });
+
     /* ---------------- 錯誤日誌（A-5） ----------------
      * 前端（還有未來的任何前端）遇到未預期例外時把一筆摘要送上來，後台「🐞 錯誤紀錄」看得到。
      * 設計重點：
@@ -1493,6 +1619,24 @@ function createApp(options = {}) {
             offset: req.query.offset
         });
         res.json(result);
+    });
+
+    /* 同一個錯誤常常一次來好幾筆（瀏覽器擴充功能、迴圈例外）：一次把同 code+message 的未處理清掉 */
+    app.post('/api/admin/error-logs/resolve-similar', requireRole('admin'), async (req, res) => {
+        const body = req.body || {};
+        const code = str(body.code, 60);
+        const message = str(body.message, 500);
+        if (!code && !message) {
+            return res.status(400).json({ error: msg('ERROR_REPORT_EMPTY'), code: 'ERROR_REPORT_EMPTY' });
+        }
+        const result = await errorLog.resolveSimilar({ code, message, by: req.user.id, note: '同類一次處理' });
+        logAudit(store, {
+            user: req.user,
+            action: 'ERROR_LOG_RESOLVE_SIMILAR',
+            details: `${code}${message ? `：${message.slice(0, 60)}` : ''}（${result.resolved} 筆）`,
+            ip: req.ip
+        });
+        return res.json({ resolved: result.resolved });
     });
 
     app.patch('/api/admin/error-logs/:id', requireRole('admin'), async (req, res) => {

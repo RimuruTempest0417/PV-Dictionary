@@ -109,10 +109,18 @@
             });
         });
 
-        /* CSP 違規是「有東西被擋掉了」的直接證據（畫面通常看起來只是壞掉而已） */
+        /* CSP 違規是「有東西被擋掉了」的直接證據（畫面通常看起來只是壞掉而已）。
+         * ★ 例外：擴充功能（Google 翻譯、深色模式、閱讀模式…）會往頁面注入行內樣式，
+         *   這會產生 style-src-elem／style-src-attr 的 'inline' 違規 —— 那不是我們的問題。
+         *   可以安全忽略的理由：我們的 CSP 沒有 unsafe-inline，而且 tests/guards.test.js
+         *   會擋掉任何行內 style 與 style 屬性，所以這種違規不可能來自本專案的程式碼。
+         *   真的自己寫了行內樣式時，守門測試會先紅燈，不會被這裡默默吃掉。 */
+        const EXTENSION_INLINE_STYLE = /^style-src-(elem|attr)$/;
         document.addEventListener('securitypolicyviolation', (event) => {
-            report('CSP_VIOLATION', `${event.effectiveDirective || event.violatedDirective} blocked ${event.blockedURI || ''}`,
-                { directive: event.effectiveDirective || event.violatedDirective, blocked: event.blockedURI });
+            const directive = event.effectiveDirective || event.violatedDirective || '';
+            const blocked = event.blockedURI || '';
+            if (EXTENSION_INLINE_STYLE.test(directive) && blocked === 'inline') return;
+            report('CSP_VIOLATION', `${directive} blocked ${blocked}`, { directive, blocked });
         });
     }
 

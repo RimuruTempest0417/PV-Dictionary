@@ -1213,6 +1213,14 @@ test('密碼政策（A-8）：新設定的密碼最少 10 碼（三個入口都�
     assert.equal((await api(base, '/api/auth/change-password', {
         method: 'POST', cookie: teacher.cookie, body: { current_password: PASSWORD, new_password: '0123456789' }
     })).status, 200);
+
+    /* ★ 訊息要帶 {min} 的值：前端是用 details 當插值變數，
+     *   少了它中文會變成「密碼長度必須是 –64 個字元」（使用者回報） */
+    const missingMin = await api(base, '/api/admin/users', {
+        method: 'POST', cookie: manager.cookie, body: { username: 'shortuser2', password: 'short', role: 'teacher' }
+    });
+    assert.equal(missingMin.data.details.min, 10, 'details 要帶 min 讓前端插值');
+    assert.equal(missingMin.data.error.includes('10'), true);
 });
 
 test('新裝置登入（A-8）：來源不同會單獨留一筆稽核並在回應標記', async (t) => {
@@ -1233,6 +1241,142 @@ test('新裝置登入（A-8）：來源不同會單獨留一筆稽核並在回�
     assert.equal(rows.length, 1);
     assert.match(rows[0].details, /新裝置登入/);
     assert.equal(store.findUserByUsername('teacher').last_login_agent, 'AnotherBrowser/1.0');
+});
+
+test('錯誤日誌（同類一次處理）：同 code+message 的未處理紀錄一次清掉，會留稽核', async (t) => {
+    const { app, base, store } = startServer(t);
+    for (let i = 0; i < 3; i += 1) {
+        await api(base, '/api/logs/error', { method: 'POST', body: { code: 'CSP_VIOLATION', message: 'style-src-elem blocked inline', path: '/' } });
+    }
+    await api(base, '/api/logs/error', { method: 'POST', body: { code: 'OTHER', message: 'something else' } });
+
+    const manager = await login(base, 'manager');
+    assert.equal((await api(base, '/api/admin/error-logs/resolve-similar', { method: 'POST' })).status, 401);
+    const teacher = await login(base, 'teacher');
+    assert.equal((await api(base, '/api/admin/error-logs/resolve-similar', {
+        method: 'POST', cookie: teacher.cookie, body: { code: 'CSP_VIOLATION', message: 'x' }
+    })).status, 403);
+
+    const done = await api(base, '/api/admin/error-logs/resolve-similar', {
+        method: 'POST', cookie: manager.cookie, body: { code: 'CSP_VIOLATION', message: 'style-src-elem blocked inline' }
+    });
+    assert.equal(done.status, 200);
+    assert.equal(done.data.resolved, 3, '同類的三筆要一次處理掉');
+    const left = await app.locals.errorLog.list({ resolved: 'false' });
+    assert.equal(left.rows.length, 1, '不同類的那一筆要留著');
+    assert.equal(left.rows[0].code, 'OTHER');
+    assert.ok(store.listAuditLogs({ limit: 10 }).items.some((row) => row.action === 'ERROR_LOG_RESOLVE_SIMILAR'));
+    const empty = await api(base, '/api/admin/error-logs/resolve-similar', { method: 'POST', cookie: manager.cookie, body: {} });
+    assert.equal(empty.status, 400);
+});
+
+test('稽核匯出（A-3）：CSV 帶 BOM、公式注入被中和、篩選條件一起套用', async (t) => {
+    const { base, store } = startServer(t);
+    const manager = await login(base, 'manager');
+    /* 造一筆「看起來像公式」的內容（帳號與生字都是使用者輸入，這是必要的防護） */
+    store.insertAuditLog({
+        user_id: 'evil', display_name: '=cmd|' + "'" + ' /C calc', role: 'teacher',
+        action: 'ENTRY_UPDATE', target_id: '1', details: '=SUM(A1:A9) 中文', ip: '1.2.3.4',
+        created_at: new Date().toISOString()
+    });
+
+    assert.equal((await api(base, '/api/admin/audit-logs/export')).status, 401);
+    const teacher = await login(base, 'teacher');
+    assert.equal((await api(base, '/api/admin/audit-logs/export', { cookie: teacher.cookie })).status, 403);
+
+    const res = await fetch(`${base}/api/admin/audit-logs/export`, { headers: { Cookie: manager.cookie } });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type') || '', /text\/csv/);
+    assert.match(res.headers.get('content-disposition') || '', /attachment; filename=/);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    assert.deepEqual([...buffer.slice(0, 3)], [239, 187, 191], 'UTF-8 BOM（不然 Excel 開中文會亂碼）');
+    const csv = buffer.toString('utf8').replace(/^\ufeff/, '');
+    const lines = csv.trim().split('\r\n');
+    assert.equal(lines[0], 'created_at,action,action_label,user_id,display_name,role,target_id,details,ip,is_self_test');
+    const evil = lines.find((line) => line.includes('cmd')) || '';
+    assert.equal(/^=/.test(evil.replace(/^[^,]*,[^,]*,[^,]*,[^,]*,/, '')), false, '每格都不能以 = 開頭');
+    assert.match(evil, /'=cmd/, '公式前面要補單引號');
+    assert.match(csv, /修改生字/, '動作要有中文標籤，Excel 才看得懂');
+
+    /* 匯出本身要留稽核 */
+    assert.ok(store.listAuditLogs({ limit: 10 }).items.some((row) => row.action === 'AUDIT_EXPORT'));
+});
+
+test('稽核清理（A-3）：預設只預覽、天數下限 30、真的刪除才動手', async (t) => {
+    const { base, store } = startServer(t);
+    const manager = await login(base, 'manager');
+    const old = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString();
+    store.insertAuditLog({ user_id: 'old', display_name: 'Old', role: 'teacher', action: 'LOGIN', target_id: null, details: '很久以前', ip: '', created_at: old });
+    const before = store.listAuditLogs({ limit: 1000, hide_self_test: false }).items.length;
+
+    const preview = await api(base, '/api/admin/audit-logs/cleanup', { method: 'POST', cookie: manager.cookie, body: {} });
+    assert.equal(preview.status, 200);
+    assert.equal(preview.data.dry_run, true, '沒指定就是預覽');
+    assert.equal(preview.data.would_delete, 1);
+    assert.equal(store.listAuditLogs({ limit: 1000, hide_self_test: false }).items.length, before, '預覽不能真的刪');
+
+    /* 天數下限 30 天：這一輪只要確認下限（dry-run，別真的刪，否則下一段就沒東西可刪了） */
+    const floored = await api(base, '/api/admin/audit-logs/cleanup', { method: 'POST', cookie: manager.cookie, body: { keep_days: 5, dry_run: true } });
+    assert.equal(floored.data.keep_days, 30, '天數下限 30 天');
+
+    const done = await api(base, '/api/admin/audit-logs/cleanup', { method: 'POST', cookie: manager.cookie, body: { keep_days: 365, dry_run: false } });
+    assert.equal(done.data.would_delete, 1);
+    const after = store.listAuditLogs({ limit: 1000, hide_self_test: false }).items;
+    assert.equal(after.some((row) => row.created_at === old), false, '舊紀錄要真的被刪掉');
+    assert.ok(after.some((row) => row.action === 'AUDIT_CLEANUP'), '清理本身要留一筆稽核');
+});
+
+test('使用統計（B-7）：只回聚合數字、admin 以上才看得到', async (t) => {
+    const { base } = startServer(t);
+    assert.equal((await api(base, '/api/admin/stats')).status, 401);
+    const teacher = await login(base, 'teacher');
+    assert.equal((await api(base, '/api/admin/stats', { cookie: teacher.cookie })).status, 403);
+
+    const manager = await login(base, 'manager');
+    const stats = (await api(base, '/api/admin/stats', { cookie: manager.cookie })).data;
+    assert.equal(stats.books.total, 1);
+    assert.equal(stats.units.total, 2, '含未發佈的草稿單元');
+    assert.equal(stats.units.published, 1);
+    assert.equal(stats.entries.published, 1);
+    assert.equal(stats.users.total, 5);
+    assert.equal(stats.users.by_role.admin, 1);
+    assert.equal(stats.audio.missing, 1, '已發佈 1 個生字、沒有錄音');
+    assert.equal(Array.isArray(stats.per_unit), true);
+    assert.equal(stats.per_unit.length, 2);
+    assert.equal(stats.empty_units.length, 1, '草稿單元是空的');
+    assert.equal(typeof stats.recent.total, 'number');
+    /* 不可以回任何帳號或生字的明細 */
+    const serialized = JSON.stringify(stats);
+    assert.equal(serialized.includes('teacher@') || serialized.includes('password'), false);
+});
+
+test('全域登出（web_manager）：所有帳號的所有裝置一起登出，包括自己', async (t) => {
+    const { base, store } = startServer(t);
+    const teacherDevice = await login(base, 'teacher');
+    const adminDevice = await login(base, 'manager');
+    const webmanager = await login(base, 'webmanager');
+    const versionsBefore = store.listUsers().map((user) => Number(user.token_version) || 1);
+
+    assert.equal((await api(base, '/api/admin/users/logout-all', { method: 'POST' })).status, 401);
+    const byAdmin = await api(base, '/api/admin/users/logout-all', { method: 'POST', cookie: adminDevice.cookie });
+    assert.equal(byAdmin.status, 403, '只有網站管理員可以做');
+    assert.equal(byAdmin.data.code, 'FORBIDDEN');
+
+    const byWebManager = await api(base, '/api/admin/users/logout-all', { method: 'POST', cookie: webmanager.cookie });
+    assert.equal(byWebManager.status, 200);
+    assert.ok(byWebManager.data.users >= 5, String(byWebManager.data.users));
+
+    const versionsAfter = store.listUsers().map((user) => Number(user.token_version) || 1);
+    assert.equal(versionsAfter.every((value, index) => value === versionsBefore[index] + 1), true, '每個帳號的工作階段版本都要 +1');
+
+    /* 所有人的舊權杖都失效：包含老師、管理員、以及按下按鈕的那一位 */
+    assert.equal((await api(base, '/api/auth/me', { cookie: teacherDevice.cookie })).status, 401);
+    assert.equal((await api(base, '/api/auth/me', { cookie: adminDevice.cookie })).status, 401);
+    assert.equal((await api(base, '/api/auth/me', { cookie: webmanager.cookie })).status, 401, '自己那一台也要登出');
+
+    assert.ok(store.listAuditLogs({ limit: 10 }).items.some((row) => row.action === 'ALL_USERS_FORCE_LOGOUT'));
+    /* 但還是可以重新登入（只是舊權杖失效） */
+    assert.equal((await login(base, 'teacher')).status, 200);
 });
 
 test('帳號救援（C-3）：管理員重設密碼（臨時密碼只回一次、舊工作階段失效）與重設兩步驟驗證', async (t) => {

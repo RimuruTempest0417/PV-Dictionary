@@ -680,6 +680,7 @@
     if (window.PDErrorLog && typeof window.PDErrorLog.install === 'function') window.PDErrorLog.install();
 
     window.PDApp = {
+        renderAuth,
         reloadBooks,
         reloadUnits,
         reloadUnit,

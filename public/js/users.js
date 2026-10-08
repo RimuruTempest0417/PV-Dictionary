@@ -22,6 +22,7 @@
     /* v0.4.3：管理員產生的一次性臨時密碼（只顯示在畫面上，不寫任何儲存） */
     let tempPassword = null;     // { id, username, password }
     let forcingLogout = null;    // 正在執行「登出所有裝置」的使用者 id
+    let logoutAllArmed = false;      // 「所有帳號的所有裝置」兩段式確認
     let formMode = null;         // 'create' | 'edit'
 
     function canSee() {
@@ -499,6 +500,7 @@
     /* ---------------- 畫面 ---------------- */
 
     function render() {
+        syncLogoutAllButton();
         renderUsers();
         renderGrants();
     }
@@ -516,10 +518,48 @@
         }
     }
 
+    /* 所有帳號、所有裝置一起登出（只有 web_manager 看得到這顆按鈕；後端也會再擋一次） */
+    async function logoutAllDevices(armed) {
+        const button = document.getElementById('logoutAllBtn');
+        if (!armed) {
+            logoutAllArmed = true;
+            button.textContent = t('users.logoutAllConfirm');
+            button.dataset.armed = '1';
+            return;
+        }
+        logoutAllArmed = false;
+        try {
+            const result = await window.PDApi.post('/api/admin/users/logout-all', {});
+            /* 自己這一台的權杖也失效了 → 清掉前端狀態、重畫標題列（會變成「登入」）與畫面 */
+            window.PDAuth.state.user = null;
+            document.getElementById('adminSection').hidden = true;
+            window.PDApp.renderAuth();
+            await window.PDApp.refreshAfterAuthChange();
+            toast(t('users.logoutAllDone'));
+            console.log('已登出所有帳號與裝置：', result.users);
+        } catch (err) {
+            toast(errText(err), 'error');
+        }
+    }
+
+    /* 只有網站管理員看得到這顆按鈕 */
+    function syncLogoutAllButton() {
+        const button = document.getElementById('logoutAllBtn');
+        if (!button) return;
+        const allowed = window.PDAuth.isLoggedIn() && window.PDAuth.atLeast('web_manager');
+        button.hidden = !allowed;
+        if (!allowed) {
+            logoutAllArmed = false;
+            button.textContent = t('users.logoutAll');
+            delete button.dataset.armed;
+        }
+    }
+
     function init() {
         document.getElementById('usersRefreshBtn').addEventListener('click', () => refresh());
         document.getElementById('grantsRefreshBtn').addEventListener('click', () => refresh());
         document.getElementById('newUserBtn').addEventListener('click', () => openUserForm('create', null));
+        document.getElementById('logoutAllBtn').addEventListener('click', () => logoutAllDevices(Boolean(document.getElementById('logoutAllBtn').dataset.armed)));
         document.getElementById('userCancelBtn').addEventListener('click', closeUserForm);
         document.getElementById('userForm').addEventListener('submit', submitUserForm);
         document.getElementById('newGrantBtn').addEventListener('click', () => {

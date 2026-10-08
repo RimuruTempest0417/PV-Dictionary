@@ -6,6 +6,8 @@
     const api = window.PDApi;
     const t = (key, vars) => window.PDI18n.t(key, vars);
 
+    let pendingCleanup = false;    /* 清理稽核紀錄的兩段式確認（第一次只預覽） */
+
     const state = {
         editingId: null,
         audioEntryId: null,
@@ -27,6 +29,7 @@
         cover: 'coverPanel',
         audit: 'auditBlock',
         errors: 'errorsBlock',
+        stats: 'statsBlock',
         users: 'usersBlock',
         grants: 'grantsBlock'
     };
@@ -34,7 +37,7 @@
     function tabAllowed(tab) {
         if (tab === 'pending' || tab === 'entry' || tab === 'import') return window.PDAuth.can('can_edit');
         if (tab === 'unit' || tab === 'unitEdit' || tab === 'book' || tab === 'cover') return window.PDAuth.atLeast('teacher');
-        if (tab === 'audit' || tab === 'errors') return window.PDAuth.can('can_view_audit');
+        if (tab === 'audit' || tab === 'errors' || tab === 'stats') return window.PDAuth.can('can_view_audit');
         if (tab === 'users' || tab === 'grants') return window.PDAuth.can('can_manage_users');
         return false;
     }
@@ -54,6 +57,7 @@
         if (open) {
             if (tab === 'audit') loadAudit();
             if (tab === 'errors') loadErrors();
+            if (tab === 'stats') loadStats();
             if (tab === 'users' || tab === 'grants') window.PDUsers.refresh();
             if (tab === 'cover') renderCoverPanel();
             if (tab === 'unitEdit') fillUnitEditOptions();
@@ -829,9 +833,31 @@
                         class: 'btn btn-ghost btn-small',
                         text: row.resolved ? t('errorLog.markOpen') : t('errorLog.markHandled'),
                         attrs: { type: 'button', 'data-action': 'toggle-error', 'data-error-id': row.id, 'data-resolved': row.resolved ? '1' : '0' }
+                    }),
+                    /* 同一個錯誤常常一次來好幾筆（擴充功能、迴圈例外）：一顆按鈕清掉同類 */
+                    row.resolved ? null : el('button', {
+                        class: 'btn btn-ghost btn-small',
+                        text: t('errorLog.resolveSimilar'),
+                        attrs: {
+                            type: 'button', 'data-action': 'resolve-similar',
+                            'data-error-code': row.code || '', 'data-error-message': row.message || ''
+                        }
                     })
-                ])
+                ].filter(Boolean))
             ]));
+        }
+    }
+
+    async function resolveSimilarErrors(button) {
+        try {
+            const result = await api.post('/api/admin/error-logs/resolve-similar', {
+                code: button.dataset.errorCode || '',
+                message: button.dataset.errorMessage || ''
+            });
+            toast(t('errorLog.resolveSimilarDone', { n: result.resolved }));
+            await loadErrors();
+        } catch (err) {
+            toast(errText(err), 'error');
         }
     }
 
@@ -854,6 +880,88 @@
         document.getElementById('errorsFromFilter').value = '';
         document.getElementById('errorsToFilter').value = '';
         loadErrors();
+    }
+
+    /* ---------------- 使用統計（B-7） ---------------- */
+    function statsLine(labelKey, value) {
+        return el('li', { class: 'audit-item', dataset: { tone: 'review', action: 'stats' } }, [
+            el('div', { class: 'audit-main' }, [
+                el('span', { class: 'audit-chip', text: t(labelKey) }),
+                el('span', { text: String(value) })
+            ])
+        ]);
+    }
+
+    async function loadStats() {
+        const list = document.getElementById('statsList');
+        const unitsBox = document.getElementById('statsUnits');
+        try {
+            const data = await api.get('/api/admin/stats');
+            clear(list);
+            clear(unitsBox);
+            list.appendChild(statsLine('stats.entries', `${data.entries.published} ${t('stats.confirmed')} · ${data.entries.pending} ${t('stats.pending')} · ${data.entries.total}`));
+            list.appendChild(statsLine('books.title', `${data.books.published}／${data.books.total}`));
+            list.appendChild(statsLine('units.title', `${data.units.published}／${data.units.total} · ${data.units.empty}`));
+            list.appendChild(statsLine('audio.title', `${data.audio.total} · ${t('stats.audioMissing', { n: Math.max(0, data.audio.missing) })}`));
+            list.appendChild(statsLine('users.title', `${data.users.active}／${data.users.total} · ${data.users.two_factor}`));
+            list.appendChild(statsLine('grants.title', data.grants.total));
+            list.appendChild(statsLine('audit.title', `${data.recent.total}（7d）`));
+            for (const unit of data.per_unit.slice(0, 30)) {
+                unitsBox.appendChild(el('li', { class: 'audit-item', dataset: { tone: unit.published ? 'create' : 'update', action: 'unit' } }, [
+                    el('div', { class: 'audit-main' }, [
+                        el('span', { class: 'audit-chip', text: unit.book || '' }),
+                        el('span', { text: unit.label }),
+                        el('span', { class: 'cell-hint', text: `${unit.published} ${t('stats.confirmed')}${unit.pending ? ` · ${unit.pending} ${t('stats.pending')}` : ''}` })
+                    ])
+                ]));
+            }
+        } catch (err) {
+            setFormMessage(document.getElementById('errorsCount') || list, errText(err), 'error');
+        }
+    }
+
+    /* 匯出稽核紀錄（A-3）：走瀏覽器下載（Excel 可開） */
+    async function exportAudit() {
+        const button = document.getElementById('auditExportBtn');
+        const filters = readAuditFilters();
+        const params = new URLSearchParams();
+        for (const key of Object.keys(filters)) if (filters[key]) params.set(key, filters[key]);
+        try {
+            const res = await fetch(`/api/admin/audit-logs/export?${params.toString()}`, { credentials: 'same-origin', cache: 'no-store' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const link = el('a', { attrs: { href: url, download: 'pv-dictionary-audit.csv' } });
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            toast(t('audit.exported', { n: '-' }));
+            setTimeout(() => { button.blur(); }, 0);
+        } catch (err) {
+            toast(err.message || String(err), 'error');
+        }
+    }
+
+    /* 清理舊稽核紀錄（A-3）：第一次按只預覽，第二次才真的刪 */
+    async function cleanupAudit(confirmed) {
+        try {
+            const body = { keep_days: 365, dry_run: !confirmed };
+            const result = await api.post('/api/admin/audit-logs/cleanup', body);
+            if (result.dry_run) {
+                if (result.would_delete === 0) toast(t('audit.cleanupNothing', { days: result.keep_days }));
+                else {
+                    toast(t('audit.cleanupPreview', { n: result.would_delete, days: result.keep_days }), 'error');
+                    pendingCleanup = true;
+                }
+                return;
+            }
+            pendingCleanup = false;
+            toast(t('audit.cleanupDone', { n: result.would_delete }));
+            await loadAudit();
+        } catch (err) {
+            toast(errText(err), 'error');
+        }
     }
 
     function init() {
@@ -902,6 +1010,9 @@
         document.getElementById('unitCancelBtn').addEventListener('click', () => showPanel(null));
         document.getElementById('bookCancelBtn').addEventListener('click', () => showPanel(null));
         document.getElementById('auditRefreshBtn').addEventListener('click', loadAudit);
+        document.getElementById('auditExportBtn').addEventListener('click', exportAudit);
+        document.getElementById('auditCleanupBtn').addEventListener('click', () => cleanupAudit(pendingCleanup));
+        document.getElementById('statsRefreshBtn').addEventListener('click', loadStats);
         bindAuditFilters();
         document.getElementById('errorsReloadBtn').addEventListener('click', loadErrors);
         for (const id of ['errorsLevelFilter', 'errorsSourceFilter', 'errorsResolvedFilter', 'errorsFromFilter', 'errorsToFilter']) {
@@ -909,8 +1020,13 @@
         }
         document.getElementById('errorsClearBtn').addEventListener('click', clearErrorFilters);
         document.getElementById('errorsList').addEventListener('click', (event) => {
-            const button = event.target.closest('[data-action="toggle-error"]');
-            if (button) toggleError(button);
+            const toggle = event.target.closest('[data-action="toggle-error"]');
+            if (toggle) {
+                toggleError(toggle);
+                return;
+            }
+            const similar = event.target.closest('[data-action="resolve-similar"]');
+            if (similar) resolveSimilarErrors(similar);
         });
 
         document.getElementById('audioPickFileBtn').addEventListener('click', pickAudioFile);

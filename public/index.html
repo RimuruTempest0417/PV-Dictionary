@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="PV_Dictionary — an online English vocabulary dictionary: browse words by book and unit, with pronunciation, part of speech, Chinese and English meanings.">
-    <title>PV_Dictionary v0.4.3</title>
-    <link rel="icon" href="/img/favicon.svg?v=0.4.3" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.4.3">
-    <link rel="stylesheet" href="/css/tokens.css?v=0.4.3">
-    <link rel="stylesheet" href="/css/app.css?v=0.4.3">
-    <link rel="stylesheet" href="/css/print.css?v=0.4.3" media="print">
-    <script src="/js/analytics.js?v=0.4.3"></script>
+    <title>PV_Dictionary v0.4.4</title>
+    <link rel="icon" href="/img/favicon.svg?v=0.4.4" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.4.4">
+    <link rel="stylesheet" href="/css/tokens.css?v=0.4.4">
+    <link rel="stylesheet" href="/css/app.css?v=0.4.4">
+    <link rel="stylesheet" href="/css/print.css?v=0.4.4" media="print">
+    <script src="/js/analytics.js?v=0.4.4"></script>
     <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
@@ -121,6 +121,7 @@
             <button id="navCoverBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="cover" data-i18n="admin.cover">🖼 Book cover</button>
             <button id="navAuditBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="audit" data-i18n="audit.title">🧾 Recent activity</button>
             <button id="navErrorsBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="errors" data-i18n="errorLog.title">🐞 Error log</button>
+            <button id="navStatsBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="stats" data-i18n="stats.title">📊 Overview</button>
             <button id="navUsersBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="users" data-i18n="users.title">👥 Accounts</button>
             <button id="navGrantsBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="grants" data-i18n="grants.title">🔑 Permissions</button>
         </nav>
@@ -251,6 +252,8 @@
             <div class="panel-head">
                 <h2 class="panel-title" data-i18n="audit.title">🧾 Recent activity</h2>
                 <button id="auditRefreshBtn" class="btn btn-ghost" type="button" data-i18n="audit.reload">Reload</button>
+                <button id="auditExportBtn" class="btn btn-ghost" type="button" data-i18n="audit.export">⬇ Export CSV</button>
+                <button id="auditCleanupBtn" class="btn btn-ghost" type="button" data-i18n="audit.cleanup">🧹 Clean up old records</button>
             </div>
             <div class="audit-filters">
                 <label class="field"><span class="field-label" data-i18n="audit.filterAction">Action</span>
@@ -265,6 +268,17 @@
             </div>
             <p class="panel-note" id="auditCount" role="status"></p>
             <ul id="auditList" class="audit-list"></ul>
+        </div>
+
+        <div id="statsBlock" class="panel" hidden>
+            <div class="panel-head">
+                <h2 class="panel-title" data-i18n="stats.title">📊 Overview</h2>
+                <button id="statsRefreshBtn" class="btn btn-ghost" type="button" data-i18n="audit.reload">Reload</button>
+            </div>
+            <p class="panel-note" data-i18n="stats.note"></p>
+            <ul id="statsList" class="audit-list"></ul>
+            <h3 class="modal-subtitle" data-i18n="stats.perUnit"></h3>
+            <ul id="statsUnits" class="audit-list"></ul>
         </div>
 
         <div id="errorsBlock" class="panel" hidden>
@@ -327,6 +341,7 @@
             <p class="hint" id="usersMsg" role="status"></p>
             <div class="form-actions">
                 <button id="newUserBtn" class="btn btn-secondary" type="button" data-i18n="users.create">➕ New account</button>
+                <button id="logoutAllBtn" class="btn btn-danger" type="button" hidden data-i18n="users.logoutAll">🚪 Sign out every account and device</button>
             </div>
             <form id="userForm" class="panel form inset" hidden>
                 <div class="panel-head">
@@ -389,7 +404,7 @@
 </main>
 
 <footer class="footer">
-    <span>PV_Dictionary <span id="versionLabel">v0.4.3</span></span>
+    <span>PV_Dictionary <span id="versionLabel">v0.4.4</span></span>
     <span class="footer-sep">·</span>
     <span id="backendLabel" class="footer-muted"></span>
     <span class="footer-sep">·</span>
@@ -479,15 +494,15 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="/js/errorlog.js?v=0.4.3"></script>
-<script src="/js/i18n.js?v=0.4.3"></script>
-<script src="/js/api.js?v=0.4.3"></script>
-<script src="/js/ui.js?v=0.4.3"></script>
-<script src="/js/audio.js?v=0.4.3"></script>
-<script src="/js/auth.js?v=0.4.3"></script>
-<script src="/js/vocab.js?v=0.4.3"></script>
-<script src="/js/admin.js?v=0.4.3"></script>
-<script src="/js/users.js?v=0.4.3"></script>
-<script src="/js/app.js?v=0.4.3"></script>
+<script src="/js/errorlog.js?v=0.4.4"></script>
+<script src="/js/i18n.js?v=0.4.4"></script>
+<script src="/js/api.js?v=0.4.4"></script>
+<script src="/js/ui.js?v=0.4.4"></script>
+<script src="/js/audio.js?v=0.4.4"></script>
+<script src="/js/auth.js?v=0.4.4"></script>
+<script src="/js/vocab.js?v=0.4.4"></script>
+<script src="/js/admin.js?v=0.4.4"></script>
+<script src="/js/users.js?v=0.4.4"></script>
+<script src="/js/app.js?v=0.4.4"></script>
 </body>
 </html>
