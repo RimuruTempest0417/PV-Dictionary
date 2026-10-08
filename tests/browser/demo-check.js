@@ -148,6 +148,8 @@ async function main() {
         await browser.waitFor(`document.getElementById('unitsView').hidden === false`);
         const chips = await browser.evaluate(`return Array.from(document.getElementById('unitList').children).map(b => b.textContent);`);
         check('目錄列出單元與生字數', chips.some((t) => t.includes('Unit 1')) && chips.some((t) => t.includes('words')), chips.join('/'));
+        check('訪客看不到「修改單元」的 ✏️（後端也會再擋一次）',
+            (await browser.evaluate(`return document.querySelectorAll('#unitList [data-action="edit-unit"]').length;`)) === 0);
         check('進入目錄時生字表還不顯示（要再點單元）',
             (await browser.evaluate(`return document.getElementById('unitSection').hidden === true;`)) === true);
 
