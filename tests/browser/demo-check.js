@@ -576,7 +576,10 @@ async function main() {
             return { badges: Array.from(card.querySelectorAll('.tag-badge')).map(n => n.textContent), card: Boolean(card) };
         `);
         check('核准後訪客（未登入）看得到 diligent', visitorSees.card === true);
-        check('訪客看不到審核狀態標記', visitorSees.badges.length === 0, JSON.stringify(visitorSees.badges));
+        /* 發音來源徽章（👩‍🏫 老師錄音／🤖 電腦語音）是給所有人看的誠實資訊（v0.4.6），
+         * 這裡要擋的是「審核狀態」標記（待審核／已退回）不能漏給訪客。 */
+        const reviewBadges = visitorSees.badges.filter((text) => !/Teacher|Browser voice|老師|電腦語音/i.test(text));
+        check('訪客看不到審核狀態標記', reviewBadges.length === 0, JSON.stringify(visitorSees.badges));
 
         console.log('\n【附加】版面、CSP、稽核、不下載不截圖');
         const overflow = await browser.evaluate(`return document.documentElement.scrollWidth - window.innerWidth;`);

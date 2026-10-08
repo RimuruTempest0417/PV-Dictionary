@@ -21,6 +21,10 @@
         "POST /api/units/:id/entries",
         "PATCH /api/entries/:id",
         "DELETE /api/entries/:id",
+        "POST /api/units/:id/duplicate",
+        "POST /api/units/:id/move",
+        "POST /api/books/:id/move",
+        "POST /api/entries/review-batch",
         "POST /api/entries/:id/review",
         "POST /api/units/:id/entries/import",
         "POST /api/entries/:id/audio",
@@ -52,7 +56,7 @@
         "PATCH /api/admin/error-logs/:id"
     ],
     "counts": {
-        "routes": 50,
-        "layers": 59
+        "routes": 54,
+        "layers": 63
     }
 }

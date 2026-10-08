@@ -354,6 +354,84 @@
             "why": "錯誤紀錄"
         },
         {
+            "id": "import-rows",
+            "capability": "can_edit",
+            "method": "POST",
+            "path": "/api/units/:unit/entries/import",
+            "min_role": "class_rep",
+            "body": {
+                "rows": [
+                    {
+                        "headword": "permissioncheck"
+                    }
+                ]
+            },
+            "ui": {
+                "element": "importFileInput",
+                "gate": "can('can_edit')"
+            },
+            "why": "從 CSV／Excel 匯入（前端解析、伺服器收列）"
+        },
+        {
+            "id": "unit-duplicate",
+            "capability": "can_manage_content",
+            "method": "POST",
+            "path": "/api/units/:unit/duplicate",
+            "min_role": "teacher",
+            "body": {},
+            "ui": {
+                "element": "unitList",
+                "gate": "can('can_manage_content')"
+            },
+            "why": "複製單元"
+        },
+        {
+            "id": "unit-move",
+            "capability": "can_manage_content",
+            "method": "POST",
+            "path": "/api/units/:unit/move",
+            "min_role": "teacher",
+            "body": {
+                "direction": "up"
+            },
+            "ui": {
+                "element": "unitList",
+                "gate": "can('can_manage_content')"
+            },
+            "why": "單元上下移動"
+        },
+        {
+            "id": "book-move",
+            "capability": "can_manage_content",
+            "method": "POST",
+            "path": "/api/books/:book/move",
+            "min_role": "teacher",
+            "body": {
+                "direction": "down"
+            },
+            "ui": {
+                "element": "bookShelf",
+                "gate": "can('can_manage_content')"
+            },
+            "why": "書本前後移動"
+        },
+        {
+            "id": "review-batch",
+            "capability": "can_publish",
+            "method": "POST",
+            "path": "/api/entries/review-batch",
+            "min_role": "teacher",
+            "body": {
+                "ids": [],
+                "action": "approve"
+            },
+            "ui": {
+                "element": "pendingApproveAllBtn",
+                "gate": "can('can_publish')"
+            },
+            "why": "批次核准／退回"
+        },
+        {
             "id": "force-logout",
             "capability": "can_force_logout",
             "method": "PATCH",

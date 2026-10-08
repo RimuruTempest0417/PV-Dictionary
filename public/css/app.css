@@ -1604,3 +1604,28 @@ code {
 .guide-table th:first-child { text-align: left; }
 .guide-yes { color: var(--accent); font-weight: 600; }
 .guide-no { color: var(--muted); }
+
+/* ---------------- v0.4.6：批次審核、播放全部、排序與匯入預覽 ---------------- */
+.pending-batch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.field-inline { flex-direction: row; align-items: center; gap: 0.4rem; margin: 0; }
+.field-inline input { min-width: 12rem; }
+
+.pending-check { margin-right: 0.5rem; }
+
+.vocab-item.is-playing { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tag-badge-muted { opacity: 0.75; }
+.review-note { margin: 0.2rem 0 0; color: var(--danger, #b3261e); font-size: 0.9rem; }
+
+.unit-row-tools { display: flex; gap: 0.25rem; }
+.shelf-tools { display: flex; gap: 0.25rem; justify-content: center; margin-top: 0.25rem; }
+
+.import-map { max-width: 12rem; }
+.panel-hr { border: 0; border-top: 1px solid var(--border); margin: 1rem 0; }

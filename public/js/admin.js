@@ -226,6 +226,133 @@
         document.getElementById('importText').focus();
     }
 
+    /* ---------------- 從 CSV／Excel 匯入（B-3） ---------------- */
+    const importState = { rows: [], mapping: [], headerSkipped: false };
+
+    function importPreviewCell(tag, text, className) {
+        return el(tag, { class: className || '', text: String(text == null ? '' : text) });
+    }
+
+    /* 讀檔 → 解析（.xlsx 走 PDXlsx.parseXlsx、CSV／TSV 走 parseDelimited）→ 畫出預覽與欄位對應 */
+    async function loadImportFile(file) {
+        const msg = document.getElementById('importFileMsg');
+        const preview = document.getElementById('importPreview');
+        if (!file) return;
+        const isExcel = /\.xlsx$/i.test(file.name);
+        try {
+            let rows = [];
+            if (isExcel) {
+                const buffer = await file.arrayBuffer();
+                rows = (await window.PDXlsx.parseXlsx(buffer)).rows;
+            } else {
+                rows = window.PDXlsx.parseDelimited(await file.text()).rows;
+            }
+            if (!rows.length) {
+                setFormMessage(msg, t('import.empty'), 'error');
+                preview.hidden = true;
+                return;
+            }
+            const header = window.PDXlsx.looksLikeHeader(rows[0]) ? rows[0] : null;
+            importState.rows = header ? rows.slice(1) : rows;
+            importState.headerSkipped = Boolean(header);
+            importState.mapping = header
+                ? window.PDXlsx.guessMapping(header)
+                : window.PDXlsx.defaultMapping(rows[0].length);
+            /* 有沒有猜不到生字欄？沒有就預設第一欄（老師的檔案幾乎都是生字在第一欄） */
+            if (!importState.mapping.includes('headword')) importState.mapping[0] = 'headword';
+            setFormMessage(msg, t('import.fileParsed', { n: importState.rows.length }), 'ok');
+            renderImportPreview(header);
+            preview.hidden = false;
+        } catch (err) {
+            setFormMessage(msg, err.message || String(err), 'error');
+            preview.hidden = true;
+        }
+    }
+
+    function renderImportPreview(header) {
+        const table = document.getElementById('importPreviewTable');
+        const note = document.getElementById('importPreviewNote');
+        const fields = window.PDXlsx.FIELD_ORDER;
+        clear(table);
+        const previewRows = importState.rows.slice(0, 8);
+        const width = Math.max(importState.mapping.length, ...previewRows.map((row) => row.length), 1);
+
+        /* 第一列：每一欄一個下拉（選擇這一欄對應到哪個欄位） */
+        const headRow = el('tr');
+        for (let column = 0; column < width; column += 1) {
+            const cell = el('th');
+            const select = el('select', { class: 'import-map', attrs: { 'data-column': column } });
+            select.appendChild(el('option', { text: t('import.mapNone'), attrs: { value: '' } }));
+            for (const field of fields) {
+                select.appendChild(el('option', { text: t(`import.field.${field}`), attrs: { value: field } }));
+            }
+            select.value = importState.mapping[column] || '';
+            select.addEventListener('change', () => { importState.mapping[column] = select.value; });
+            cell.appendChild(select);
+            headRow.appendChild(cell);
+        }
+        table.appendChild(headRow);
+        if (header) {
+            const origRow = el('tr');
+            for (let column = 0; column < width; column += 1) origRow.appendChild(importPreviewCell('th', header[column] || '', 'cell-hint'));
+            table.appendChild(origRow);
+        }
+        for (const row of previewRows) {
+            const tr = el('tr');
+            for (let column = 0; column < width; column += 1) tr.appendChild(importPreviewCell('td', row[column] || ''));
+            table.appendChild(tr);
+        }
+        const entries = window.PDXlsx.toEntries(importState.rows, importState.mapping);
+        const dupes = importState.rows.filter((row) => row.some((cell) => String(cell || '').trim())).length - entries.length;
+        note.textContent = t('import.previewNote', { n: previewRows.length });
+        const count = document.getElementById('importFileMsg');
+        if (count) setFormMessage(count, t('import.previewCount', { rows: importState.rows.length, dupes: Math.max(0, dupes) }), 'ok');
+    }
+
+    async function runImportFile() {
+        const msg = document.getElementById('importFileMsg');
+        const unitId = window.PDState.currentUnitId;
+        if (!unitId) {
+            setFormMessage(msg, t('import.needUnit'), 'error');
+            return;
+        }
+        const rows = window.PDXlsx.toEntries(importState.rows, importState.mapping)
+            .map((entry, index) => Object.assign({ line: index + (importState.headerSkipped ? 2 : 1) }, entry));
+        if (!rows.length) {
+            setFormMessage(msg, t('import.empty'), 'error');
+            return;
+        }
+        const button = document.getElementById('importFileRunBtn');
+        button.disabled = true;
+        try {
+            const result = await api.post(`/api/units/${unitId}/entries/import`, { rows, source: 'file' });
+            let parts = t('import.fileResult', { created: result.created });
+            if (result.skipped) parts += t('import.skipped', { skipped: result.skipped });
+            if (result.errors && result.errors.length) parts += t('import.errors', { n: result.errors.length });
+            if (result.status === 'pending') parts += t('import.pendingNote');
+            setFormMessage(msg, parts, result.created ? 'ok' : 'error');
+            document.getElementById('importPreview').hidden = true;
+            const input = document.getElementById('importFileInput');
+            if (input) input.value = '';
+            importState.rows = [];
+            importState.mapping = [];
+            await window.PDApp.reloadUnit({ keepForm: true });
+        } catch (err) {
+            setFormMessage(msg, window.PDI18n.errorMessage(err), 'error');
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    function cancelImportFile() {
+        importState.rows = [];
+        importState.mapping = [];
+        document.getElementById('importPreview').hidden = true;
+        const input = document.getElementById('importFileInput');
+        if (input) input.value = '';
+        setFormMessage(document.getElementById('importFileMsg'), '', 'ok');
+    }
+
     async function submitImport(event) {
         event.preventDefault();
         const msg = document.getElementById('importMsg');
@@ -422,6 +549,31 @@
     }
 
     /* ---------------- 待審核 ---------------- */
+    /* 批次審核（B-6）：把勾選的每一筆送出，回報成功／失敗筆數 */
+    async function reviewBatch(action) {
+        const ids = Array.from(document.querySelectorAll('#pendingList .pending-check:checked')).map((node) => node.dataset.entryId);
+        if (!ids.length) return toast(t('errors.REVIEW_IDS_EMPTY'), 'error');
+        const note = (document.getElementById('pendingBatchNote') || {}).value || '';
+        const buttons = Array.from(document.querySelectorAll('#pendingBatch [data-batch]'));
+        for (const button of buttons) button.disabled = true;
+        try {
+            const result = await api.post('/api/entries/review-batch', { ids, action, note });
+            if (result.done) {
+                toast(action === 'approve' ? t('pending.batchApproved', { n: result.done }) : t('pending.batchRejected', { n: result.done }));
+            }
+            if (result.failed && result.failed.length) {
+                setFormMessage(document.getElementById('pendingNote'), t('pending.batchFailed', { n: result.failed.length }), 'error');
+            }
+            const box = document.getElementById('pendingBatchNote');
+            if (box) box.value = '';
+            await window.PDApp.reloadUnit({ keepForm: true });
+        } catch (err) {
+            toast(window.PDI18n.errorMessage(err), 'error');
+        } finally {
+            for (const button of buttons) button.disabled = true;   /* 重新載入後沒有任何勾選 → 保持停用 */
+        }
+    }
+
     function renderPending(entries) {
         const block = document.getElementById('pendingBlock');
         const list = document.getElementById('pendingList');
@@ -439,6 +591,8 @@
         if (canEdit && !pending.length) {
             list.appendChild(el('li', { class: 'audit-item', text: t('pending.empty') }));
         }
+        /* 批次審核（B-6）：老師可以勾選多筆再一次核准／退回（退回可附原因） */
+        const batchIds = [];
         for (const entry of pending) {
             const info = el('div', { class: 'pending-item-info' }, [
                 el('strong', { text: entry.headword }),
@@ -448,6 +602,17 @@
                     text: t('pending.by', { user: entry.created_by || '—', date: formatDateTime(entry.created_at) })
                 })
             ]);
+            if (canReview) {
+                const check = el('input', { class: 'pending-check', attrs: { type: 'checkbox', 'data-entry-id': entry.id, 'aria-label': entry.headword } });
+                check.addEventListener('change', () => {
+                    const current = Array.from(document.querySelectorAll('#pendingList .pending-check:checked')).map((node) => node.dataset.entryId);
+                    const count = document.getElementById('pendingBatchCount');
+                    if (count) count.textContent = current.length ? t('pending.selected', { n: current.length }) : '';
+                    for (const button of document.querySelectorAll('#pendingBatch [data-batch]')) button.disabled = current.length === 0;
+                });
+                batchIds.push(check);
+                info.insertBefore(check, info.firstChild);
+            }
             const actions = canReview ? el('div', { class: 'pending-item-actions' }, [
                 el('button', {
                     class: 'btn btn-primary btn-small',
@@ -968,6 +1133,13 @@
         document.getElementById('entryForm').addEventListener('submit', submitEntry);
         document.getElementById('cancelEntryBtn').addEventListener('click', closeEntryForm);
         document.getElementById('importForm').addEventListener('submit', submitImport);
+        /* 選檔案 → 預覽欄位 → 才送出（B-3） */
+        document.getElementById('importFileInput').addEventListener('change', (event) => {
+            const file = event.target.files && event.target.files[0];
+            loadImportFile(file).catch((err) => setFormMessage(document.getElementById('importFileMsg'), err.message || String(err), 'error'));
+        });
+        document.getElementById('importFileRunBtn').addEventListener('click', runImportFile);
+        document.getElementById('importFileCancelBtn').addEventListener('click', cancelImportFile);
         document.getElementById('importToggleBtn').addEventListener('click', openImport);
         document.getElementById('importCancelBtn').addEventListener('click', () => showPanel(null));
         document.getElementById('unitForm').addEventListener('submit', submitUnit);
@@ -1049,6 +1221,9 @@
             if (button.dataset.action === 'delete-entry') deleteEntry(entryId, button);
             if (button.dataset.action === 'upload-audio') openAudioModal(entryId);
         });
+        for (const button of document.querySelectorAll('#pendingBatch [data-batch]')) {
+            button.addEventListener('click', () => reviewBatch(button.dataset.batch));
+        }
         document.getElementById('pendingList').addEventListener('click', (event) => {
             const button = event.target.closest('[data-action]');
             if (!button) return;

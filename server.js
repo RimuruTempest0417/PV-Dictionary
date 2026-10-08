@@ -90,6 +90,28 @@ function boolish(value, fallback = true) {
 /* 批次貼上的解析（純函式，module 層級 → 測試可以直接拿 __test__.parseImportText 驗）
  * 每行：生字 ⇥ 讀音 ⇥ 詞性 ⇥ 中文解釋 ⇥ 英文解釋
  * 也接受「兩個以上空白」或「逗號後接非空白」當分隔（老師從 Word／Excel 貼過來常見） */
+/* 前端解析好的列（CSV／.xlsx）：每一筆是 {headword, ipa_us, part_of_speech, zh_meaning, en_definition, example_en, example_zh} */
+function parseImportRows(input) {
+    const rows = [];
+    for (const raw of input.slice(0, 500)) {
+        if (!raw || typeof raw !== 'object') continue;
+        const headword = str(raw.headword, LIMITS.headword);
+        if (!headword) continue;
+        rows.push({
+            headword,
+            ipa_us: str(raw.ipa_us, LIMITS.ipa),
+            ipa_uk: str(raw.ipa_uk, LIMITS.ipa),
+            part_of_speech: str(raw.part_of_speech, LIMITS.pos),
+            zh_meaning: str(raw.zh_meaning, LIMITS.zh),
+            en_definition: str(raw.en_definition, LIMITS.en),
+            example_en: str(raw.example_en, LIMITS.en),
+            example_zh: str(raw.example_zh, LIMITS.zh),
+            line: Number(raw.line) || rows.length + 2
+        });
+    }
+    return rows;
+}
+
 function parseImportText(text) {
     const rows = [];
     const errors = [];
@@ -116,6 +138,20 @@ function parseImportText(text) {
         });
     });
     return { rows, errors };
+}
+
+/* 單元的對外格式（複製／排序／我的單元都用這一個，欄位才不會各寫一份） */
+function unitView(unit, store, { includeHidden = true } = {}) {
+    return {
+        id: unit.id,
+        book_id: unit.book_id,
+        unit_no: unit.unit_no,
+        title: unit.title || '',
+        is_published: unit.is_published !== false,
+        entry_count: store.countEntries(unit.id, includeHidden ? null : PUBLISHED_ONLY),
+        published_count: store.countEntries(unit.id, PUBLISHED_ONLY),
+        pending_count: includeHidden ? store.countEntries(unit.id, ['pending']) : 0
+    };
 }
 
 /* 生字列的對外格式：永遠不含音檔 base64（只在 GET /api/audio/:id 才給） */
@@ -451,9 +487,9 @@ function createApp(options = {}) {
         const viewerCanEdit = Boolean(req.user && Roles.canEditUnit(req.user, unit, scoped));
         /* 誰看得到哪些狀態：
          *   老師以上（includeHidden）→ 全部
-         *   科代表等可編輯者        → 已發佈 + 待審核（否則他們送出的字自己看不到，介面等於在騙人）
+         *   科代表等可編輯者        → 已發佈 + 待審核 + 被退回（否則他們送出的字自己看不到、被退回也不知道為什麼，介面等於在騙人）
          *   其他人（含未登入）      → 只有已發佈 */
-        const statuses = includeHidden ? null : (viewerCanEdit ? ['published', 'pending'] : PUBLISHED_ONLY);
+        const statuses = includeHidden ? null : (viewerCanEdit ? ['published', 'pending', 'rejected'] : PUBLISHED_ONLY);
         const book = store.getBook(unit.book_id);
         const entries = store.listEntries({ unitId: unit.id, statuses })
             .map((entry) => publicEntry(entry, store, { includeStatus: includeHidden || viewerCanEdit }));
@@ -894,6 +930,148 @@ function createApp(options = {}) {
     });
 
     /* ================= 生字：審核（老師以上） ================= */
+    /* 複製單元（B-4）：把單元與它的生字複製一份（**不含錄音**，避免整本書重複佔空間）。
+     * 新單元排在最後，名稱預設加「（複製）」—— 名稱由前端給，因為要跟著語言走。 */
+    app.post('/api/units/:id/duplicate', requireRole('teacher'), (req, res) => {
+        const unit = store.getUnit(req.params.id);
+        if (!unit) return res.status(404).json({ error: msg('UNIT_NOT_FOUND'), code: 'UNIT_NOT_FOUND' });
+        const book = store.getBook(unit.book_id);
+        const siblings = store.listUnits({ bookId: unit.book_id, includeUnpublished: true });
+        const nextNo = siblings.reduce((max, item) => Math.max(max, Number(item.unit_no) || 0), 0) + 1;
+        if (nextNo > 99) {
+            return res.status(400).json({ error: msg('UNIT_NUMBER', { min: 1, max: 99 }), code: 'UNIT_NUMBER', details: { min: 1, max: 99 } });
+        }
+        const title = str(req.body && req.body.title, LIMITS.title) || `${unit.title || `Unit ${unit.unit_no}`}（複製）`;
+        const copy = store.createUnit({
+            book_id: unit.book_id, unit_no: nextNo, title,
+            description: unit.description || '',
+            is_published: false,
+            sort_order: nextNo,
+            created_by: req.user.username
+        });
+        let order = 0;
+        let copied = 0;
+        for (const entry of store.listEntries({ unitId: unit.id })) {
+            order += 1;
+            /* 只複製內容欄位（不帶 id／時間／審核紀錄；錄音本來就沒有對應欄位，所以複製出來的單元沒有錄音） */
+            store.createEntry({
+                unit_id: copy.id,
+                headword: entry.headword,
+                headword_norm: entry.headword_norm,
+                ipa_us: entry.ipa_us || '',
+                ipa_uk: entry.ipa_uk || '',
+                part_of_speech: entry.part_of_speech || '',
+                zh_meaning: entry.zh_meaning || '',
+                en_definition: entry.en_definition || '',
+                example_en: entry.example_en || '',
+                example_zh: entry.example_zh || '',
+                status: 'pending',
+                sort_order: order,
+                created_by: req.user.username,
+                updated_by: req.user.username
+            });
+            copied += 1;
+        }
+        logAudit(store, {
+            user: req.user, action: 'UNIT_DUPLICATE', targetId: copy.id,
+            details: `${book ? book.name : ''} Unit ${unit.unit_no} → Unit ${nextNo}（${title}）：複製 ${copied} 筆生字`, ip: req.ip
+        });
+        return res.json({ unit: unitView(copy, store), entries: copied });
+    });
+
+    /* 調整順序（B-4）：與上／下一個單元互換編號。
+     * 為什麼不用「改編號」達成：連續兩個單元互換時會撞到「同書不重複編號」的檢查，
+     * 所以由伺服器一次做完（先搬到暫存值再交換），前端只要按 ↑／↓。 */
+    app.post('/api/units/:id/move', requireRole('teacher'), (req, res) => {
+        const unit = store.getUnit(req.params.id);
+        if (!unit) return res.status(404).json({ error: msg('UNIT_NOT_FOUND'), code: 'UNIT_NOT_FOUND' });
+        const direction = str(req.body && req.body.direction, 4);
+        if (!['up', 'down'].includes(direction)) {
+            return res.status(400).json({ error: msg('MOVE_DIRECTION'), code: 'MOVE_DIRECTION' });
+        }
+        const siblings = store.listUnits({ bookId: unit.book_id, includeUnpublished: true })
+            .sort((a, b) => (Number(a.unit_no) - Number(b.unit_no)) || (a.id - b.id));
+        const index = siblings.findIndex((item) => String(item.id) === String(unit.id));
+        const swapIndex = direction === 'up' ? index - 1 : index + 1;
+        if (swapIndex < 0 || swapIndex >= siblings.length) {
+            return res.json({ moved: false, unit: unitView(unit, store), reason: 'edge' });
+        }
+        const other = siblings[swapIndex];
+        store.updateUnit(unit.id, { unit_no: 999 });                 /* 先讓開，避免撞號 */
+        store.updateUnit(other.id, { unit_no: unit.unit_no });
+        store.updateUnit(unit.id, { unit_no: other.unit_no });
+        logAudit(store, {
+            user: req.user, action: 'UNIT_MOVE', targetId: unit.id,
+            details: `Unit ${unit.unit_no} ⇄ Unit ${other.unit_no}`, ip: req.ip
+        });
+        return res.json({ moved: true, unit: unitView(store.getUnit(unit.id), store), swapped_with: unitView(store.getUnit(other.id), store) });
+    });
+
+    /* 書本排序（B-4）：同一套互換邏輯 */
+    app.post('/api/books/:id/move', requireRole('teacher'), (req, res) => {
+        const book = store.getBook(req.params.id);
+        if (!book) return res.status(404).json({ error: msg('BOOK_NOT_FOUND'), code: 'BOOK_NOT_FOUND' });
+        const direction = str(req.body && req.body.direction, 4);
+        if (!['up', 'down'].includes(direction)) {
+            return res.status(400).json({ error: msg('MOVE_DIRECTION'), code: 'MOVE_DIRECTION' });
+        }
+        const all = store.listBooks({ includeUnpublished: true })
+            .sort((a, b) => (Number(a.sort_order || 0) - Number(b.sort_order || 0)) || (a.id - b.id));
+        const index = all.findIndex((item) => String(item.id) === String(book.id));
+        const swapIndex = direction === 'up' ? index - 1 : index + 1;
+        if (swapIndex < 0 || swapIndex >= all.length) {
+            return res.json({ moved: false, book: publicBook(store.getBook(book.id)) });
+        }
+        const other = all[swapIndex];
+        const mine = Number(book.sort_order || 0);
+        const theirs = Number(other.sort_order || 0);
+        store.updateBook(book.id, { sort_order: -999 });
+        store.updateBook(other.id, { sort_order: mine });
+        store.updateBook(book.id, { sort_order: theirs });
+        logAudit(store, {
+            user: req.user, action: 'BOOK_MOVE', targetId: book.id,
+            details: `${book.name} ⇄ ${other.name}`, ip: req.ip
+        });
+        return res.json({ moved: true, book: publicBook(store.getBook(book.id)) });
+    });
+
+    /* 批次審核（B-6）：一次核准／退回多筆（老師以上）。
+     * 每一筆都會留稽核，退回可以附原因（會顯示給科代表看）。 */
+    app.post('/api/entries/review-batch', requireRole('teacher'), (req, res) => {
+        const body = req.body || {};
+        const ids = Array.isArray(body.ids) ? body.ids.slice(0, 200) : [];
+        const action = str(body.action, 20);
+        if (!ids.length) return res.status(400).json({ error: msg('REVIEW_IDS_EMPTY'), code: 'REVIEW_IDS_EMPTY' });
+        if (!['approve', 'reject'].includes(action)) {
+            return res.status(400).json({ error: msg('REVIEW_ACTION'), code: 'REVIEW_ACTION' });
+        }
+        const note = str(body.note, LIMITS.note);
+        const done = [];
+        const failed = [];
+        for (const id of ids) {
+            const entry = store.getEntry(id);
+            if (!entry || entry.status !== 'pending') {
+                failed.push({ id, reason: '找不到或不是在待審核狀態' });
+                continue;
+            }
+            store.updateEntry(entry.id, {
+                status: action === 'approve' ? 'published' : 'rejected',
+                review_note: note,
+                reviewed_by: req.user.username,
+                reviewed_at: new Date().toISOString(),
+                updated_by: req.user.username
+            });
+            done.push(store.getEntry(entry.id));
+        }
+        if (done.length) {
+            logAudit(store, {
+                user: req.user, action: 'ENTRY_REVIEW_BATCH', targetId: null,
+                details: `${action === 'approve' ? '核准' : '退回'} ${done.length} 筆${note ? `（${note}）` : ''}`, ip: req.ip
+            });
+        }
+        return res.json({ done: done.length, failed, entries: done.map((entry) => publicEntry(entry, store, { includeStatus: true })) });
+    });
+
     app.post('/api/entries/:id/review', requireRole('teacher'), (req, res) => {
         const entry = store.getEntry(req.params.id);
         if (!entry) return res.status(404).json({ error: msg('ENTRY_NOT_FOUND'), code: 'ENTRY_NOT_FOUND' });
@@ -931,13 +1109,19 @@ function createApp(options = {}) {
         if (!Roles.canEditUnit(req.user, unit, scoped)) {
             return res.status(403).json({ error: msg('NO_EDIT_PERMISSION'), code: 'NO_EDIT_PERMISSION' });
         }
-        const parsed = parseImportText(req.body && req.body.text);
+        /* 兩種來源：貼上的文字（text，伺服器解析）或前端已解析好的列（rows，CSV／.xlsx 走這條）。
+         * .xlsx 在瀏覽器裡解（public/js/xlsx.js，零依賴），伺服器只負責收乾淨的欄位。 */
+        const fromRows = Array.isArray(req.body && req.body.rows);
+        const parsed = fromRows
+            ? { rows: parseImportRows(req.body.rows), errors: [] }
+            : parseImportText(req.body && req.body.text);
         if (parsed.rows.length === 0) {
             return res.status(400).json({ error: msg('IMPORT_EMPTY'), code: 'IMPORT_EMPTY', errors: parsed.errors });
         }
         const status = Roles.needsReview(req.user, unit, scoped) ? 'pending' : 'published';
         const created = [];
         const skipped = [];
+        const source = fromRows ? (str(req.body.source, 20) === 'file' ? 'file' : 'rows') : 'paste';
         let order = store.listEntries({ unitId: unit.id }).length;
         for (const row of parsed.rows) {
             const norm = normalizeHeadword(row.headword);
@@ -963,7 +1147,7 @@ function createApp(options = {}) {
         if (created.length) {
             logAudit(store, {
                 user: req.user,
-                action: 'ENTRY_IMPORT',
+                action: source === 'paste' ? 'ENTRY_IMPORT' : 'ENTRY_IMPORT_FILE',
                 targetId: unit.id,
                 details: `${unit.title || `Unit ${unit.unit_no}`}：新增 ${created.length} 筆、略過 ${skipped.length} 筆${status === 'pending' ? '（待審核）' : ''}`,
                 ip: req.ip

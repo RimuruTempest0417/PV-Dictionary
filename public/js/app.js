@@ -64,6 +64,38 @@
 
     /* 一次只顯示一個畫面：書架 → 目錄 → 生字表。
      * ★ 可見性只在這裡決定（其他函式只負責填內容），否則兩邊互相覆蓋會出現「畫面空白」的鬼故事。 */
+    /* 調整單元順序（B-4）：一次交換，完成後重新載入目錄 */
+    async function moveUnit(unitId, direction) {
+        try {
+            await window.PDApi.post(`/api/units/${unitId}/move`, { direction });
+            await reloadUnits(state.currentBookId);
+        } catch (err) {
+            toast(errText(err), 'error');
+        }
+    }
+
+    /* 複製單元（B-4）：名稱預設加「（複製）」，複製出來的是待審核、沒有錄音 */
+    async function duplicateUnit(unit) {
+        const title = t('unit.copyTitle', { title: unit.title || `Unit ${unit.unit_no}` });
+        try {
+            const result = await window.PDApi.post(`/api/units/${unit.id}/duplicate`, { title });
+            toast(t('unit.duplicated', { n: result.entries }));
+            await reloadUnits(state.currentBookId);
+        } catch (err) {
+            toast(errText(err), 'error');
+        }
+    }
+
+    /* 調整書本順序（B-4）：書架卡片上的 ↑↓（只有能管理教材的人看得到） */
+    async function moveBook(bookId, direction) {
+        try {
+            await window.PDApi.post(`/api/books/${bookId}/move`, { direction });
+            await reloadBooks();
+        } catch (err) {
+            toast(errText(err), 'error');
+        }
+    }
+
     /* 「我的單元」（C-1）：登入後一眼看到「我可以編輯的單元」，點一下直接跳過去 */
     async function renderMyUnits() {
         const box = document.getElementById('myUnitsBlock');
@@ -101,6 +133,49 @@
         } catch (err) {
             box.hidden = true;
         }
+    }
+
+    /* 「▶ 播放全部」（B-2）：依畫面上的順序一個一個播，中途可以停。
+     * 正在播的那一張會加上 .is-playing，讓學生知道現在播到哪裡。 */
+    let playlist = null;
+    function stopsPlaylist() {
+        if (playlist) playlist.stop();
+        playlist = null;
+        document.querySelectorAll('#vocabList .vocab-item.is-playing').forEach((node) => node.classList.remove('is-playing'));
+        const button = document.getElementById('playAllBtn');
+        if (button) button.textContent = t('unit.playAll');
+    }
+
+    function markPlaying(entry) {
+        document.querySelectorAll('#vocabList .vocab-item.is-playing').forEach((node) => node.classList.remove('is-playing'));
+        if (!entry) return;
+        const card = document.querySelector(`#vocabList .vocab-item[data-entry-id="${entry.id}"]`);
+        if (card) card.classList.add('is-playing');
+    }
+
+    function togglePlayAll() {
+        const button = document.getElementById('playAllBtn');
+        if (!button) return;
+        if (playlist) {
+            stopsPlaylist();
+            return;
+        }
+        const entries = state.entries.slice();
+        if (!entries.length) return;
+        button.textContent = t('unit.stopPlay');
+        /* 先標第一個：播放裝置可能慢半拍才出聲，學生要馬上看到「現在從哪裡開始」 */
+        markPlaying(entries[0]);
+        playlist = window.PDPlaylist.create({
+            onChange: (entry) => markPlaying(entry),
+            onDone: () => stopsPlaylist(),
+            onStop: () => {
+                if (window.PDAudio) {
+                    window.PDAudio.stopTts();
+                    window.PDAudio.stopAudio();
+                }
+            }
+        });
+        playlist.run(entries);
     }
 
     function showView(name) {
@@ -153,7 +228,7 @@
                     }
                 })
                 : el('span', { class: 'shelf-cover-fallback', text: String(book.code || book.name || '?').slice(0, 6) });
-            box.appendChild(el('li', { class: 'shelf-item' }, [
+            const children = [
                 el('button', {
                     class: 'shelf-card',
                     attrs: { type: 'button', 'data-book-id': book.id, 'aria-label': book.name },
@@ -163,7 +238,36 @@
                     el('span', { class: 'shelf-name', text: book.name }),
                     el('span', { class: 'shelf-meta', text: meta })
                 ])
-            ]));
+            ];
+            /* 調整書本順序（B-4）：只有能管理教材的人看得到，按鈕要 stopPropagation，
+             * 不然會變成「按 ↑ 卻打開了那本書」。 */
+            if (window.PDAuth.can('can_manage_content')) {
+                children.push(el('div', { class: 'shelf-tools' }, [
+                    el('button', {
+                        class: 'btn btn-ghost btn-small',
+                        text: '↑',
+                        attrs: { type: 'button', 'data-action': 'move-book', 'data-book-id': book.id, 'data-direction': 'up', title: t('book.moveUp'), 'aria-label': t('book.moveUp') },
+                        on: {
+                            click: (event) => {
+                                event.stopPropagation();
+                                moveBook(book.id, 'up');
+                            }
+                        }
+                    }),
+                    el('button', {
+                        class: 'btn btn-ghost btn-small',
+                        text: '↓',
+                        attrs: { type: 'button', 'data-action': 'move-book', 'data-book-id': book.id, 'data-direction': 'down', title: t('book.moveDown'), 'aria-label': t('book.moveDown') },
+                        on: {
+                            click: (event) => {
+                                event.stopPropagation();
+                                moveBook(book.id, 'down');
+                            }
+                        }
+                    })
+                ]));
+            }
+            box.appendChild(el('li', { class: 'shelf-item' }, children));
         }
         updateEmptyState();
     }
@@ -182,7 +286,7 @@
         for (const unit of state.units) {
             const words = t('unit.words', { n: unit.published_count });
             const pending = unit.pending_count ? ` · ${t('unit.pending', { n: unit.pending_count })}` : '';
-            const row = el('li', { class: 'unit-row' }, [
+            const row = el('li', { class: 'unit-row', dataset: { unitId: unit.id } }, [
                 el('button', {
                     class: 'unit-row-btn',
                     attrs: { type: 'button', 'data-unit-id': unit.id },
@@ -194,18 +298,35 @@
                 ])
             ]);
             if (canEditUnits) {
-                row.appendChild(el('button', {
-                    class: 'unit-row-edit',
-                    text: '✏️',
-                    attrs: {
-                        type: 'button',
-                        'data-action': 'edit-unit',
-                        'data-unit-id': unit.id,
-                        'aria-label': t('unit.editTitle'),
-                        title: t('unit.editTitle')
-                    },
-                    on: { click: () => window.PDAdmin.openUnitEdit(unit.id) }
-                }));
+                /* ↑ ↓ 調整順序、⧉ 複製單元（B-4）：都由伺服器做「一次做完的交換」，
+                 * 前端不要自己算編號（連續兩個互換時前端做會撞到「同書不重複」的檢查）。 */
+                const tools = el('div', { class: 'unit-row-tools' }, [
+                    el('button', {
+                        class: 'unit-row-edit',
+                        text: '✏️',
+                        attrs: { type: 'button', 'data-action': 'edit-unit', title: t('unit.editTitle'), 'aria-label': t('unit.editTitle') },
+                        on: { click: () => window.PDAdmin.openUnitEdit(unit.id) }
+                    }),
+                    el('button', {
+                        class: 'unit-row-edit',
+                        text: '↑',
+                        attrs: { type: 'button', 'data-action': 'move-unit', 'data-direction': 'up', title: t('unit.moveUp'), 'aria-label': t('unit.moveUp') },
+                        on: { click: () => moveUnit(unit.id, 'up') }
+                    }),
+                    el('button', {
+                        class: 'unit-row-edit',
+                        text: '↓',
+                        attrs: { type: 'button', 'data-action': 'move-unit', 'data-direction': 'down', title: t('unit.moveDown'), 'aria-label': t('unit.moveDown') },
+                        on: { click: () => moveUnit(unit.id, 'down') }
+                    }),
+                    el('button', {
+                        class: 'unit-row-edit',
+                        text: '⧉',
+                        attrs: { type: 'button', 'data-action': 'duplicate-unit', title: t('unit.duplicate'), 'aria-label': t('unit.duplicate') },
+                        on: { click: () => duplicateUnit(unit) }
+                    })
+                ]);
+                row.appendChild(tools);
             }
             box.appendChild(row);
         }
@@ -635,6 +756,7 @@
             const button = event.target.closest('[data-unit-id]');
             if (button) selectUnit(button.dataset.unitId).catch((err) => toast(errText(err), 'error'));
         });
+        document.getElementById('playAllBtn').addEventListener('click', togglePlayAll);
         document.getElementById('unitsBackBtn').addEventListener('click', backToShelf);
         document.getElementById('vocabBackBtn').addEventListener('click', backToUnits);
         /* 管理區的選單：按哪個才顯示哪一塊（管理頁面太長了） */
@@ -707,6 +829,7 @@
             showView('shelf');
             renderUnitHead();
             renderVocab();
+            stopsPlaylist();
             window.PDAdmin.refreshAvailability();
             await renderMyUnits();
         } catch (err) {

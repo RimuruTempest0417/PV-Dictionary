@@ -59,6 +59,9 @@
             entry.ipa_uk ? el('span', { class: 'ipa', text: `UK ${entry.ipa_uk}`, attrs: { title: `UK · ${entry.ipa_uk}` } }) : null,
             entry.part_of_speech ? el('span', { class: 'pos-badge', text: entry.part_of_speech }) : null,
             entry.has_audio ? el('span', { class: 'tag-badge', text: t('badge.teacherAudio') }) : null,
+            /* 沒有老師錄音的生字要說清楚「這個聲音是電腦唸的」（B-2 的誠實原則），
+             * 也順便讓老師一眼看出哪些還沒錄。 */
+            !entry.has_audio ? el('span', { class: 'tag-badge tag-badge-muted', text: t('badge.tts'), attrs: { title: t('badge.ttsHint') } }) : null,
             entry.status && entry.status !== 'published'
                 ? el('span', { class: statusClass(entry.status), text: statusLabel(entry.status) })
                 : null
@@ -68,6 +71,10 @@
             headline,
             entry.zh_meaning ? el('p', { class: 'meaning-zh', text: entry.zh_meaning }) : null,
             entry.en_definition ? el('p', { class: 'meaning-en', text: entry.en_definition }) : null,
+            /* 被退回的生字要把原因顯示出來（科代表才知道要改什麼，B-6） */
+            entry.status === 'rejected' && entry.review_note
+                ? el('p', { class: 'review-note', text: t('entry.rejectedReason', { note: entry.review_note }) })
+                : null,
             (entry.example_en || entry.example_zh) ? el('div', { class: 'example' }, [
                 entry.example_en ? el('span', { class: 'example-en', text: entry.example_en }) : null,
                 entry.example_zh ? el('span', { class: 'example-zh', text: entry.example_zh }) : null

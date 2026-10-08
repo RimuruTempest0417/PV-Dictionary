@@ -1270,6 +1270,168 @@ test('錯誤日誌（同類一次處理）：同 code+message 的未處理紀錄
     assert.equal(empty.status, 400);
 });
 
+test('匯入（B-3）：前端解析好的列可以直接匯入（CSV／.xlsx 走這條）', async (t) => {
+    const { base, ids, store } = startServer(t);
+    const teacher = await login(base, 'teacher');
+    const before = store.countEntries(ids.unit.id, null);
+
+    const res = await api(base, `/api/units/${ids.unit.id}/entries/import`, {
+        method: 'POST', cookie: teacher.cookie,
+        body: {
+            source: 'file',
+            rows: [
+                { headword: 'library', ipa_us: '/ˈlaɪ.brer.i/', part_of_speech: 'n.', zh_meaning: '圖書館', en_definition: 'a place with books' },
+                { headword: 'playground', zh_meaning: '操場' },
+                { headword: '', zh_meaning: '沒有生字，整列都要被忽略' },
+                { headword: 'campus', zh_meaning: '這個單元已經有了' },
+                { headword: 'x'.repeat(200), zh_meaning: '太長會被截斷' }
+            ]
+        }
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.data.created, 3, '三筆是新的（含超長被截斷的那一筆）');
+    assert.equal(res.data.skipped, 1, '重複的那一筆要略過');
+    assert.equal(store.countEntries(ids.unit.id, null), before + 3);
+
+    const imported = store.findEntryByHeadword(ids.unit.id, 'library');
+    assert.ok(imported, '要真的寫進資料庫');
+    assert.equal(imported.status, 'published', '老師匯入＝直接發佈');
+    assert.equal(imported.zh_meaning, '圖書館');
+    const truncated = store.listEntries({ unitId: ids.unit.id }).find((entry) => entry.headword.length > 60);
+    assert.ok(truncated && truncated.headword.length <= 100, '超長的生字要截斷，不能整串塞進來');
+
+    /* 稽核要記「從檔案匯入」（跟貼上的動作分開，才知道老師是用哪一種） */
+    const actions = store.listAuditLogs({ limit: 20 }).items.map((row) => row.action);
+    assert.ok(actions.includes('ENTRY_IMPORT_FILE'), actions.join(','));
+
+    /* 科代表用同一條路徑匯入 → 進待審核 */
+    const rep = await login(base, 'classrep');
+    const repRes = await api(base, `/api/units/${ids.unit.id}/entries/import`, {
+        method: 'POST', cookie: rep.cookie,
+        body: { source: 'file', rows: [{ headword: 'canteen', zh_meaning: '飯堂' }] }
+    });
+    assert.equal(repRes.data.status, 'pending');
+    assert.equal(store.findEntryByHeadword(ids.unit.id, 'canteen').status, 'pending');
+
+    /* 沒有編輯權的人（學生）不行 */
+    const student = await login(base, 'student');
+    assert.equal((await api(base, `/api/units/${ids.unit.id}/entries/import`, {
+        method: 'POST', cookie: student.cookie, body: { rows: [{ headword: 'nope' }] }
+    })).status, 403);
+});
+
+test('複製單元（B-4）：生字一起複製、不含錄音、新單元排在最後且預設不發佈', async (t) => {
+    const { base, ids, store } = startServer(t);
+    const teacher = await login(base, 'teacher');
+    const student = await login(base, 'student');
+
+    /* 先在原單元放一筆錄音，確認複製出來的單元不會帶錄音 */
+    const entry = store.listEntries({ unitId: ids.unit.id })[0];
+    store.createAudio({ entry_id: entry.id, source: 'teacher', mime: 'audio/webm', bytes: 4, data: 'AAAA' });
+
+    assert.equal((await api(base, `/api/units/${ids.unit.id}/duplicate`, { method: 'POST', cookie: student.cookie, body: {} })).status, 403);
+
+    const res = await api(base, `/api/units/${ids.unit.id}/duplicate`, { method: 'POST', cookie: teacher.cookie, body: { title: 'My New School (copy)' } });
+    assert.equal(res.status, 200);
+    assert.equal(res.data.entries, 1, '原本那一筆生字要被複製');
+    const copy = store.getUnit(res.data.unit.id);
+    assert.equal(copy.title, 'My New School (copy)');
+    assert.equal(copy.is_published, false, '複製出來的單元預設不發佈（老師檢查過再發）');
+    assert.ok(Number(copy.unit_no) > Number(store.getUnit(ids.unit.id).unit_no), '編號要排在最後');
+    const copyEntries = store.listEntries({ unitId: copy.id });
+    assert.equal(copyEntries.length, 1);
+    assert.equal(copyEntries[0].status, 'pending', '複製出來的是待審核（避免沒檢查就上線）');
+    assert.equal(store.findTeacherAudio(copyEntries[0].id), null, '不複製錄音');
+    assert.ok(store.listAuditLogs({ limit: 10 }).items.some((row) => row.action === 'UNIT_DUPLICATE'));
+
+    /* 標題留空時給一個預設值（不會出現沒有名字的單元） */
+    const plain = await api(base, `/api/units/${ids.unit.id}/duplicate`, { method: 'POST', cookie: teacher.cookie, body: {} });
+    assert.ok(store.getUnit(plain.data.unit.id).title.includes('My New School'));
+});
+
+test('調整順序（B-4）：單元與書本都能上下互換，最邊緣不會出錯', async (t) => {
+    const { base, ids, store } = startServer(t);
+    const teacher = await login(base, 'teacher');
+    /* 再加一個單元，才有東西可以換 */
+    const second = store.createUnit({ book_id: ids.book.id, unit_no: 5, title: 'Unit 5', sort_order: 5, is_published: true });
+
+    const down = await api(base, `/api/units/${ids.unit.id}/move`, { method: 'POST', cookie: teacher.cookie, body: { direction: 'down' } });
+    assert.equal(down.status, 200);
+    assert.equal(down.data.moved, true);
+    assert.equal(Number(store.getUnit(ids.unit.id).unit_no), 5, '原本 Unit 1 變成 5');
+    assert.equal(Number(store.getUnit(second.id).unit_no), 1, '原本 Unit 5 變成 1');
+    assert.ok(store.listAuditLogs({ limit: 10 }).items.some((row) => row.action === 'UNIT_MOVE'));
+
+    /* 已經在最上面再按上 → 不動，但不能報錯 */
+    const edge = await api(base, `/api/units/${second.id}/move`, { method: 'POST', cookie: teacher.cookie, body: { direction: 'up' } });
+    assert.equal(edge.status, 200);
+    assert.equal(edge.data.moved, false);
+    assert.equal(Number(store.getUnit(second.id).unit_no), 1, '邊緣時編號不變');
+
+    /* 方向亂寫要 400 */
+    assert.equal((await api(base, `/api/units/${second.id}/move`, { method: 'POST', cookie: teacher.cookie, body: { direction: 'sideways' } })).status, 400);
+
+    /* 書本排序 */
+    const book2 = store.createBook({ code: 'B6B', name: 'Book 6B', sort_order: 9, is_published: true });
+    const moved = await api(base, `/api/books/${book2.id}/move`, { method: 'POST', cookie: teacher.cookie, body: { direction: 'up' } });
+    assert.equal(moved.status, 200);
+    assert.equal(moved.data.moved, true);
+    assert.ok(Number(store.getBook(book2.id).sort_order) < 9, '書本順序要往前');
+    assert.ok(store.listAuditLogs({ limit: 10 }).items.some((row) => row.action === 'BOOK_MOVE'));
+
+    const student = await login(base, 'student');
+    assert.equal((await api(base, `/api/books/${book2.id}/move`, { method: 'POST', cookie: student.cookie, body: { direction: 'up' } })).status, 403);
+});
+
+test('批次審核（B-6）：一次核准或退回多筆、退回可附原因、非待審核的要回報', async (t) => {
+    const { base, ids, store } = startServer(t);
+    const teacher = await login(base, 'teacher');
+    const rep = await login(base, 'classrep');
+    const published = store.listEntries({ unitId: ids.unit.id })[0];
+
+    /* 科代表新增三筆（進待審核） */
+    const created = [];
+    for (const word of ['locker', 'canteen', 'hall']) {
+        const res = await api(base, `/api/units/${ids.unit.id}/entries`, {
+            method: 'POST', cookie: rep.cookie, body: { headword: word, zh_meaning: '測試' }
+        });
+        created.push(res.data.entry.id);
+    }
+
+    assert.equal((await api(base, '/api/entries/review-batch', { method: 'POST', cookie: rep.cookie, body: { ids: created, action: 'approve' } })).status, 403);
+    assert.equal((await api(base, '/api/entries/review-batch', { method: 'POST', cookie: teacher.cookie, body: { ids: [], action: 'approve' } })).status, 400);
+
+    /* 核准兩筆、退回一筆（附原因） */
+    const approved = await api(base, '/api/entries/review-batch', {
+        method: 'POST', cookie: teacher.cookie, body: { ids: created.slice(0, 2), action: 'approve' }
+    });
+    assert.equal(approved.data.done, 2);
+    const rejected = await api(base, '/api/entries/review-batch', {
+        method: 'POST', cookie: teacher.cookie, body: { ids: created.slice(2), action: 'reject', note: '中文解釋要再完整一點' }
+    });
+    assert.equal(rejected.data.done, 1);
+    assert.equal(store.getEntry(created[2]).status, 'rejected');
+    assert.equal(store.getEntry(created[2]).review_note, '中文解釋要再完整一點', '退回原因要存起來（科代表看得到）');
+
+    /* 已經不是待審核的（剛剛那筆已發佈的）→ 回報失敗但整批不中斷 */
+    const mixed = await api(base, '/api/entries/review-batch', {
+        method: 'POST', cookie: teacher.cookie, body: { ids: [published.id, created[0]], action: 'approve' }
+    });
+    assert.equal(mixed.data.done, 0);
+    assert.equal(mixed.data.failed.length, 2);
+
+    /* 稽核只留一筆批次紀錄（不是三筆） */
+    const batchLogs = store.listAuditLogs({ limit: 30 }).items.filter((row) => row.action === 'ENTRY_REVIEW_BATCH');
+    assert.equal(batchLogs.length, 2, '有實際動作的兩次才留稽核（全失敗的那次不留）');
+    assert.match(batchLogs[0].details, /核准|退回/);
+
+    /* 科代表看得到自己的生字被退回與原因（前端會顯示） */
+    const listed = await api(base, `/api/units/${ids.unit.id}`, { cookie: rep.cookie });
+    const mine = listed.data.entries.find((entry) => entry.id === created[2]);
+    assert.equal(mine.status, 'rejected');
+    assert.match(mine.review_note, /完整/);
+});
+
 test('角色與能力對照表（C-4）：公開、DB-free、六個角色與能力都在', async (t) => {
     const { base } = startServer(t);
     const res = await fetch(`${base}/api/roles`);

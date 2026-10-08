@@ -768,6 +768,173 @@ async function main() {
                 return statuses.every((status) => status === 200);
             })());
 
+        console.log('\n【8e】v0.4.6：檔案匯入預覽、批次審核、播放全部、排序與複製');
+        /* 【8d】的「全部登出」把所有權杖都作廢了 → 這裡要先重新登入，才看得到老師／管理員的按鈕 */
+        await loginViaUi(browser, { username: 'manager' });
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        /* 先確保有一個單元可以操作，並造兩筆待審核生字 */
+        const book0 = store.listBooks({ includeUnpublished: true })[0];
+        const unit0 = store.listUnits({ bookId: book0.id, includeUnpublished: true })[0];
+        const pendingA = store.createEntry({
+            unit_id: unit0.id, headword: 'batchone', headword_norm: 'batchone', status: 'pending', sort_order: 80, created_by: 'manager'
+        });
+        const pendingB = store.createEntry({
+            unit_id: unit0.id, headword: 'batchtwo', headword_norm: 'batchtwo', status: 'pending', sort_order: 81, created_by: 'manager'
+        });
+
+        await browser.goto(`${app.base}/`);
+        await browser.waitFor(`document.querySelectorAll('#bookShelf [data-book-id]').length > 0`, { timeout: 15000 });
+        await browser.evaluate(STUBS);
+        await browser.evaluate(`document.querySelector('#bookShelf [data-book-id]').click(); return true;`);
+        await browser.waitFor(`document.getElementById('unitList').hidden === false`, { timeout: 8000 });
+
+        /* 單元列的 ↑ ↓ ⧉ 都要在（B-4） */
+        const unitTools = await browser.evaluate(`return {
+            moveUp: document.querySelectorAll('#unitList [data-action="move-unit"][data-direction="up"]').length,
+            moveDown: document.querySelectorAll('#unitList [data-action="move-unit"][data-direction="down"]').length,
+            dup: document.querySelectorAll('#unitList [data-action="duplicate-unit"]').length,
+            units: document.querySelectorAll('#unitList .unit-row').length
+        };`);
+        check('單元列有 ↑ ↓ 與複製單元（B-4）',
+            unitTools.moveUp === unitTools.units && unitTools.moveDown === unitTools.units && unitTools.dup === unitTools.units,
+            JSON.stringify(unitTools));
+
+        /* 複製單元：單元數 +1、複製出來的是待審核、沒有錄音 */
+        const beforeUnits = store.listUnits({ bookId: book0.id, includeUnpublished: true }).length;
+        await browser.evaluate(`document.querySelector('#unitList .unit-row [data-action="duplicate-unit"]').click(); return true;`);
+        const duplicated = await waitForStore(() => store.listUnits({ bookId: book0.id, includeUnpublished: true }).length === beforeUnits + 1);
+        check('按 ⧉ 會複製出一個新單元（B-4）', duplicated === true);
+        const copyUnit = store.listUnits({ bookId: book0.id, includeUnpublished: true }).slice(-1)[0];
+        check('複製出來的單元預設不發佈、生字是待審核',
+            copyUnit.is_published === false && store.listEntries({ unitId: copyUnit.id }).every((entry) => entry.status === 'pending'),
+            JSON.stringify([copyUnit.is_published, store.listEntries({ unitId: copyUnit.id }).length]));
+
+        /* 排序：先造一個排在最後的單元，用 ↑ 與上一個互換編號（互換邏輯在伺服器，前端只按鈕） */
+        const moveTarget = store.createUnit({ book_id: book0.id, unit_no: 90, title: 'Temp 90', sort_order: 90, is_published: true });
+        const neighbour = store.listUnits({ bookId: book0.id, includeUnpublished: true })
+            .filter((item) => item.id !== moveTarget.id)
+            .sort((a, b) => Number(b.unit_no) - Number(a.unit_no))[0];
+        await browser.evaluate(`return window.PDApp.reloadUnits('${book0.id}').then(() => true);`);
+        await browser.waitFor(`document.querySelector('#unitList .unit-row[data-unit-id="${moveTarget.id}"] [data-action="move-unit"][data-direction="up"]') !== null`, { timeout: 8000 });
+        await browser.evaluate(`document.querySelector('#unitList .unit-row[data-unit-id="${moveTarget.id}"] [data-action="move-unit"][data-direction="up"]').click(); return true;`);
+        const swapped = await waitForStore(() => Number(store.getUnit(moveTarget.id).unit_no) === Number(neighbour.unit_no));
+        check('按 ↑ 會與上一個單元互換編號（B-4）', swapped === true,
+            JSON.stringify([store.getUnit(moveTarget.id).unit_no, neighbour.unit_no]));
+        /* 這個臨時單元不用清：整輪用的是暫存資料庫，行程結束就一起消失 */
+        await browser.evaluate(`return window.PDApp.reloadUnits('${book0.id}').then(() => true);`);
+
+        /* 檔案匯入（B-3）：在頁面裡做一個真的 CSV File，走「選檔 → 預覽 → 匯入」 */
+        /* 回到一開始那個單元（就是要匯入的目標）—— 先確認它在畫面上（列表可能剛重新渲染過） */
+        const backToUnit = await browser.evaluate(`
+            const node = document.querySelector('#unitList [data-unit-id="${unit0.id}"]');
+            if (node) node.click();
+            return { found: Boolean(node), rows: document.querySelectorAll('#unitList .unit-row').length, ids: Array.from(document.querySelectorAll('#unitList .unit-row')).map((row) => row.dataset.unitId).join(',') };
+        `);
+        check('回到原本的單元準備匯入（B-3）', backToUnit.found === true, JSON.stringify(backToUnit));
+        await browser.waitFor(`document.getElementById('vocabList').hidden === false`, { timeout: 8000 });
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await browser.evaluate(`document.getElementById('importToggleBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('importForm').hidden === false`, { timeout: 8000 });
+        const fileImport = await browser.evaluate(`
+            const csv = '生字,音標,詞性,中文解釋\\ncsvword1,/kæmpəs/,n.,測試一\\ncsvword2,,n.,測試二\\n';
+            const file = new File([csv], 'words.csv', { type: 'text/csv' });
+            const input = document.getElementById('importFileInput');
+            const data = new DataTransfer();
+            data.items.add(file);
+            input.files = data.files;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('importPreview').hidden === false`, { timeout: 8000 });
+        const preview = await browser.evaluate(`return {
+            rows: document.querySelectorAll('#importPreviewTable tr').length,
+            selects: document.querySelectorAll('#importPreviewTable select.import-map').length,
+            guessed: Array.from(document.querySelectorAll('#importPreviewTable select.import-map')).map((node) => node.value).join(','),
+            note: document.getElementById('importFileMsg').textContent
+        };`);
+        check('選 CSV 之後會出現預覽與欄位對應（B-3）', preview.rows >= 3 && preview.selects >= 4, JSON.stringify(preview));
+        check('表頭會自動對應到生字／音標／詞性／中文（B-3）',
+            preview.guessed.startsWith('headword,ipa_us,part_of_speech,zh_meaning'), preview.guessed);
+        check('預覽會說讀到幾列（B-3）', /\d/.test(preview.note), preview.note);
+
+        const beforeEntries = store.countEntries(unit0.id, null);
+        await browser.evaluate(`document.getElementById('importFileRunBtn').click(); return true;`);
+        const imported = await waitForStore(() => store.countEntries(unit0.id, null) === beforeEntries + 2);
+        check('按下匯入會真的把兩筆寫進資料庫（B-3）', imported === true);
+        check('匯入的生字內容正確（B-3）',
+            (store.findEntryByHeadword(unit0.id, 'csvword1') || {}).zh_meaning === '測試一',
+            JSON.stringify(store.findEntryByHeadword(unit0.id, 'csvword1')));
+
+        /* 播放全部（B-2）：按了會變「停止」，第一張會被標成正在播 */
+        await browser.evaluate(`document.getElementById('playAllBtn').click(); return true;`);
+        await sleep(300);
+        const playing = await browser.evaluate(`return {
+            label: document.getElementById('playAllBtn').textContent,
+            marked: document.querySelectorAll('#vocabList .vocab-item.is-playing').length
+        };`);
+        check('「▶ 播放全部」按下去會進入播放狀態（B-2）',
+            /停止|Stop/i.test(playing.label) && playing.marked >= 1, JSON.stringify(playing));
+        await browser.evaluate(`document.getElementById('playAllBtn').click(); return true;`);
+        await sleep(200);
+        check('再按一次會停止，標記也會清掉（B-2）',
+            (await browser.evaluate(`return document.querySelectorAll('#vocabList .vocab-item.is-playing').length;`)) === 0);
+
+        /* 沒有老師錄音的生字要看得到「電腦語音」徽章（B-2 的誠實原則） */
+        check('沒有老師錄音的生字標示「電腦語音」（B-2）',
+            (await browser.evaluate(`return document.querySelectorAll('#vocabList .tag-badge-muted').length;`)) >= 1);
+
+        /* 批次審核（B-6）：勾兩筆 → 一次核准 */
+        await browser.evaluate(`document.getElementById('navPendingBtn').click(); return true;`);
+        await browser.waitFor(`document.querySelectorAll('#pendingList .pending-check').length >= 2`, { timeout: 8000 });
+        const batchUi = await browser.evaluate(`return {
+            checks: document.querySelectorAll('#pendingList .pending-check').length,
+            approveBtn: Boolean(document.getElementById('pendingApproveAllBtn')),
+            rejectBtn: Boolean(document.getElementById('pendingRejectAllBtn')),
+            disabledBefore: document.getElementById('pendingApproveAllBtn').disabled
+        };`);
+        check('待審核每一筆都有勾選框，並有批次核准／退回按鈕（B-6）',
+            batchUi.checks >= 2 && batchUi.approveBtn && batchUi.rejectBtn, JSON.stringify(batchUi));
+        check('還沒勾選之前批次按鈕是停用的（不會誤按）', batchUi.disabledBefore === true);
+
+        await browser.evaluate(`
+            const ids = ['${pendingA.id}', '${pendingB.id}'];
+            for (const id of ids) {
+                const box = document.querySelector('#pendingList .pending-check[data-entry-id="' + id + '"]');
+                box.checked = true;
+                box.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            return true;
+        `);
+        check('勾選之後批次按鈕會啟用（B-6）',
+            (await browser.evaluate(`return document.getElementById('pendingApproveAllBtn').disabled;`)) === false);
+        await browser.evaluate(`document.getElementById('pendingApproveAllBtn').click(); return true;`);
+        const approvedBoth = await waitForStore(() => store.getEntry(pendingA.id).status === 'published' && store.getEntry(pendingB.id).status === 'published');
+        check('批次核准會把勾選的生字一次發佈（B-6）', approvedBoth === true);
+
+        /* 批次退回要留原因，而且科代表看得到 */
+        const pendingC = store.createEntry({
+            unit_id: unit0.id, headword: 'batchthree', headword_norm: 'batchthree', status: 'pending', sort_order: 82, created_by: 'classrep'
+        });
+        /* 重新載入單元（待審核清單也會跟著更新），再切回待審核分頁 */
+        await browser.evaluate(`return window.PDApp.reloadUnit({ keepForm: true }).then(() => { document.getElementById('navPendingBtn').click(); return true; });`);
+        await browser.waitFor(`document.querySelector('#pendingList .pending-check[data-entry-id="${pendingC.id}"]') !== null`, { timeout: 8000 });
+        const rejected = await browser.evaluate(`
+            const box = document.querySelector('#pendingList .pending-check[data-entry-id="${pendingC.id}"]');
+            box.checked = true;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+            document.getElementById('pendingBatchNote').value = '請補上英文解釋';
+            document.getElementById('pendingRejectAllBtn').click();
+            return true;
+        `);
+        const rejectedDone = await waitForStore(() => store.getEntry(pendingC.id).status === 'rejected');
+        check('批次退回會把生字退回並附原因（B-6）', rejectedDone === true);
+        check('退回原因存在生字上（科代表看得到）（B-6）',
+            store.getEntry(pendingC.id).review_note === '請補上英文解釋',
+            store.getEntry(pendingC.id).review_note);
+
+        /* 清乾淨這一區造的資料 */
+        for (const id of [pendingA.id, pendingB.id, pendingC.id]) store.deleteEntry(id);
+
         console.log('\n【9】收尾：沒有 CSP 違規、例外、下載、截圖');
         const csp = await browser.evaluate(`return window.__cspViolations || [];`);
         check('沒有 CSP 違規', csp.length === 0, JSON.stringify(csp));
