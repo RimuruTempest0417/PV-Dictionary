@@ -40,7 +40,30 @@
 
     async function login(username, password) {
         const data = await window.PDApi.post('/api/auth/login', { username, password });
+        /* 兩步驟驗證（A-1）：密碼對了但還沒完成第二步 —— 中間權杖只留在記憶體，不寫任何儲存。
+         * 它不能拿來呼叫 API（後端會拒），所以外洩的風險僅限這 5 分鐘且什麼都不能做。 */
+        if (data && data.two_factor_required) {
+            state.challenge = data.challenge_token || '';
+            state.challengeName = username;
+            return { two_factor_required: true };
+        }
         state.user = data.user;
+        state.newDevice = Boolean(data.new_device);
+        await loadMe();
+        return state.user;
+    }
+
+    /* 第二步：6 位驗證碼或一組備援碼（後端兩種都收，這裡依格式決定送哪一種） */
+    async function loginTwoFactor(code) {
+        const value = String(code || '').trim();
+        const body = { challenge_token: state.challenge || '' };
+        if (/^\d{6}$/.test(value)) body.code = value;
+        else body.backup_code = value;
+        const data = await window.PDApi.post('/api/auth/login/2fa', body);
+        state.challenge = '';
+        state.challengeName = '';
+        state.user = data.user;
+        state.newDevice = Boolean(data.new_device);
         await loadMe();
         return state.user;
     }
@@ -62,6 +85,7 @@
         atLeast,
         loadMe,
         login,
+        loginTwoFactor,
         logout,
         get user() {
             return state.user;

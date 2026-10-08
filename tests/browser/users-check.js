@@ -13,8 +13,9 @@ const path = require('node:path');
 
 const { Browser, sleep } = require('./lib/cdp');
 const { STUBS, startApp, loginViaUi, logoutViaUi, visibleIds } = require('./lib/harness');
+const Totp = require('../../lib/totp');
 
-const PASSWORD = 'pass1234';
+const PASSWORD = 'pass123456';
 
 let passed = 0;
 let failed = 0;
@@ -478,6 +479,137 @@ async function main() {
                 .then(() => 'OK').catch((err) => err.code || err.message);
         `);
         check('可以再改回原本的密碼', restored === 'OK', String(restored));
+
+        console.log('\n【8c】兩步驟驗證與帳號救援（v0.4.3）：自助開啟 → 登入第二步 → 臨時密碼 → 重設 2FA → 登出所有裝置');
+        /* 先切回英文，讓下面的斷言用英文比對 */
+        await browser.evaluate(`const btn = document.querySelector('#langSwitch [data-lang="en"]'); if (btn) btn.click(); return true;`);
+        await sleep(200);
+
+        /* ---- 老師自己開啟兩步驟驗證（真的走畫面） ---- */
+        await logoutViaUi(browser);
+        await loginViaUi(browser, { username: 'teacher' });
+        await browser.evaluate(`document.getElementById('passwordBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('passwordModal').hidden === false`);
+        const beforeSetup = await browser.evaluate(`return document.getElementById('twoFactorState').textContent;`);
+        check('預設是「未開啟」兩步驟驗證（不強制，使用者指定）', /off/i.test(beforeSetup), beforeSetup);
+
+        await browser.evaluate(`document.getElementById('twoFactorStartBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('twoFactorSetup').hidden === false`, { timeout: 8000 });
+        const secret = await browser.evaluate(`return document.getElementById('twoFactorSecret').textContent.trim();`);
+        check('按「開啟」會顯示一組密鑰（給驗證器 App 用）', /^[A-Z2-7]{16,}=*$/.test(secret), secret.slice(0, 12));
+
+        /* 用我們自己的 TOTP 實作算出現在的驗證碼（與手機 App 相同演算法） */
+        const enableCode = Totp.codeAt(secret, Date.now() / 1000);
+        await browser.evaluate(`
+            document.getElementById('twoFactorCode').value = '${enableCode}';
+            document.getElementById('twoFactorEnableBtn').click();
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('twoFactorBackupBox').hidden === false`, { timeout: 8000 });
+        const backupCodes = await browser.evaluate(`return document.getElementById('twoFactorBackupCodes').textContent.trim().split(/\s*·\s*/);`);
+        check('開啟成功並顯示 8 組備援碼（只顯示這一次）', backupCodes.length === 8, String(backupCodes.length));
+        check('資料庫存的是密文（不是明文密鑰）',
+            store.findUserByUsername('teacher').totp_secret.includes(secret) === false
+            && store.findUserByUsername('teacher').totp_enabled_at !== null);
+
+        /* ---- 登入要兩步：畫面會換成輸入驗證碼 ---- */
+        await logoutViaUi(browser);
+        await browser.evaluate(`document.getElementById('loginBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('loginModal').hidden === false`);
+        await browser.evaluate(`
+            document.getElementById('loginUsername').value = 'teacher';
+            document.getElementById('loginPassword').value = ${JSON.stringify(PASSWORD)};
+            document.forms.loginForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('login2faBlock').hidden === false`, { timeout: 8000 });
+        check('密碼正確時不會直接登入：彈窗要求驗證碼', true);
+        check('這時候還沒有登入狀態', (await browser.evaluate(`return window.PDAuth.isLoggedIn();`)) === false);
+
+        /* 錯的碼：留在原地並顯示錯誤 */
+        await browser.evaluate(`
+            document.getElementById('login2faCode').value = '000000';
+            document.forms.loginForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('loginMsg').textContent.length > 0`, { timeout: 8000 });
+        check('錯誤的驗證碼不會登入', (await browser.evaluate(`return window.PDAuth.isLoggedIn();`)) === false);
+
+        /* 正確的碼：登入成功 */
+        const loginCode = Totp.codeAt(secret, Date.now() / 1000);
+        await browser.evaluate(`
+            document.getElementById('login2faCode').value = '${loginCode}';
+            document.forms.loginForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('logoutBtn') !== null`, { timeout: 8000 });
+        check('輸入正確驗證碼後完成登入', true);
+
+        /* 備援碼也可以登入（用掉一組） */
+        const backupFirst = backupCodes[0];
+        await logoutViaUi(browser);
+        await browser.evaluate(`document.getElementById('loginBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('loginModal').hidden === false`);
+        await browser.evaluate(`
+            document.getElementById('loginUsername').value = 'teacher';
+            document.getElementById('loginPassword').value = ${JSON.stringify(PASSWORD)};
+            document.forms.loginForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('login2faBlock').hidden === false`, { timeout: 8000 });
+        await browser.evaluate(`
+            document.getElementById('login2faCode').value = '${backupFirst}';
+            document.forms.loginForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('logoutBtn') !== null`, { timeout: 8000 });
+        check('備援碼也能登入（用掉一組）', store.findUserByUsername('teacher').backup_codes.length === 7,
+            String(store.findUserByUsername('teacher').backup_codes.length));
+
+        /* ---- 管理員：2FA 欄位、臨時密碼、重設 2FA、登出所有裝置 ---- */
+        await logoutViaUi(browser);
+        await loginViaUi(browser, { username: 'webmanager' });
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await browser.evaluate(`document.getElementById('navUsersBtn').click(); return true;`);
+        await browser.waitFor(`window.__rowFor('teacher') !== null`, { timeout: 8000 });
+        const twoFactorCell = await browser.evaluate(`
+            const tr = window.__rowFor('teacher');
+            const cell = tr.querySelector('[data-two-factor]');
+            return cell ? { value: cell.getAttribute('data-two-factor'), text: cell.textContent } : null;
+        `);
+        check('帳號管理顯示兩步驟驗證狀態', twoFactorCell && twoFactorCell.value === 'on' && /on/i.test(twoFactorCell.text),
+            JSON.stringify(twoFactorCell));
+
+        await browser.evaluate(`window.__rowFor('teacher').querySelector('[data-action="temp-password"]').click(); return true;`);
+        await browser.waitFor(`document.querySelector('[data-field="temp-password"]') !== null`, { timeout: 8000 });
+        const tempPassword = await browser.evaluate(`return document.querySelector('[data-field="temp-password"]').textContent.trim();`);
+        check('管理員可以產生一次性臨時密碼並在畫面顯示', tempPassword.length >= 10, tempPassword.length + ' 字元');
+        check('臨時密碼可以用來登入（真的生效）', (await loginAs(app.base, 'teacher', tempPassword)) === 200);
+        check('臨時密碼沒有寫進稽核或資料庫明文', store.findUserByUsername('teacher').password_hash.includes(tempPassword) === false);
+
+        /* 重設兩步驟驗證（手機掉了的救援） */
+        await browser.evaluate(`window.__rowFor('teacher').querySelector('[data-action="reset-2fa"]').click(); return true;`);
+        await browser.waitFor(`window.__rowFor('teacher').querySelector('[data-two-factor]').getAttribute('data-two-factor') === 'off'`, { timeout: 8000 });
+        check('重設兩步驟驗證後狀態變回未設定', store.findUserByUsername('teacher').totp_enabled_at === null);
+
+        /* 登出所有裝置：兩段式確認，會把該帳號的 token_version 加一 */
+        const versionBefore = Number(store.findUserByUsername('teacher').token_version) || 1;
+        await browser.evaluate(`window.__rowFor('teacher').querySelector('[data-action="force-logout"]').click(); return true;`);
+        await browser.waitFor(`window.__rowFor('teacher').querySelector('[data-action="force-logout"]').textContent.includes('confirm')`, { timeout: 5000 });
+        check('登出所有裝置要按兩次（防手滑）', (Number(store.findUserByUsername('teacher').token_version) || 1) === versionBefore);
+        await browser.evaluate(`window.__rowFor('teacher').querySelector('[data-action="force-logout"]').click(); return true;`);
+        const bumped = await waitForStore(() => (Number(store.findUserByUsername('teacher').token_version) || 1) > versionBefore);
+        check('第二次按才真的把所有裝置登出（工作階段版本 +1）', bumped === true,
+            String(store.findUserByUsername('teacher').token_version));
+        check('一般登出不會影響其他裝置（使用者指定）', await (async () => {
+            const a = await loginAs(app.base, 'teacher', tempPassword);
+            const versionNow = Number(store.findUserByUsername('teacher').token_version) || 1;
+            return a === 200 && (Number(store.findUserByUsername('teacher').token_version) || 1) === versionNow;
+        })());
+
+        /* 復原：把老師的密碼改回去，後面的收尾檢查才不會被影響 */
+        await logoutViaUi(browser);
+        await loginViaUi(browser, { username: 'manager' });
 
         console.log('\n【9】收尾：沒有 CSP 違規、例外、下載、截圖');
         const csp = await browser.evaluate(`return window.__cspViolations || [];`);

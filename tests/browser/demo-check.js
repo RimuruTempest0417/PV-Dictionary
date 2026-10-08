@@ -577,6 +577,25 @@ async function main() {
         await browser.evaluate(STUBS);
         await openLogin(browser);
         await typeLogin(browser, 'manager');
+
+        /* 使用者回報：重新載入後停在書架（還沒點任何書），管理提示卻說「目前還沒有任何書本」。
+         * 這裡故意重新載入，重現那個狀態（登入狀態在 cookie 裡，重新載入之後還在）。
+         * 用瀏覽器層的 goto（真的導航），不要用頁面內 location.reload()：
+         * 後者會讓後續的查詢打到已經被銷毀的執行環境，等待永遠不會成立（踩過一次）。 */
+        await browser.goto(`${base}/`);
+        await browser.waitFor(`document.getElementById('bookShelf') && document.getElementById('bookShelf').children.length > 0`, { timeout: 15000 });
+        await browser.evaluate(STUBS);
+        /* 提示是在書本載入完之後才寫上的：等它出現再斷言（先取樣會拿到空字串 —— 這個坑踩過三次了） */
+        await browser.waitFor(`document.getElementById('adminHint').hidden === false && document.getElementById('adminHint').textContent.length > 0`, { timeout: 8000 });
+        const shelfHint = await browser.evaluate(`return {
+            text: document.getElementById('adminHint').textContent,
+            tone: document.getElementById('adminHint').dataset.tone || '',
+            booksOnShelf: document.querySelectorAll('#bookShelf [data-book-id]').length
+        };`);
+        check('重新載入停在書架時：提示不會說「還沒有任何書本」（書架上有書）',
+            shelfHint.booksOnShelf > 0 && !/no books/i.test(shelfHint.text) && /already has/i.test(shelfHint.text),
+            JSON.stringify(shelfHint));
+        check('書架上的這種提示是中性的（不是警告色）', shelfHint.tone === 'info', shelfHint.tone);
         await browser.evaluate(`
             document.getElementById('adminToggleBtn').click();
             return true;

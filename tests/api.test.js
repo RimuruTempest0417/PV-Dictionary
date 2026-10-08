@@ -11,7 +11,7 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
 const { createApp } = require('../server');
 const { hashPassword } = require('../lib/passwords');
 
-const PASSWORD = 'pass1234';
+const PASSWORD = 'pass123456';
 
 function seedStore(store) {
     const users = [
@@ -477,14 +477,14 @@ test('帳號管理：建立 → 新帳號可以登入 → 改角色 → 停用�
 
     const created = await api(base, '/api/admin/users', {
         method: 'POST', cookie: manager.cookie,
-        body: { username: 'teacherchan', display_name: 'Miss Chan', password: 'chan12345', role: 'teacher' }
+        body: { username: 'teacherchan', display_name: 'Miss Chan', password: 'chan123456', role: 'teacher' }
     });
     assert.equal(created.status, 201);
     assert.equal(created.data.user.username, 'teacherchan');
     assert.equal(created.data.user.role, 'teacher');
     assert.equal(created.data.user.password_hash, undefined, '回應不得包含密碼雜湊');
 
-    const newLogin = await login(base, 'teacherchan', 'chan12345');
+    const newLogin = await login(base, 'teacherchan', 'chan123456');
     assert.equal(newLogin.status, 200, '新帳號應可立即登入');
 
     const id = created.data.user.id;
@@ -499,7 +499,7 @@ test('帳號管理：建立 → 新帳號可以登入 → 改角色 → 停用�
     });
     assert.equal(off.status, 200);
     assert.equal(off.data.user.is_active, false);
-    const blocked = await login(base, 'teacherchan', 'chan12345');
+    const blocked = await login(base, 'teacherchan', 'chan123456');
     assert.equal(blocked.status, 401, '停用的帳號不能再登入');
 
     const reset = await api(base, `/api/admin/users/${id}`, {
@@ -557,7 +557,7 @@ test('帳號管理：不能管理自己、admin 不能動網站管理員、網�
     assert.equal(assignAdmin.status, 403, 'admin 不能建立同級的 admin');
 
     const teacherTries = await api(base, '/api/admin/users', {
-        method: 'POST', cookie: teacher.cookie, body: { username: 'x', password: 'xxxxxxxx', role: 'student' }
+        method: 'POST', cookie: teacher.cookie, body: { username: 'x', password: 'xxxxxxxxxx', role: 'student' }
     });
     assert.equal(teacherTries.status, 403, '老師不能建立帳號');
 });
@@ -567,7 +567,7 @@ test('刪除帳號：授權一併清掉，而且帳號真的消失', async (t) =
     const manager = await login(base, 'manager');
     const created = await api(base, '/api/admin/users', {
         method: 'POST', cookie: manager.cookie,
-        body: { username: 'helper', password: 'helper1234', role: 'student' }
+        body: { username: 'helper', password: 'helper12345', role: 'student' }
     });
     const id = created.data.user.id;
 
@@ -588,10 +588,10 @@ test('授權管理：授權某個單元後才能編輯；重複授權會擋；�
     const manager = await login(base, 'manager');
     const helper = await api(base, '/api/admin/users', {
         method: 'POST', cookie: manager.cookie,
-        body: { username: 'helper', password: 'helper1234', role: 'teacher' }
+        body: { username: 'helper', password: 'helper12345', role: 'teacher' }
     });
     const helperId = helper.data.user.id;
-    const helperLogin = await login(base, 'helper', 'helper1234');
+    const helperLogin = await login(base, 'helper', 'helper12345');
 
     /* 先把 helper 降成學生：學生對這個單元本來沒有編輯權，這樣才測得到「授權」的效果 */
     await api(base, `/api/admin/users/${helperId}`, { method: 'PATCH', cookie: manager.cookie, body: { role: 'student' } });
@@ -705,14 +705,19 @@ test('改自己的密碼：管理員面板可以改，任何登入者也能用 /
     });
     assert.equal(selfReset.status, 200, '自己改自己的密碼不該被擋');
     assert.equal((await login(base, 'manager', 'selfpass123')).status, 200);
+    /* ★ 改密碼會換掉工作階段版本（A-10）：回應會帶一張新權杖給自己，後續要用它 */
+    const selfCookie = selfReset.headers.getSetCookie().map((line) => line.split(';')[0]).join('; ');
+    assert.match(selfCookie, /pd_token=/, '改自己的密碼要順手換新權杖，不然會把自己登出');
+    assert.equal((await api(base, '/api/auth/me', { cookie: manager.cookie })).status, 401, '舊權杖要失效');
+    assert.equal((await api(base, '/api/auth/me', { cookie: selfCookie })).status, 200, '新權杖要能用');
 
     /* 但不能改自己的角色或停用自己（提權／自鎖） */
     const selfRole = await api(base, `/api/admin/users/${me.id}`, {
-        method: 'PATCH', cookie: manager.cookie, body: { role: 'student' }
+        method: 'PATCH', cookie: selfCookie, body: { role: 'student' }
     });
     assert.equal(selfRole.status, 403);
     const selfOff = await api(base, `/api/admin/users/${me.id}`, {
-        method: 'PATCH', cookie: manager.cookie, body: { is_active: false }
+        method: 'PATCH', cookie: selfCookie, body: { is_active: false }
     });
     assert.equal(selfOff.status, 403);
 
@@ -1014,4 +1019,256 @@ test('自動化檢查的流量（E-4）：稽核標成 is_self_test，預設檢�
     const shown = await api(base, '/api/admin/audit-logs?hide_self_test=0', { cookie: manager.cookie });
     assert.equal(shown.data.logs.some((row) => row.is_self_test === true), true, '想看就看得到');
     assert.equal(shown.data.filters.hide_self_test, false);
+});
+
+/* ---- v0.4.3：兩步驟驗證（A-1）、工作階段版本（A-10）、密碼政策與新裝置（A-8）、帳號救援（C-3） ---- */
+
+const Totp = require('../lib/totp');
+
+function secretKeyOf() {
+    return process.env.JWT_SECRET;
+}
+
+async function twoFactorLogin(base, username, password = PASSWORD) {
+    const first = await login(base, username, password);
+    if (first.status !== 200 || !first.body.two_factor_required) return { first, challenge: '' };
+    const user = first.body;
+    return { first, challenge: user.challenge_token };
+}
+
+test('兩步驟驗證（A-1）：設定 → 啟用 → 登入要兩步 → 中間權杖不能拿來用 → 備援碼只能用一次', async (t) => {
+    const { app, base, store } = startServer(t);
+    const manager = await login(base, 'manager');
+
+    /* 未啟用前：登入只要密碼 */
+    const before = await login(base, 'teacher');
+    assert.equal(before.status, 200);
+    assert.equal(Boolean(before.body.two_factor_required), false);
+
+    /* 老師自己設定 2FA（可選，不強制） */
+    const setup = await api(base, '/api/auth/2fa/setup', { method: 'POST', cookie: (await login(base, 'teacher')).cookie });
+    assert.equal(setup.status, 200);
+    assert.match(setup.data.secret, /^[A-Z2-7]+=*$/);
+    assert.match(setup.data.otpauth_url, /^otpauth:\/\/totp\//);
+    assert.equal(store.findUserByUsername('teacher').totp_enabled_at || null, null, '還沒驗碼不算啟用');
+
+    /* 錯的碼不能啟用 */
+    const wrongEnable = await api(base, '/api/auth/2fa/enable', { method: 'POST', cookie: before.cookie, body: { code: '000000' } });
+    assert.equal(wrongEnable.status, 400);
+    assert.equal(wrongEnable.data.code, 'TWO_FACTOR_INVALID');
+
+    const secret = setup.data.secret;
+    const enabled = await api(base, '/api/auth/2fa/enable', {
+        method: 'POST', cookie: before.cookie, body: { code: Totp.codeAt(secret, Date.now() / 1000) }
+    });
+    assert.equal(enabled.status, 200);
+    assert.equal(enabled.data.backup_codes.length, 8, '備援碼只回這一次');
+    assert.equal(Array.isArray(store.findUserByUsername('teacher').backup_codes), true);
+
+    /* 密鑰在資料庫裡是密文 */
+    const stored = store.findUserByUsername('teacher').totp_secret;
+    assert.equal(stored.includes(secret), false, '資料庫不可以存明文密鑰');
+    assert.equal(Totp.decryptSecret(stored, secretKeyOf()), secret);
+
+    /* 登入第一步：只回中間權杖，不給 cookie */
+    const step1 = await login(base, 'teacher');
+    assert.equal(step1.status, 200);
+    assert.equal(step1.body.two_factor_required, true);
+    assert.equal(step1.cookie, '', '第一步不可以發登入 cookie');
+    const challenge = step1.body.challenge_token;
+
+    /* ★ 中間權杖不能當登入憑證用（拿它去呼叫需要登入的端點一律 401） */
+    assert.equal((await api(base, '/api/auth/me', { cookie: `pd_token=${challenge}` })).status, 401);
+    assert.equal((await api(base, '/api/admin/users', { cookie: `pd_token=${challenge}` })).status, 401);
+    assert.equal((await api(base, '/api/auth/2fa/setup', { method: 'POST', cookie: `pd_token=${challenge}` })).status, 401);
+
+    /* 第二步：錯的碼 401、對的碼登入成功 */
+    const badCode = await api(base, '/api/auth/login/2fa', { method: 'POST', body: { challenge_token: challenge, code: '000000' } });
+    assert.equal(badCode.status, 401);
+    assert.equal(badCode.data.code, 'TWO_FACTOR_INVALID');
+    const step2 = await api(base, '/api/auth/login/2fa', {
+        method: 'POST', body: { challenge_token: challenge, code: Totp.codeAt(secret, Date.now() / 1000) }
+    });
+    assert.equal(step2.status, 200);
+    assert.equal(step2.data.user.username, 'teacher');
+    assert.match(step2.headers.getSetCookie().join('; '), /pd_token=/);
+
+    /* 過期／亂改的中間權杖要擋 */
+    const shortChallenge = await login(base, 'teacher');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const forged = `${challenge}x`;
+    assert.equal((await api(base, '/api/auth/login/2fa', { method: 'POST', body: { challenge_token: forged, code: '123456' } })).status, 400);
+    assert.equal((await api(base, '/api/auth/login/2fa', { method: 'POST', body: { challenge_token: 'garbage', code: '123456' } })).status, 400);
+    assert.ok(shortChallenge.body.challenge_token);
+
+    /* 備援碼：可以用一次，第二次就不行 */
+    const backup = enabled.data.backup_codes[0];
+    const byBackup = await api(base, '/api/auth/login/2fa', {
+        method: 'POST', body: { challenge_token: challenge, backup_code: backup }
+    });
+    assert.equal(byBackup.status, 200, '備援碼可以登入');
+    const again = await login(base, 'teacher');
+    const reused = await api(base, '/api/auth/login/2fa', {
+        method: 'POST', body: { challenge_token: again.body.challenge_token, backup_code: backup }
+    });
+    assert.equal(reused.status, 401, '同一組備援碼不能重複使用');
+
+    /* 6 位碼只有一百萬種：錯太多次要被節流 */
+    let limited = false;
+    for (let i = 0; i < 12; i += 1) {
+        const res = await api(base, '/api/auth/login/2fa', {
+            method: 'POST', body: { challenge_token: again.body.challenge_token, code: '111111' }
+        });
+        if (res.status === 429) limited = true;
+    }
+    assert.equal(limited, true, '連續錯的驗證碼要被節流');
+
+    /* 使用者自己可以關掉（要目前的密碼） */
+    const teacherCookie = step2.headers.getSetCookie().map((line) => line.split(';')[0]).join('; ');
+    assert.equal((await api(base, '/api/auth/2fa/disable', { method: 'POST', cookie: teacherCookie, body: { password: 'wrong-pass' } })).status, 400);
+    assert.equal((await api(base, '/api/auth/2fa/disable', { method: 'POST', cookie: teacherCookie, body: { password: PASSWORD } })).status, 200);
+    assert.equal((await login(base, 'teacher')).body.two_factor_required || false, false, '關掉之後登入回到只要密碼');
+
+    const actions = store.listAuditLogs({ limit: 30 }).items.map((row) => row.action);
+    assert.ok(actions.includes('TWO_FA_ENABLE') && actions.includes('TWO_FA_DISABLE'), actions.join(','));
+    assert.ok(manager.status === 200);
+});
+
+test('工作階段（A-10）：改密碼會登出其他裝置但自己這台還在；web_manager 可以讓某人所有裝置登出', async (t) => {
+    const { base, ids, store } = startServer(t);
+
+    /* 同一個老師在兩台裝置登入 */
+    const deviceA = await login(base, 'teacher');
+    const deviceB = await login(base, 'teacher');
+    assert.equal((await api(base, '/api/auth/me', { cookie: deviceB.cookie })).status, 200);
+
+    /* A 改密碼 → B 的權杖立刻失效、A 拿到新權杖繼續用 */
+    const changed = await api(base, '/api/auth/change-password', {
+        method: 'POST', cookie: deviceA.cookie, body: { current_password: PASSWORD, new_password: 'newteacher123' }
+    });
+    assert.equal(changed.status, 200);
+    const freshCookie = changed.headers.getSetCookie().map((line) => line.split(';')[0]).join('; ');
+    assert.equal((await api(base, '/api/auth/me', { cookie: deviceB.cookie })).status, 401, '舊裝置要被登出');
+    assert.equal((await api(base, '/api/auth/me', { cookie: freshCookie })).data.user.username, 'teacher', '自己這台換新權杖，不用重新登入');
+    assert.equal((await login(base, 'teacher', PASSWORD)).status, 401, '舊密碼失效');
+    assert.equal((await login(base, 'teacher', 'newteacher123')).status, 200);
+
+    /* web_manager 一鍵登出某個人的所有裝置 */
+    const teacherId = store.findUserByUsername('teacher').id;
+    const teacherDevice = await login(base, 'teacher', 'newteacher123');
+    const webmanager = await login(base, 'webmanager');
+    const admin = await login(base, 'manager');
+
+    /* admin 不行（使用者指定：只有 web_manager 可以） */
+    const byAdmin = await api(base, `/api/admin/users/${teacherId}`, {
+        method: 'PATCH', cookie: admin.cookie, body: { force_logout: true }
+    });
+    assert.equal(byAdmin.status, 403);
+    assert.equal(byAdmin.data.code, 'FORCE_LOGOUT_FORBIDDEN');
+
+    const byWebManager = await api(base, `/api/admin/users/${teacherId}`, {
+        method: 'PATCH', cookie: webmanager.cookie, body: { force_logout: true }
+    });
+    assert.equal(byWebManager.status, 200);
+    assert.equal(byWebManager.data.forced_logout, true);
+    assert.equal((await api(base, '/api/auth/me', { cookie: teacherDevice.cookie })).status, 401, '被強制登出');
+
+    /* 一般登出只登出自己那一台（使用者指定） */
+    const other = await login(base, 'teacher', 'newteacher123');
+    const thisOne = await login(base, 'teacher', 'newteacher123');
+    await api(base, '/api/auth/logout', { method: 'POST', cookie: thisOne.cookie });
+    assert.equal((await api(base, '/api/auth/me', { cookie: other.cookie })).status, 200, '另一台不受影響');
+
+    const actions = store.listAuditLogs({ limit: 40 }).items.map((row) => row.action);
+    assert.ok(actions.includes('USER_FORCE_LOGOUT'), actions.join(','));
+    assert.ok(ids);
+});
+
+test('密碼政策（A-8）：新設定的密碼最少 10 碼（三個入口都要擋）', async (t) => {
+    const { base, store } = startServer(t);
+    const manager = await login(base, 'manager');
+
+    const created = await api(base, '/api/admin/users', {
+        method: 'POST', cookie: manager.cookie, body: { username: 'shortuser', password: 'ninechars', role: 'teacher' }
+    });
+    assert.equal(created.status, 400);
+    assert.equal(created.data.code, 'PASSWORD_LENGTH');
+    assert.equal(String(created.data.error).includes('10'), true, '訊息要說明最少幾碼');
+
+    const teacherId = store.findUserByUsername('teacher').id;
+    const patched = await api(base, `/api/admin/users/${teacherId}`, {
+        method: 'PATCH', cookie: manager.cookie, body: { password: 'short' }
+    });
+    assert.equal(patched.status, 400);
+    assert.equal(patched.data.code, 'PASSWORD_LENGTH');
+
+    const teacher = await login(base, 'teacher');
+    const selfChange = await api(base, '/api/auth/change-password', {
+        method: 'POST', cookie: teacher.cookie, body: { current_password: PASSWORD, new_password: 'ninechars' }
+    });
+    assert.equal(selfChange.status, 400);
+    assert.equal(selfChange.data.code, 'PASSWORD_LENGTH');
+
+    /* 剛好 10 碼可以 */
+    assert.equal((await api(base, '/api/auth/change-password', {
+        method: 'POST', cookie: teacher.cookie, body: { current_password: PASSWORD, new_password: '0123456789' }
+    })).status, 200);
+});
+
+test('新裝置登入（A-8）：來源不同會單獨留一筆稽核並在回應標記', async (t) => {
+    const { app, base, store } = startServer(t);
+    const first = await login(base, 'teacher');
+    assert.equal(first.body.new_device || false, false, '第一次登入沒有「上次」可比，不算新裝置');
+
+    /* 換一個瀏覽器字串 = 不同裝置 */
+    const second = await api(base, '/api/auth/login', {
+        method: 'POST',
+        headers: { 'User-Agent': 'AnotherBrowser/1.0' },
+        body: { username: 'teacher', password: PASSWORD }
+    });
+    assert.equal(second.status, 200);
+    assert.equal(second.data.new_device, true);
+
+    const rows = store.listAuditLogs({ limit: 20 }).items.filter((row) => row.action === 'LOGIN_NEW_DEVICE');
+    assert.equal(rows.length, 1);
+    assert.match(rows[0].details, /新裝置登入/);
+    assert.equal(store.findUserByUsername('teacher').last_login_agent, 'AnotherBrowser/1.0');
+});
+
+test('帳號救援（C-3）：管理員重設密碼（臨時密碼只回一次、舊工作階段失效）與重設兩步驟驗證', async (t) => {
+    const { base, store } = startServer(t);
+    const manager = await login(base, 'manager');
+    const teacherId = store.findUserByUsername('teacher').id;
+    const teacherDevice = await login(base, 'teacher');
+
+    const reset = await api(base, `/api/admin/users/${teacherId}/reset-password`, { method: 'POST', cookie: manager.cookie });
+    assert.equal(reset.status, 200);
+    assert.equal(reset.data.username, 'teacher');
+    assert.ok(reset.data.temp_password.length >= 10, '臨時密碼要符合政策');
+    assert.equal((await login(base, 'teacher', reset.data.temp_password)).status, 200, '臨時密碼可以登入');
+    assert.equal((await api(base, '/api/auth/me', { cookie: teacherDevice.cookie })).status, 401, '重設密碼後舊工作階段失效');
+
+    /* 重設兩步驟驗證（先幫老師開起來） */
+    const teacherLogin = await login(base, 'teacher', reset.data.temp_password);
+    const setup = await api(base, '/api/auth/2fa/setup', { method: 'POST', cookie: teacherLogin.cookie });
+    await api(base, '/api/auth/2fa/enable', {
+        method: 'POST', cookie: teacherLogin.cookie, body: { code: Totp.codeAt(setup.data.secret, Date.now() / 1000) }
+    });
+    assert.equal(store.findUserByUsername('teacher').totp_enabled_at !== null, true);
+    assert.equal((await login(base, 'teacher', reset.data.temp_password)).body.two_factor_required, true);
+
+    const cleared = await api(base, `/api/admin/users/${teacherId}/reset-2fa`, { method: 'POST', cookie: manager.cookie });
+    assert.equal(cleared.status, 200);
+    assert.equal(cleared.data.user.two_factor, false);
+    assert.equal(store.findUserByUsername('teacher').totp_enabled_at, null);
+    assert.equal((await login(base, 'teacher', reset.data.temp_password)).body.two_factor_required || false, false, '重設後回到只要密碼');
+
+    /* 不能重設比自己高的角色（老師不能碰管理員） */
+    const teacherOnManager = await api(base, `/api/admin/users/${store.findUserByUsername('manager').id}/reset-password`, {
+        method: 'POST', cookie: teacherLogin.cookie
+    });
+    assert.equal(teacherOnManager.status, 403);
+
+    const actions = store.listAuditLogs({ limit: 40 }).items.map((row) => row.action);
+    assert.ok(actions.includes('USER_PASSWORD_RESET') && actions.includes('USER_2FA_RESET') && actions.includes('TWO_FA_ENABLE'), actions.join(','));
 });

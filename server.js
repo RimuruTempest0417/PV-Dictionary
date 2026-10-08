@@ -21,7 +21,8 @@ const { createErrorLog } = require('./lib/errorlog');
 const { createThrottle } = require('./lib/throttle');
 const SelfTest = require('./lib/selftest');
 const RequestContext = require('./lib/requestcontext');
-const { verifyPassword, hashPassword, needsPasswordUpgrade } = require('./lib/passwords');
+const { verifyPassword, hashPassword, needsPasswordUpgrade, passwordProblem, generateTempPassword, PASSWORD_MIN } = require('./lib/passwords');
+const Totp = require('./lib/totp');
 
 const PACKAGE = require('./package.json');
 
@@ -157,7 +158,9 @@ function publicUser(user) {
         role_label: Roles.roleLabel(user.role),
         is_active: user.is_active !== false,
         last_login_at: user.last_login_at || null,
-        created_at: user.created_at || null
+        created_at: user.created_at || null,
+        /* 只回「有沒有開兩步驟驗證」，永遠不回密鑰或備援碼 */
+        two_factor: Boolean(user.totp_secret && user.totp_enabled_at)
     };
 }
 
@@ -317,9 +320,13 @@ function createApp(options = {}) {
         const token = Auth.tokenFromRequest(req);
         if (token) {
             const payload = Auth.verifyToken(token);
-            if (payload) {
+            /* ★ 兩種權杖一律當成未登入：
+             *   1. stage 存在 → 那是登入流程中間的權杖（兩步驟驗證第一步），不是登入憑證
+             *   2. ver 與使用者目前的 token_version 不符 → 改過密碼／被強制登出，舊權杖失效 */
+            if (payload && !payload.stage) {
                 const user = store.getUser(payload.sub);
-                if (user && user.is_active !== false) req.user = user;
+                const versionOk = Number(payload.ver || 1) === Number(user ? (user.token_version || 1) : 0);
+                if (user && user.is_active !== false && versionOk) req.user = user;
             }
         }
         next();
@@ -494,16 +501,53 @@ function createApp(options = {}) {
             return res.status(401).json({ error: msg('LOGIN_FAILED'), code: 'LOGIN_FAILED' });
         }
 
-        // 舊格式（明碼）登入成功時順手升級成 scrypt
-        if (needsPasswordUpgrade(user.password_hash)) {
-            store.updateUser(user.id, { password_hash: hashPassword(password) });
+        /* 兩步驟驗證（A-1）：密碼對了還不算登入 —— 這裡只發一張 5 分鐘的中間權杖，
+         * 它不能拿來呼叫任何 API（中介層看到 stage 一律當成未登入）。 */
+        if (hasTwoFactor(user)) {
+            clearFailures(ip, username);
+            return res.json({
+                two_factor_required: true,
+                challenge_token: Auth.signToken(user, { stage: '2fa', ttlSeconds: Auth.CHALLENGE_TTL_SECONDS })
+            });
         }
-        store.updateUser(user.id, { last_login_at: new Date().toISOString() });
-        clearFailures(ip, username);
-        Auth.setAuthCookie(res, Auth.signToken(user));
-        logAudit(store, { user, action: 'LOGIN', details: '登入成功', ip });
-        const fresh = store.getUser(user.id);
-        return res.json({ user: publicUser(fresh), token_type: 'cookie' });
+
+        return finishLogin(req, res, user, password, ip);
+    });
+
+    /* 兩步驟驗證第二步：中間權杖 + 6 位碼（或一組備援碼）→ 真的登入 */
+    app.post('/api/auth/login/2fa', (req, res) => {
+        const body = req.body || {};
+        const challenge = typeof body.challenge_token === 'string' ? body.challenge_token : '';
+        const code = str(body.code, 10);
+        const backupCode = str(body.backup_code, 20);
+        const payload = challenge ? Auth.verifyToken(challenge) : null;
+        if (!payload || payload.stage !== '2fa' || !payload.sub) {
+            return res.status(400).json({ error: msg('TWO_FACTOR_SESSION'), code: 'TWO_FACTOR_SESSION' });
+        }
+        /* 6 位碼只有一百萬種組合：一定要節流（比密碼更需要） */
+        const gate = throttle.allow(`2fa|${req.ip || ''}|${payload.sub}`, 10, 5 * 60 * 1000);
+        if (!gate.allowed) {
+            res.setHeader('Retry-After', String(Math.ceil(gate.retryAfterMs / 1000)));
+            return res.status(429).json({ error: msg('RATE_LIMITED'), code: 'RATE_LIMITED' });
+        }
+        const target = store.getUser(payload.sub);
+        if (!target || target.is_active === false || !hasTwoFactor(target)) {
+            return res.status(400).json({ error: msg('TWO_FACTOR_NOT_ENABLED'), code: 'TWO_FACTOR_NOT_ENABLED' });
+        }
+        const secret = Totp.decryptSecret(target.totp_secret, secretKey());
+        let verified = false;
+        if (code && secret) verified = Totp.verifyCode(secret, code);
+        if (!verified && backupCode) {
+            const used = Totp.consumeBackupCode(target.backup_codes, backupCode, secretKey());
+            if (used.ok) {
+                store.updateUser(target.id, { backup_codes: used.remaining });
+                verified = true;
+            }
+        }
+        if (!verified) {
+            return res.status(401).json({ error: msg('TWO_FACTOR_INVALID'), code: 'TWO_FACTOR_INVALID' });
+        }
+        return finishLogin(req, res, store.getUser(target.id), '', req.ip || 'unknown');
     });
 
     app.post('/api/auth/logout', (req, res) => {
@@ -530,6 +574,150 @@ function createApp(options = {}) {
 
     /* 任何已登入的人都可以改「自己的」密碼（要知道目前的密碼）。
      * 管理員在帳號管理面板改別人的密碼走 /api/admin/users/:id。 */
+    /* ---------------- 兩步驟驗證與帳號安全的共用工具（A-1／A-8／A-10／C-3） ---------------- */
+    function hasTwoFactor(user) {
+        return Boolean(user && user.totp_secret && user.totp_enabled_at);
+    }
+
+    /* TOTP 密鑰的加密金鑰由 JWT_SECRET 衍生（見 lib/totp.js）。
+     * 換 JWT_SECRET 等於要重新綁定 2FA —— 這個代價寫在 docs/金鑰輪替.md 裡。 */
+    function secretKey() {
+        try {
+            return Auth.resolveJwtSecret();
+        } catch (err) {
+            return '';
+        }
+    }
+
+    function bumpTokenVersion(user) {
+        return (Number(user && user.token_version) || 1) + 1;
+    }
+
+    /* 登入成功後的共同收尾（密碼登入與兩步驟驗證第二步都會走這裡） */
+    function finishLogin(req, res, user, password, ip) {
+        if (password && needsPasswordUpgrade(user.password_hash)) {
+            store.updateUser(user.id, { password_hash: hashPassword(password) });
+        }
+        const agent = String(req.headers['user-agent'] || '').slice(0, 200);
+        const previousIp = String(user.last_login_ip || '');
+        const previousAgent = String(user.last_login_agent || '');
+        const knownDevice = Boolean(previousIp) && previousIp === ip && previousAgent === agent;
+        store.updateUser(user.id, {
+            last_login_at: new Date().toISOString(),
+            last_login_ip: ip,
+            last_login_agent: agent
+        });
+        clearFailures(ip, user.username);
+        const fresh = store.getUser(user.id);
+        Auth.setAuthCookie(res, Auth.signToken(fresh));
+        logAudit(store, { user: fresh, action: 'LOGIN', details: '登入成功', ip });
+        /* A-8：來源（IP + 瀏覽器）與上次不同就單獨留一筆 —— 管理員追查異常登入時看得到 */
+        const newDevice = !knownDevice && Boolean(previousIp || previousAgent);
+        if (newDevice) {
+            logAudit(store, {
+                user: fresh,
+                action: 'LOGIN_NEW_DEVICE',
+                targetId: fresh.id,
+                details: `新裝置登入：${ip}｜${agent.slice(0, 60)}`,
+                ip
+            });
+        }
+        const response = { user: publicUser(fresh), token_type: 'cookie' };
+        if (newDevice) response.new_device = true;    /* 前端顯示一次提示（不是錯誤，只是提醒） */
+        return res.json(response);
+    }
+
+    /* ---- 兩步驟驗證：可選、不強制（使用者指定） ---- */
+    app.post('/api/auth/2fa/setup', requireAuth, (req, res) => {
+        const key = secretKey();
+        if (!key) return res.status(503).json({ error: msg('SERVER'), code: 'SERVER' });
+        const secret = Totp.generateSecret();
+        /* 先寫進使用者但**還不算啟用**（totp_enabled_at 仍是空的）→ 驗過一次碼才啟用 */
+        store.updateUser(req.user.id, { totp_secret: Totp.encryptSecret(secret, key) });
+        return res.json({
+            secret,
+            otpauth_url: Totp.otpauthURL(secret, req.user.username),
+            digits: Totp.DIGITS,
+            period: Totp.STEP_SECONDS
+        });
+    });
+
+    app.post('/api/auth/2fa/enable', requireAuth, (req, res) => {
+        const key = secretKey();
+        const code = str((req.body || {}).code, 10);
+        const secret = Totp.decryptSecret(req.user.totp_secret, key);
+        if (!secret) return res.status(400).json({ error: msg('TWO_FACTOR_NOT_ENABLED'), code: 'TWO_FACTOR_NOT_ENABLED' });
+        if (!Totp.verifyCode(secret, code)) {
+            return res.status(400).json({ error: msg('TWO_FACTOR_INVALID'), code: 'TWO_FACTOR_INVALID' });
+        }
+        const codes = Totp.generateBackupCodes();
+        store.updateUser(req.user.id, {
+            totp_enabled_at: new Date().toISOString(),
+            backup_codes: codes.map((code_) => Totp.hashBackupCode(code_, key))
+        });
+        logAudit(store, {
+            user: req.user, action: 'TWO_FA_ENABLE', targetId: req.user.id,
+            details: req.user.username, ip: req.ip
+        });
+        /* 備援碼只回這一次：畫面要提醒使用者抄下來，資料庫裡只有雜湊 */
+        return res.json({ ok: true, backup_codes: codes });
+    });
+
+    app.post('/api/auth/2fa/disable', requireAuth, (req, res) => {
+        if (!hasTwoFactor(req.user)) {
+            return res.status(400).json({ error: msg('TWO_FACTOR_NOT_ENABLED'), code: 'TWO_FACTOR_NOT_ENABLED' });
+        }
+        const body = req.body || {};
+        const password = typeof body.password === 'string' ? body.password : '';
+        const code = str(body.code, 10);
+        const secret = Totp.decryptSecret(req.user.totp_secret, secretKey());
+        const byPassword = Boolean(password) && verifyPassword(req.user.password_hash, password);
+        const byCode = Boolean(secret) && Totp.verifyCode(secret, code);
+        if (!byPassword && !byCode) {
+            return res.status(400).json({ error: msg('CURRENT_PASSWORD_WRONG'), code: 'CURRENT_PASSWORD_WRONG' });
+        }
+        store.updateUser(req.user.id, { totp_secret: '', totp_enabled_at: null, backup_codes: null });
+        logAudit(store, {
+            user: req.user, action: 'TWO_FA_DISABLE', targetId: req.user.id,
+            details: req.user.username, ip: req.ip
+        });
+        return res.json({ ok: true });
+    });
+
+    /* ---- 帳號救援（C-3）：管理員幫老師重設密碼／重設兩步驟驗證 ---- */
+    app.post('/api/admin/users/:id/reset-password', requireRole('admin'), (req, res) => {
+        const target = store.getUser(req.params.id);
+        if (!target) return res.status(404).json({ error: msg('USER_NOT_FOUND'), code: 'USER_NOT_FOUND' });
+        if (!Roles.canManageUser(req.user, target)) {
+            return res.status(403).json({ error: msg('USER_MANAGE_FORBIDDEN'), code: 'USER_MANAGE_FORBIDDEN' });
+        }
+        const temp = generateTempPassword();
+        store.updateUser(target.id, {
+            password_hash: hashPassword(temp),
+            token_version: bumpTokenVersion(target)      /* 舊的工作階段全部失效 */
+        });
+        logAudit(store, {
+            user: req.user, action: 'USER_PASSWORD_RESET', targetId: target.id,
+            details: `${target.username}：重設為臨時密碼`, ip: req.ip
+        });
+        /* 臨時密碼只回這一次：不寫稽核、不寫日誌 */
+        return res.json({ ok: true, username: target.username, temp_password: temp });
+    });
+
+    app.post('/api/admin/users/:id/reset-2fa', requireRole('admin'), (req, res) => {
+        const target = store.getUser(req.params.id);
+        if (!target) return res.status(404).json({ error: msg('USER_NOT_FOUND'), code: 'USER_NOT_FOUND' });
+        if (!Roles.canManageUser(req.user, target)) {
+            return res.status(403).json({ error: msg('USER_MANAGE_FORBIDDEN'), code: 'USER_MANAGE_FORBIDDEN' });
+        }
+        store.updateUser(target.id, { totp_secret: '', totp_enabled_at: null, backup_codes: null });
+        logAudit(store, {
+            user: req.user, action: 'USER_2FA_RESET', targetId: target.id,
+            details: `${target.username}：重設兩步驟驗證`, ip: req.ip
+        });
+        return res.json({ ok: true, user: publicUser(store.getUser(target.id)) });
+    });
+
     app.post('/api/auth/change-password', (req, res) => {
         if (!req.user) return res.status(401).json({ error: msg('AUTH_REQUIRED'), code: 'AUTH_REQUIRED' });
         const body = req.body || {};
@@ -538,13 +726,18 @@ function createApp(options = {}) {
         if (!verifyPassword(req.user.password_hash, current)) {
             return res.status(400).json({ error: msg('CURRENT_PASSWORD_WRONG'), code: 'CURRENT_PASSWORD_WRONG' });
         }
-        if (next.length < 6 || next.length > 64) {
-            return res.status(400).json({ error: msg('PASSWORD_LENGTH'), code: 'PASSWORD_LENGTH' });
+        if (passwordProblem(next)) {
+            return res.status(400).json({ error: msg('PASSWORD_LENGTH', { min: PASSWORD_MIN }), code: 'PASSWORD_LENGTH' });
         }
-        store.updateUser(req.user.id, { password_hash: hashPassword(next) });
+        /* 改密碼＝其他裝置的舊工作階段全部失效（A-10）；自己這一台換一張新權杖，不用重新登入 */
+        store.updateUser(req.user.id, {
+            password_hash: hashPassword(next),
+            token_version: bumpTokenVersion(req.user)
+        });
+        Auth.setAuthCookie(res, Auth.signToken(store.getUser(req.user.id)));
         logAudit(store, {
             user: req.user, action: 'PASSWORD_CHANGE', targetId: req.user.id,
-            details: req.user.username, ip: req.ip
+            details: `${req.user.username}（其他裝置已登出）`, ip: req.ip
         });
         return res.json({ ok: true });
     });
@@ -1040,8 +1233,8 @@ function createApp(options = {}) {
         if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) {
             return res.status(400).json({ error: msg('USERNAME_FORMAT'), code: 'USERNAME_FORMAT' });
         }
-        if (password.length < 6 || password.length > 64) {
-            return res.status(400).json({ error: msg('PASSWORD_LENGTH'), code: 'PASSWORD_LENGTH' });
+        if (passwordProblem(password)) {
+            return res.status(400).json({ error: msg('PASSWORD_LENGTH', { min: PASSWORD_MIN }), code: 'PASSWORD_LENGTH' });
         }
         if (!Roles.canCreateRole(req.user, role)) {
             return res.status(403).json({ error: msg('ROLE_CREATE_FORBIDDEN'), code: 'ROLE_CREATE_FORBIDDEN' });
@@ -1073,6 +1266,7 @@ function createApp(options = {}) {
         if (isSelf && (body.role !== undefined || body.is_active !== undefined)) {
             return res.status(403).json({ error: msg('USER_MANAGE_FORBIDDEN'), code: 'USER_MANAGE_FORBIDDEN' });
         }
+        const forceLogout = body.force_logout !== undefined && boolish(body.force_logout, false);
         const patch = {};
         if (body.display_name !== undefined) patch.display_name = str(body.display_name, LIMITS.display_name);
         if (body.is_active !== undefined) {
@@ -1084,10 +1278,19 @@ function createApp(options = {}) {
         }
         if (body.password !== undefined) {
             const password = String(body.password);
-            if (password.length < 6 || password.length > 64) {
-                return res.status(400).json({ error: msg('PASSWORD_LENGTH'), code: 'PASSWORD_LENGTH' });
+            if (passwordProblem(password)) {
+                return res.status(400).json({ error: msg('PASSWORD_LENGTH', { min: PASSWORD_MIN }), code: 'PASSWORD_LENGTH' });
             }
             patch.password_hash = hashPassword(password);
+            patch.token_version = bumpTokenVersion(target);      /* 改別人的密碼＝把對方登出（A-10） */
+        }
+        /* web_manager 可以叫某個人「所有裝置一起登出」（使用者指定：一般登出只登出自己那一台） */
+        if (forceLogout) {
+            if (!Roles.atLeast(req.user.role, 'web_manager')) {
+                return res.status(403).json({ error: msg('FORCE_LOGOUT_FORBIDDEN'), code: 'FORCE_LOGOUT_FORBIDDEN' });
+            }
+            if (isSelf) return res.status(400).json({ error: msg('CANNOT_DELETE_SELF'), code: 'CANNOT_DELETE_SELF' });
+            patch.token_version = bumpTokenVersion(target);
         }
         if (body.role !== undefined) {
             if (!Roles.canCreateRole(req.user, body.role)) {
@@ -1100,14 +1303,23 @@ function createApp(options = {}) {
             patch.role = Roles.normalizeRole(body.role);
         }
         const updated = store.updateUser(target.id, patch);
+        /* 改的是自己的密碼（管理員在面板替自己改）：立刻換一張新權杖給自己，不然會把自己登出 */
+        if (isSelf && patch.password_hash) {
+            Auth.setAuthCookie(res, Auth.signToken(store.getUser(target.id)));
+        }
+        const labelOf = { display_name: '顯示名稱', is_active: '啟用狀態', password_hash: '密碼', role: '角色', token_version: '所有裝置登出' };
+        const changed = Object.keys(patch)
+            .filter((key) => key !== 'token_version' || forceLogout)
+            .map((key) => labelOf[key])
+            .filter(Boolean);
         logAudit(store, {
             user: req.user,
-            action: 'USER_UPDATE',
+            action: forceLogout ? 'USER_FORCE_LOGOUT' : 'USER_UPDATE',
             targetId: target.id,
-            details: `${target.username}：${Object.keys(patch).map((k) => ({ display_name: '顯示名稱', is_active: '啟用狀態', password_hash: '密碼', role: '角色' }[k])).join('、')}`,
+            details: `${target.username}：${changed.join('、')}`,
             ip: req.ip
         });
-        return res.json({ user: publicUser(updated) });
+        return res.json({ user: publicUser(updated), forced_logout: forceLogout });
     });
 
     app.delete('/api/admin/users/:id', requireRole('admin'), (req, res) => {

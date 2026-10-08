@@ -10,7 +10,7 @@ const path = require('node:path');
 const { createApp } = require('../../../server');
 const { hashPassword } = require('../../../lib/passwords');
 
-const PASSWORD = 'pass1234';
+const PASSWORD = 'pass123456';
 
 const STUBS = `
     window.__spoken = [];

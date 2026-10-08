@@ -6,6 +6,8 @@
     const errText = (err) => window.PDI18n.errorMessage(err);
 
     const state = {
+        twoFactorSetup: null,      /* 正在設定的 2FA 密鑰（畫面用，不落地） */
+        twoFactorCodes: [],        /* 剛開啟時顯示一次的備援碼 */
         books: [],
         units: [],
         entries: [],
@@ -281,6 +283,8 @@
         state.query = '';
         document.getElementById('searchInput').value = '';
         showView('shelf');
+        /* 回到書架＝沒有選取任何書本：管理區的按鈕與提示要立刻跟著變（與 backToUnits 同一個道理） */
+        window.PDAdmin.refreshAvailability();
     }
 
     function backToUnits() {
@@ -376,7 +380,95 @@
     }
 
     /* 修改自己的密碼（任何登入者都能用；要輸入目前的密碼） */
+    /* ---------------- 兩步驟驗證（A-1，v0.4.3） ---------------- */
+    function twoFactorUi() {
+        return {
+            state: document.getElementById('twoFactorState'),
+            setup: document.getElementById('twoFactorSetup'),
+            secret: document.getElementById('twoFactorSecret'),
+            code: document.getElementById('twoFactorCode'),
+            backupBox: document.getElementById('twoFactorBackupBox'),
+            backupCodes: document.getElementById('twoFactorBackupCodes'),
+            msg: document.getElementById('twoFactorMsg'),
+            startBtn: document.getElementById('twoFactorStartBtn'),
+            enableBtn: document.getElementById('twoFactorEnableBtn'),
+            disableBtn: document.getElementById('twoFactorDisableBtn')
+        };
+    }
+
+    function renderTwoFactor() {
+        const ui = twoFactorUi();
+        if (!ui.state) return;
+        const user = window.PDAuth.user;
+        const on = Boolean(user && user.two_factor);
+        const codes = Array.isArray(state.twoFactorCodes) ? state.twoFactorCodes : [];
+        ui.state.textContent = on
+            ? t('twoFactor.stateOn', { n: state.twoFactorBackupCount || 0 })
+            : t('twoFactor.stateOff');
+        ui.startBtn.hidden = on;
+        ui.disableBtn.hidden = !on;
+        ui.setup.hidden = !state.twoFactorSetup;
+        ui.backupBox.hidden = codes.length === 0;
+        if (state.twoFactorSetup && state.twoFactorSetup.secret) {
+            ui.secret.textContent = state.twoFactorSetup.secret;
+        }
+        if (codes.length) ui.backupCodes.textContent = codes.join('  ·  ');
+    }
+
+    async function startTwoFactorSetup() {
+        const ui = twoFactorUi();
+        try {
+            const data = await api.post('/api/auth/2fa/setup', {});
+            state.twoFactorSetup = { secret: data.secret, otpauth_url: data.otpauth_url };
+            state.twoFactorCodes = [];
+            setFormMessage(ui.msg, t('twoFactor.setupNote'), 'ok');
+            renderTwoFactor();
+            ui.code.value = '';
+            ui.code.focus();
+        } catch (err) {
+            setFormMessage(ui.msg, window.PDI18n.errorMessage(err), 'error');
+        }
+    }
+
+    async function enableTwoFactor() {
+        const ui = twoFactorUi();
+        const code = ui.code.value.trim();
+        if (!code) return setFormMessage(ui.msg, t('twoFactor.code'), 'error');
+        try {
+            const data = await api.post('/api/auth/2fa/enable', { code });
+            state.twoFactorCodes = data.backup_codes || [];
+            state.twoFactorSetup = null;
+            window.PDAuth.state.user = Object.assign({}, window.PDAuth.user, { two_factor: true });
+            setFormMessage(ui.msg, t('twoFactor.enabled'), 'ok');
+            toast(t('twoFactor.copied'));
+            renderTwoFactor();
+        } catch (err) {
+            setFormMessage(ui.msg, window.PDI18n.errorMessage(err), 'error');
+        }
+    }
+
+    async function disableTwoFactor() {
+        const ui = twoFactorUi();
+        const password = document.getElementById('currentPassword').value;
+        if (!password) return setFormMessage(ui.msg, t('password.current'), 'error');
+        try {
+            await api.post('/api/auth/2fa/disable', { password });
+            window.PDAuth.state.user = Object.assign({}, window.PDAuth.user, { two_factor: false });
+            state.twoFactorSetup = null;
+            state.twoFactorCodes = [];
+            setFormMessage(ui.msg, t('twoFactor.disabled'), 'ok');
+            renderTwoFactor();
+        } catch (err) {
+            setFormMessage(ui.msg, window.PDI18n.errorMessage(err), 'error');
+        }
+    }
+
     function openPasswordModal() {
+        state.twoFactorSetup = null;
+        state.twoFactorCodes = [];
+        const ui = twoFactorUi();
+        if (ui.msg) setFormMessage(ui.msg, '');
+        renderTwoFactor();
         document.getElementById('passwordModal').hidden = false;
         document.getElementById('currentPassword').value = '';
         document.getElementById('newPassword').value = '';
@@ -409,23 +501,55 @@
         }
     }
 
+    function setLoginTwoFactor(active) {
+        const block = document.getElementById('login2faBlock');
+        const code = document.getElementById('login2faCode');
+        const submit = document.getElementById('loginSubmitBtn');
+        block.hidden = !active;
+        if (submit) submit.textContent = active ? t('login.twoFactorCode') : t('login.submit');
+        if (active) {
+            code.value = '';
+            code.focus();
+        } else {
+            code.value = '';
+        }
+    }
+
     function closeLoginModal() {
         document.getElementById('loginModal').hidden = true;
         document.getElementById('loginPassword').value = '';
+        setLoginTwoFactor(false);
+        window.PDAuth.state.challenge = '';
     }
 
     async function doLogin(event) {
         event.preventDefault();
         const msg = document.getElementById('loginMsg');
+        const twoFactorActive = document.getElementById('login2faBlock').hidden === false;
         try {
-            await window.PDAuth.login(
-                document.getElementById('loginUsername').value.trim(),
-                document.getElementById('loginPassword').value
-            );
+            if (twoFactorActive) {
+                await window.PDAuth.loginTwoFactor(document.getElementById('login2faCode').value);
+            } else {
+                const result = await window.PDAuth.login(
+                    document.getElementById('loginUsername').value.trim(),
+                    document.getElementById('loginPassword').value
+                );
+                /* 這個帳號開了兩步驟驗證：留在同一個彈窗，請使用者輸入驗證碼 */
+                if (result && result.two_factor_required) {
+                    setLoginTwoFactor(true);
+                    setFormMessage(msg, t('login.twoFactorNote'), 'ok');
+                    return;
+                }
+            }
             setFormMessage(msg, '');
             closeLoginModal();
             renderAuth();
             toast(t('login.welcome', { name: window.PDAuth.user.display_name, role: window.PDI18n.roleLabel(window.PDAuth.user.role) }));
+            /* A-8：來源與上次不同時提醒一次（不是錯誤，只是讓使用者有機會發現異常登入） */
+            if (window.PDAuth.state.newDevice) {
+                window.PDAuth.state.newDevice = false;
+                toast(t('login.newDevice'), 'error');
+            }
             await refreshAfterAuthChange();
         } catch (err) {
             setFormMessage(msg, window.PDI18n.errorMessage(err), 'error');
@@ -502,6 +626,9 @@
         document.getElementById('printBtn').addEventListener('click', () => window.print());
         document.getElementById('loginForm').addEventListener('submit', doLogin);
         document.getElementById('passwordForm').addEventListener('submit', submitPassword);
+        document.getElementById('twoFactorStartBtn').addEventListener('click', startTwoFactorSetup);
+        document.getElementById('twoFactorEnableBtn').addEventListener('click', enableTwoFactor);
+        document.getElementById('twoFactorDisableBtn').addEventListener('click', disableTwoFactor);
         document.getElementById('passwordCancelBtn').addEventListener('click', closePasswordModal);
         document.getElementById('passwordModal').addEventListener('click', (event) => {
             if (event.target.id === 'passwordModal') closePasswordModal();

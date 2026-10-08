@@ -3,7 +3,7 @@
 線上英文生字字典：學生**點書本封面 → 選單元 → 看生字表**（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.4.2（本機 Demo ＋ 線上版已上線）**
+- 目前版本：**v0.4.3（本機 Demo ＋ 線上版已上線）**
 - 規劃書（**待完成的事都在這**）：`docs/規劃書-待完成.md`｜決策與各版結果：`docs/規劃書-v0.0.1.md`｜部署：`docs/deploy-vercel.md`
 - 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie、介面預設英文可切中文
 - 線上：**已上線** https://pv-dictionary-mylearning.vercel.app （Vercel `pv-dictionary` ＋ Supabase；環境變數已設好）
@@ -111,7 +111,9 @@ Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-sout
 
 | 面向 | 做法 |
 |---|---|
-| 登入憑證 | JWT 放 HttpOnly + SameSite=Strict cookie（預設 12 小時）；也接受 `Authorization: Bearer` |
+| 登入憑證 | JWT 放 HttpOnly + SameSite=Strict cookie（預設 12 小時）；也接受 `Authorization: Bearer`；權杖帶 `token_version`，改密碼／強制登出後舊權杖立即失效 |
+| 兩步驟驗證 | **可選、不強制**（TOTP，RFC 6238）：任何人可在 🔑 彈窗自己開啟，8 組一次性備援碼，密鑰以 AES-256-GCM 加密後才存；開啟後登入分兩步，中間權杖不能呼叫 API |
+| 密碼政策 | 新設定的密碼最少 10 碼（三個入口都擋）；新裝置登入會單獨留一筆稽核並提醒使用者 |
 | CSRF | 不安全的方法一律檢查來源，且**只比對主機名**（反代後面 `req.protocol` 不可信，比 scheme 會誤擋自家請求） |
 | CSP | `default-src 'self'`、`script-src 'self'`、`style-src 'self'`（零行內樣式與事件）、`object-src 'none'`、`frame-src 'none'`、`worker-src 'self'`、`frame-ancestors 'none'`；`upgrade-insecure-requests` **只在 production** |
 | 其他標頭 | `X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy`、HSTS、`Cross-Origin-Opener-Policy`、`Permissions-Policy`（相機與麥克風只給自家、其餘全關） |
@@ -135,7 +137,10 @@ Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-sout
   從生字卡按「✏️ 編輯」時，管理區沒開會**自動打開並帶到那張表單**。
 - **修改單元**（v0.4.1）：目錄每一列右邊的 ✏️（老師以上）→ 自動打開管理區並帶入該單元的編號與名稱，
   名稱與編號都可以改（改編號會改變學生看到的順序）；編號重複或不是 1–99 會被擋（409／400），不會變成兩個 Unit 3。
-- **修改自己的密碼**：標題列的 🔑（任何登入者都能用，要輸入目前的密碼）；管理員也可以在帳號管理面板替任何人重設。
+- **修改自己的密碼 與 兩步驟驗證**：標題列的 🔑（任何登入者都能用）：改密碼要輸入目前的密碼（最少 10 碼，
+  改完其他裝置會登出、自己這台換新權杖）；同一個彈窗可以自己開啟／關閉兩步驟驗證。
+- **帳號救援**：「👥 帳號管理」可以替下級**產生一次性臨時密碼**（畫面顯示一次）、**重設兩步驟驗證**，
+  網站管理員還能按「登出所有裝置」（該帳號所有裝置一起登出，兩段式確認）。
   自己**不能**改自己的角色或停用自己（那是提權／自鎖），後端會擋。
 - **帳號管理**：建立帳號、改角色、重設密碼、停用／啟用、刪除（兩段式確認）。
 - **單元級授權**：授權某人在某本書或某個單元編輯（可加「也可以發佈」）。

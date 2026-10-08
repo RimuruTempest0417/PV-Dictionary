@@ -19,6 +19,9 @@
      * 因為每次重畫都會重建 DOM，狀態不能存在 DOM 上。 */
     let armed = null;            // 'user:3' | 'grant:7'
     let resetting = null;        // 正在重設密碼的使用者 id
+    /* v0.4.3：管理員產生的一次性臨時密碼（只顯示在畫面上，不寫任何儲存） */
+    let tempPassword = null;     // { id, username, password }
+    let forcingLogout = null;    // 正在執行「登出所有裝置」的使用者 id
     let formMode = null;         // 'create' | 'edit'
 
     function canSee() {
@@ -73,6 +76,32 @@
             }));
         }
         if (user.can_manage) {
+            /* 產生一次性臨時密碼（C-3）：管理員不必自己想密碼，也不用把密碼打進對話或紙上 */
+            buttons.push(el('button', {
+                class: 'btn btn-ghost btn-small',
+                text: t('users.tempPassword'),
+                attrs: { type: 'button', 'data-action': 'temp-password' },
+                on: { click: () => generateTempPassword(user) }
+            }));
+            /* 重設某人的兩步驟驗證（手機換了、遺失時的救援） */
+            if (user.two_factor) {
+                buttons.push(el('button', {
+                    class: 'btn btn-ghost btn-small',
+                    text: t('users.resetTwoFactor'),
+                    attrs: { type: 'button', 'data-action': 'reset-2fa' },
+                    on: { click: () => resetTwoFactor(user) }
+                }));
+            }
+            /* 只有 web_manager 能讓別人的所有裝置一起登出（使用者指定） */
+            if (!user.is_self && window.PDAuth.atLeast('web_manager')) {
+                const isForcing = forcingLogout === user.id;
+                buttons.push(el('button', {
+                    class: isForcing ? 'btn btn-danger btn-small' : 'btn btn-ghost btn-small',
+                    text: isForcing ? t('users.deleteConfirm') : t('users.forceLogout'),
+                    attrs: { type: 'button', 'data-action': 'force-logout' },
+                    on: { click: () => forceLogout(user, isForcing) }
+                }));
+            }
             buttons.push(el('button', {
                 class: 'btn btn-ghost btn-small',
                 text: user.is_active ? t('users.disable') : t('users.enable'),
@@ -87,6 +116,76 @@
             }));
         }
         return buttons;
+    }
+
+    /* 2FA 欄位：只顯示狀態，永遠不顯示密鑰或備援碼 */
+    function twoFactorCell(user) {
+        return el('span', {
+            class: user.two_factor ? 'cell-hint' : 'cell-hint',
+            text: user.two_factor ? t('users.twoFactorOn') : t('users.twoFactorOff'),
+            attrs: { 'data-two-factor': user.two_factor ? 'on' : 'off' }
+        });
+    }
+
+    /* 一次性臨時密碼：顯示到使用者按「關閉」為止（不會寫進任何儲存） */
+    function tempPasswordRow(user) {
+        return el('tr', { class: 'row-sub' }, [
+            el('td', { attrs: { colspan: '7' } }, [
+                el('div', { class: 'row-sub-inner' }, [
+                    el('span', { class: 'cell-hint', text: `${user.username} · ${t('users.tempPasswordNote')}` }),
+                    el('code', { class: 'secret-box', text: tempPassword.password, attrs: { 'data-field': 'temp-password' } }),
+                    el('button', {
+                        class: 'btn btn-ghost btn-small',
+                        text: t('entry.cancel'),
+                        attrs: { type: 'button', 'data-action': 'close-temp-password' },
+                        on: { click: () => { tempPassword = null; render(); } }
+                    })
+                ])
+            ])
+        ]);
+    }
+
+    async function generateTempPassword(user) {
+        try {
+            const data = await window.PDApi.post(`/api/admin/users/${user.id}/reset-password`, {});
+            tempPassword = { id: user.id, username: data.username || user.username, password: data.temp_password };
+            resetting = null;
+            await load();
+            render();
+            toast(t('users.tempPassword'));
+        } catch (err) {
+            toast(errText(err), 'error');
+        }
+    }
+
+    async function resetTwoFactor(user) {
+        try {
+            await window.PDApi.post(`/api/admin/users/${user.id}/reset-2fa`, {});
+            await load();
+            render();
+            toast(t('users.twoFactorReset'));
+        } catch (err) {
+            toast(errText(err), 'error');
+        }
+    }
+
+    /* 兩段式：第一次按進入確認狀態，第二次才真的執行 */
+    async function forceLogout(user, confirmed) {
+        if (!confirmed) {
+            forcingLogout = user.id;
+            render();
+            return;
+        }
+        try {
+            await window.PDApi.patch(`/api/admin/users/${user.id}`, { force_logout: true });
+            forcingLogout = null;
+            toast(t('users.forceLogoutDone'));
+        } catch (err) {
+            toast(errText(err), 'error');
+        } finally {
+            forcingLogout = null;
+            render();
+        }
     }
 
     function resetRow(user) {
@@ -134,8 +233,10 @@
                     text: user.is_active ? t('users.active') : t('users.inactive')
                 })]),
                 el('td', { text: user.last_login_at ? formatDateTime(user.last_login_at) : t('users.never') }),
+                el('td', {}, [twoFactorCell(user)]),
                 el('td', { class: 'cell-actions' }, actionButtons(user))
             ]));
+            if (tempPassword && tempPassword.id === user.id) body.appendChild(tempPasswordRow(user));
             if (resetting === user.id) body.appendChild(resetRow(user));
         }
         if (!state.users.length) {

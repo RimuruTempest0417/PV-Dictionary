@@ -7,8 +7,14 @@
         "GET /api/units/:id",
         "GET /api/audio/:id",
         "POST /api/auth/login",
+        "POST /api/auth/login/2fa",
         "POST /api/auth/logout",
         "GET /api/auth/me",
+        "POST /api/auth/2fa/setup",
+        "POST /api/auth/2fa/enable",
+        "POST /api/auth/2fa/disable",
+        "POST /api/admin/users/:id/reset-password",
+        "POST /api/admin/users/:id/reset-2fa",
         "POST /api/auth/change-password",
         "POST /api/units/:id/entries",
         "PATCH /api/entries/:id",
@@ -39,7 +45,7 @@
         "PATCH /api/admin/error-logs/:id"
     ],
     "counts": {
-        "routes": 37,
-        "layers": 46
+        "routes": 43,
+        "layers": 52
     }
 }

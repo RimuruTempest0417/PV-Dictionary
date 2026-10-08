@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="PV_Dictionary — an online English vocabulary dictionary: browse words by book and unit, with pronunciation, part of speech, Chinese and English meanings.">
-    <title>PV_Dictionary v0.4.2</title>
-    <link rel="icon" href="/img/favicon.svg?v=0.4.2" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.4.2">
-    <link rel="stylesheet" href="/css/tokens.css?v=0.4.2">
-    <link rel="stylesheet" href="/css/app.css?v=0.4.2">
-    <link rel="stylesheet" href="/css/print.css?v=0.4.2" media="print">
-    <script src="/js/analytics.js?v=0.4.2"></script>
+    <title>PV_Dictionary v0.4.3</title>
+    <link rel="icon" href="/img/favicon.svg?v=0.4.3" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.4.3">
+    <link rel="stylesheet" href="/css/tokens.css?v=0.4.3">
+    <link rel="stylesheet" href="/css/app.css?v=0.4.3">
+    <link rel="stylesheet" href="/css/print.css?v=0.4.3" media="print">
+    <script src="/js/analytics.js?v=0.4.3"></script>
     <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
@@ -317,6 +317,7 @@
                             <th data-i18n="users.colRole">Role</th>
                             <th data-i18n="users.colStatus">Status</th>
                             <th data-i18n="users.colLastLogin">Last sign-in</th>
+                            <th data-i18n="users.colTwoFactor">Two-step</th>
                             <th data-i18n="users.colActions">Actions</th>
                         </tr>
                     </thead>
@@ -388,7 +389,7 @@
 </main>
 
 <footer class="footer">
-    <span>PV_Dictionary <span id="versionLabel">v0.4.2</span></span>
+    <span>PV_Dictionary <span id="versionLabel">v0.4.3</span></span>
     <span class="footer-sep">·</span>
     <span id="backendLabel" class="footer-muted"></span>
     <span class="footer-sep">·</span>
@@ -404,8 +405,13 @@
                 <input id="loginUsername" type="text" autocomplete="username" required></label>
             <label class="field"><span class="field-label" data-i18n="login.password">Password</span>
                 <input id="loginPassword" type="password" autocomplete="current-password" required></label>
+            <div id="login2faBlock" hidden>
+                <p class="modal-note" data-i18n="login.twoFactorNote">Type the 6-digit code from your authenticator app (or one of your backup codes).</p>
+                <label class="field"><span class="field-label" data-i18n="login.twoFactorCode">Verification code</span>
+                    <input id="login2faCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="20"></label>
+            </div>
             <div class="modal-actions">
-                <button class="btn btn-primary" type="submit" data-i18n="login.submit">Sign in</button>
+                <button id="loginSubmitBtn" class="btn btn-primary" type="submit" data-i18n="login.submit">Sign in</button>
                 <button id="loginCancelBtn" class="btn btn-ghost" type="button" data-i18n="login.cancel">Cancel</button>
             </div>
             <p id="loginMsg" class="form-msg" role="status"></p>
@@ -416,7 +422,7 @@
 <div id="passwordModal" class="modal" hidden>
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="passwordTitle">
         <h2 id="passwordTitle" class="modal-title" data-i18n="password.title">🔑 Change my password</h2>
-        <p class="modal-note" data-i18n="password.note">Type your current password, then the new one (6–64 characters).</p>
+        <p class="modal-note" data-i18n="password.note">Type your current password, then the new one (at least 10 characters).</p>
         <form id="passwordForm">
             <label class="field"><span class="field-label" data-i18n="password.current">Current password</span>
                 <input id="currentPassword" type="password" autocomplete="current-password" required></label>
@@ -428,6 +434,28 @@
             </div>
             <p id="passwordMsg" class="form-msg" role="status"></p>
         </form>
+
+        <hr class="modal-sep">
+        <h3 class="modal-subtitle" data-i18n="twoFactor.title">Two-step verification</h3>
+        <p class="modal-note" id="twoFactorState"></p>
+        <div id="twoFactorSetup" hidden>
+            <p class="modal-note" data-i18n="twoFactor.setupNote">Add this secret to Google Authenticator or Microsoft Authenticator, then type the 6-digit code it shows.</p>
+            <p class="secret-box" id="twoFactorSecret" aria-live="polite"></p>
+            <label class="field"><span class="field-label" data-i18n="twoFactor.code">6-digit code</span>
+                <input id="twoFactorCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10"></label>
+            <div class="modal-actions">
+                <button id="twoFactorEnableBtn" class="btn btn-primary" type="button" data-i18n="twoFactor.confirm">Turn on</button>
+            </div>
+        </div>
+        <div id="twoFactorBackupBox" hidden>
+            <p class="modal-note" data-i18n="twoFactor.backupNote">Save these backup codes somewhere safe — each one works once, and they are the only way in if you lose your phone. They will not be shown again.</p>
+            <p class="secret-box" id="twoFactorBackupCodes"></p>
+        </div>
+        <div class="modal-actions">
+            <button id="twoFactorStartBtn" class="btn btn-ghost" type="button" data-i18n="twoFactor.start">Turn on two-step verification</button>
+            <button id="twoFactorDisableBtn" class="btn btn-ghost" type="button" hidden data-i18n="twoFactor.disable">Turn off</button>
+        </div>
+        <p id="twoFactorMsg" class="form-msg" role="status"></p>
     </div>
 </div>
 
@@ -451,15 +479,15 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="/js/errorlog.js?v=0.4.2"></script>
-<script src="/js/i18n.js?v=0.4.2"></script>
-<script src="/js/api.js?v=0.4.2"></script>
-<script src="/js/ui.js?v=0.4.2"></script>
-<script src="/js/audio.js?v=0.4.2"></script>
-<script src="/js/auth.js?v=0.4.2"></script>
-<script src="/js/vocab.js?v=0.4.2"></script>
-<script src="/js/admin.js?v=0.4.2"></script>
-<script src="/js/users.js?v=0.4.2"></script>
-<script src="/js/app.js?v=0.4.2"></script>
+<script src="/js/errorlog.js?v=0.4.3"></script>
+<script src="/js/i18n.js?v=0.4.3"></script>
+<script src="/js/api.js?v=0.4.3"></script>
+<script src="/js/ui.js?v=0.4.3"></script>
+<script src="/js/audio.js?v=0.4.3"></script>
+<script src="/js/auth.js?v=0.4.3"></script>
+<script src="/js/vocab.js?v=0.4.3"></script>
+<script src="/js/admin.js?v=0.4.3"></script>
+<script src="/js/users.js?v=0.4.3"></script>
+<script src="/js/app.js?v=0.4.3"></script>
 </body>
 </html>

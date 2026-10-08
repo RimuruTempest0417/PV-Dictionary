@@ -92,13 +92,20 @@
          *   2. 這本書真的沒有單元  → 警告色：先建立單元
          *   3. 有單元、只是還沒點進去 → 中性色：點開其中一個就能加入生字（這不是問題，不該用警告色）
          * 判斷「這本書有沒有單元」要用 PDState.units（書本層級的資料），不是 currentUnitId。 */
+        const allBooks = window.PDState.books || [];
         const bookUnitCount = (window.PDState.units || []).length;
         const hint = document.getElementById('adminHint');
         let hintKey = '';
         let hintTone = 'warn';
         if (canEdit && !hasUnit) {
-            if (!hasBook) hintKey = 'admin.hintNoBook';
-            else if (bookUnitCount === 0) hintKey = 'admin.hintNoUnit';
+            if (!hasBook) {
+                /* 書架上：有書但還沒點進去 ≠ 沒有書（使用者回報過兩次同一類錯誤） */
+                if (allBooks.length === 0) hintKey = 'admin.hintNoBook';
+                else {
+                    hintKey = 'admin.hintPickBook';
+                    hintTone = 'info';
+                }
+            } else if (bookUnitCount === 0) hintKey = 'admin.hintNoUnit';
             else {
                 hintKey = 'admin.hintPickUnit';
                 hintTone = 'info';
@@ -106,7 +113,8 @@
         }
         hint.hidden = !hintKey;
         if (hintKey) {
-            hint.textContent = t(hintKey, { n: bookUnitCount });
+            const count = hintKey === 'admin.hintPickBook' ? allBooks.length : bookUnitCount;
+            hint.textContent = t(hintKey, { n: count });
             hint.dataset.tone = hintTone;
         }
 
