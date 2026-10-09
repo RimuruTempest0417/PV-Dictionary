@@ -83,7 +83,7 @@ async function main() {
 
     try {
         const home = await timed(`${SITE}/`);
-        record('首頁 HTML', home.status === 200 && /<title>PV_Dictionary/.test(home.text), `${home.status}｜${home.ms}ms`);
+        record('首頁 HTML', home.status === 200 && /<title>Gary-Dictionary/.test(home.text), `${home.status}｜${home.ms}ms`);
     } catch (err) {
         record('首頁 HTML', false, err.name === 'AbortError' ? '逾時' : err.message);
     }

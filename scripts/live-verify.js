@@ -39,7 +39,6 @@ const TEST_CODE = '__live_verify__';
 const NO_AUTH = process.argv.includes('--no-auth');
 const EPHEMERAL = process.argv.includes('--ephemeral-teacher') || process.env.VERIFY_EPHEMERAL_TEACHER === '1';
 const TEMP_USER = '__live_verify_teacher__';
-const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AARAAI/wH+AB0AAAAASUVORK5CYII=';
 
 let pass = 0;
 let fail = 0;
@@ -147,7 +146,7 @@ async function main() {
     const auditWatermark = await maxAuditId();
     console.log(`   （開始前的筆數：${JSON.stringify(baseline)}；稽核水線 id=${auditWatermark}）`);
 
-    console.log('\n3. 資料庫直連往返：帶封面的書（不需要登入）');
+    console.log('\n3. 資料庫直連往返：書本（v0.5.0：只有年級，沒有封面）');
     try {
         /* id 自己配（跟 App 一樣用 max(id)+1）：identity sequence 只有在「不給 id」時才會遞增，
          * 而本專案的資料一律帶 id 寫入，所以不能靠 sequence。 */
@@ -159,33 +158,30 @@ async function main() {
                 id: nextBookId,
                 code: TEST_CODE,
                 name: 'ZZ Live Verify',
-                grade: '',
+                grade: 'ZZ',
                 publisher: '',
                 sort_order: 999,
                 is_published: true,
-                cover_mime: 'image/png',
-                cover_data: PNG_1PX,
-                cover_bytes: Buffer.from(PNG_1PX, 'base64').length
             }
         });
         const directId = inserted && inserted[0] && inserted[0].id;
         createdIds.push(directId);
-        check('資料庫收得下封面欄位（INSERT 成功）', Boolean(directId), `id=${directId}`);
+        check('資料庫寫得進去（INSERT 成功）', Boolean(directId), `id=${directId}`);
         /* 等 App 的快取過期（3 秒）再讀，驗的是「真的寫進資料庫」，不是快取行為 */
         await sleep(3500);
-        const cover = await pvFetch(`${BASE}/api/covers/${directId}`);
-        check('GET /api/covers/<id> 回圖片', cover.status === 200 && /image\/png/.test(cover.headers.get('content-type') || ''), `HTTP ${cover.status}`);
         const books = await (await pvFetch(`${BASE}/api/books`)).json();
-        const row = (books.books || []).find((b) => b.code === TEST_CODE);
-        check('書本清單看得到它有封面（has_cover）', Boolean(row && row.has_cover));
-        check('清單沒有把 base64 一起回傳', JSON.stringify(row || {}).indexOf(PNG_1PX.slice(0, 40)) === -1);
+        const row = (books.books || []).find((b) => b.grade === 'ZZ');
+        check('書本清單讀得到剛寫進去的年級', Boolean(row), JSON.stringify((books.books || []).slice(-2)));
+        check('書本清單只回年級（沒有 name／code／封面欄位）',
+            Boolean(row) && row.name === undefined && row.code === undefined && row.has_cover === undefined && row.cover_url === undefined,
+            JSON.stringify(row || {}));
     } catch (err) {
-        check('資料庫收得下封面欄位（INSERT 成功）', false, err.message);
+        check('資料庫寫得進去（INSERT 成功）', false, err.message);
     }
 
-    console.log('\n3b. 臨時教師帳號：走一次「建書 → 上傳封面」（不碰你的帳號，結束後刪掉）');
+    console.log('\n3b. 臨時教師帳號：走一次「建立年級 → 建立單元」（v0.5.0：只需年級，封面已移除）');
     if (!EPHEMERAL) {
-        skip('臨時帳號上傳驗收', '加 --ephemeral-teacher 就會跑（會建立並刪除一個臨時老師帳號）');
+        skip('臨時年級驗收', '加 --ephemeral-teacher 就會跑（會建立並刪除一個臨時老師帳號）');
     } else {
         try {
             const { hashPassword } = require('../lib/passwords');
@@ -226,26 +222,16 @@ async function main() {
             const created = await authed('/api/books', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: 'ZZ Live Verify', code: `${TEST_CODE}_api`, is_published: false })
+                body: JSON.stringify({ grade: 'ZZ' })
             });
             const createdBody = await created.json();
-            check('臨時教師可以建立書本（HTTP 201）', created.status === 201, JSON.stringify(createdBody).slice(0, 140));
+            check('臨時教師可以建立年級（HTTP 201）', created.status === 201 && createdBody.book && createdBody.book.grade === 'ZZ', JSON.stringify(createdBody).slice(0, 140));
+            check('年級物件沒有書名與封面欄位',
+                createdBody.book && createdBody.book.name === undefined && createdBody.book.code === undefined && createdBody.book.has_cover === undefined,
+                JSON.stringify(createdBody.book || {}));
             const bookId = createdBody.book && createdBody.book.id;
             if (bookId) createdIds.push(bookId);
 
-            if (bookId) {
-                const upload = await authed(`/api/books/${bookId}/cover`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ data: `data:image/png;base64,${PNG_1PX}`, mime: 'image/png' })
-                });
-                const uploadText = await upload.text();
-                check('上傳書本封面 HTTP 201（＝你回報的那個 500）', upload.status === 201, uploadText.slice(0, 200));
-                const cover = await pvFetch(`${BASE}/api/covers/${bookId}`);
-                check('封面讀得回來（圖片）', cover.status === 200 && /image\/png/.test(cover.headers.get('content-type') || ''), `HTTP ${cover.status}`);
-                const removed = await authed(`/api/books/${bookId}/cover`, { method: 'DELETE' });
-                check('刪除封面 HTTP 200', removed.status === 200);
-            }
         } catch (err) {
             check('臨時帳號上傳驗收', false, err.message);
         }
@@ -286,27 +272,20 @@ async function main() {
             const created = await authed('/api/books', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: 'ZZ Live Verify', code: TEST_CODE, is_published: false })
+                body: JSON.stringify({ grade: 'ZZ' })
             });
             const createdBody = await created.json();
-            check('建立書本 HTTP 201', created.status === 201, JSON.stringify(createdBody).slice(0, 140));
+            check('建立年級 HTTP 201', created.status === 201 && createdBody.book && createdBody.book.grade === 'ZZ', JSON.stringify(createdBody).slice(0, 140));
             const apiId = createdBody.book && createdBody.book.id;
             if (apiId) createdIds.push(apiId);
 
             if (apiId) {
                 const books = await (await pvFetch(`${BASE}/api/books`)).json();
-                check('書本清單看得到它（＝真的寫進 Supabase）', (books.books || []).some((b) => b.code === TEST_CODE));
-                const upload = await authed(`/api/books/${apiId}/cover`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ data: `data:image/png;base64,${PNG_1PX}`, mime: 'image/png' })
-                });
-                const uploadText = await upload.text();
-                check('上傳書本封面 HTTP 201（你回報的那個 500）', upload.status === 201, uploadText.slice(0, 160));
-                const covered = (await (await pvFetch(`${BASE}/api/books`)).json()).books || [];
-                check('上傳後清單顯示 has_cover', Boolean((covered.find((b) => b.code === TEST_CODE) || {}).has_cover));
-                const removed = await authed(`/api/books/${apiId}/cover`, { method: 'DELETE' });
-                check('刪除封面 HTTP 200', removed.status === 200, (await removed.text()).slice(0, 120));
+                const mine = (books.books || []).find((b) => b.grade === 'ZZ');
+                check('年級清單看得到它（＝真的寫進 Supabase）', Boolean(mine), JSON.stringify((books.books || []).slice(-2)));
+                check('清單不含書名、代號與封面欄位（v0.5.0）',
+                    Boolean(mine) && mine.name === undefined && mine.code === undefined && mine.has_cover === undefined && mine.cover_url === undefined,
+                    JSON.stringify(mine || {}));
             }
         }
     }
