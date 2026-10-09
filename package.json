@@ -1,6 +1,6 @@
 {
     "name": "gary-dictionary",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "description": "PV_Dictionary — 線上英文生字字典（Express 5 + Supabase）",
     "main": "server.js",
     "type": "commonjs",
@@ -19,7 +19,9 @@
         "uptime": "node scripts/uptime-check.js",
         "triage": "node scripts/triage.js",
         "usage": "node scripts/db-usage.js",
-        "cleanup:logs": "node scripts/cleanup-logs.js"
+        "cleanup:logs": "node scripts/cleanup-logs.js",
+        "check:live-browser": "node tests/browser/live-check.js",
+        "perf:entries": "node scripts/perf-entries.js"
     },
     "keywords": [
         "dictionary",

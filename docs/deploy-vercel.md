@@ -3,8 +3,8 @@
 線上版跟本機 Demo 的差別只有一個：資料放在 **Supabase**（本機是 `data/store.json`）。
 程式碼本身不用改 —— `DATA_BACKEND=supabase` 就會換過去。
 
-- Vercel 專案：`pv-dictionary`（team `mylearning`）
-- Production 網址：https://pv-dictionary-mylearning.vercel.app
+- Vercel 專案：`gary-dictionary`（team `mylearning`；v0.6.0 起由 `pv-dictionary` 更名）
+- Production 網址：https://gary-dictionary-mylearning.vercel.app（v0.6.0 起由 pv-dictionary 更名）
 - 已連結 GitHub：`RimuruTempest0417/PV-Dictionary`（**push 到 `main` 就會自動部署**）
 - 資料庫：Supabase 專案 `pv-dictionary`（ref `hckozqluooeobvyltcyf`，region ap-southeast-1）
 
@@ -14,7 +14,7 @@
 |---|---|---|
 | `DATA_BACKEND` | `supabase` | 已設好 |
 | `SUPABASE_URL` | `https://hckozqluooeobvyltcyf.supabase.co` | 已設好 |
-| `SITE_URL` | `https://pv-dictionary-mylearning.vercel.app` | 已設好（production） |
+| `SITE_URL` | `https://gary-dictionary-mylearning.vercel.app` | 已設好（production；更名時要一起改，見「更名」一節） |
 | `JWT_SECRET` | `.env` 的 `JWT_SECRET` | ✅ 已推上去（用 `node scripts/vercel-env.js --push --deploy`） |
 | `SUPABASE_SERVICE_ROLE_KEY` | `.env` 的 `SUPABASE_SERVICE_ROLE_KEY` | ✅ 已推上去 |
 
@@ -33,19 +33,19 @@ node scripts/vercel-env.js --check           # 只看看哪些變數設好了（
 ## 二、部署
 
 Git 連結建立後，`main` 每次 push 都會自動部署（production）。
-手動重部署：Vercel → pv-dictionary → Deployments → 最新那筆 → ⋯ → Redeploy（記得勾選使用最新的環境變數）。
+手動重部署：Vercel → gary-dictionary → Deployments → 最新那筆 → ⋯ → Redeploy（記得勾選使用最新的環境變數）。也可用 `node scripts/vercel-redeploy.js`。
 
 ## 三、上線後要驗的三件事
 
 ```bash
 # 1. 後端活著、資料層是 supabase（不是 json）
-curl -s https://pv-dictionary-mylearning.vercel.app/api/health
+curl -s https://gary-dictionary-mylearning.vercel.app/api/health
 
 # 2. 書本清單讀得到（空的也要回 {"books":[]}，不是 500）
-curl -s https://pv-dictionary-mylearning.vercel.app/api/books
+curl -s https://gary-dictionary-mylearning.vercel.app/api/books
 
 # 3. 登入頁打得開（回 200 HTML）
-curl -s -o /dev/null -w "%{http_code}\n" https://pv-dictionary-mylearning.vercel.app/
+curl -s -o /dev/null -w "%{http_code}\n" https://gary-dictionary-mylearning.vercel.app/
 ```
 
 `/api/health` 的 `backend` 要是 `supabase`、`data_file` 要是 `null`、`jwt_secret_configured` 要是 `true`。

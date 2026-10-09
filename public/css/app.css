@@ -1725,3 +1725,53 @@ code {
     background: var(--accent-soft);
     border-radius: var(--radius);
 }
+
+/* v0.6.0：管理區「📗 新增年級」下面的年級清單（修改年級用） */
+.grade-list {
+    list-style: none;
+    margin: var(--space-3) 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.grade-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--card);
+}
+
+.grade-row--empty {
+    color: var(--muted-foreground);
+    font-size: 0.9rem;
+}
+
+.grade-name {
+    font-weight: 600;
+    min-width: 3.5rem;
+}
+
+.grade-meta {
+    color: var(--muted-foreground);
+    font-size: 0.85rem;
+    flex: 1;
+}
+
+.btn-icon {
+    padding: var(--space-1) var(--space-2);
+    line-height: 1;
+}
+
+/* v0.6.0：生字表的分頁（載入更多） */
+.load-more-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    margin: var(--space-3) 0;
+}

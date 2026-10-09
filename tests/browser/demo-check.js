@@ -544,6 +544,90 @@ async function main() {
         };`);
         check('畫面上（含管理區）沒有任何書名', leaks.html === false, JSON.stringify(leaks));
 
+        console.log('\n【10d】修改年級：管理區的 ✏️ 改名 → 書架與稽核都跟著變（v0.6.0）');
+        /* 先回到管理區的「新增年級」分頁 */
+        await browser.evaluate(`document.getElementById('newBookBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('gradeListBlock').hidden === false`, { timeout: 8000 });
+        await browser.waitFor(`document.querySelectorAll('#gradeList .grade-row').length >= 2`, { timeout: 8000 });
+        const gradeList = await browser.evaluate(`return {
+            rows: document.querySelectorAll('#gradeList .grade-row').length,
+            texts: Array.from(document.querySelectorAll('#gradeList .grade-row')).map((row) => row.textContent.trim()),
+            editBtns: document.querySelectorAll('#gradeList [data-action="edit-grade"]').length
+        };`);
+        check('年級清單列出所有年級、每一列都有 ✏️', gradeList.rows >= 2 && gradeList.editBtns === gradeList.rows, JSON.stringify(gradeList));
+
+        /* 改第一個年級（S1 → S9） */
+        await browser.evaluate(`
+            const row = Array.from(document.querySelectorAll('#gradeList .grade-row')).find((r) => r.textContent.includes('S1'));
+            row.querySelector('[data-action="edit-grade"]').click();
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('gradeEditForm').hidden === false`, { timeout: 8000 });
+        const gradePrefilled = await browser.evaluate(`return document.getElementById('fGradeEditValue').value;`);
+        check('修改年級的表單會先填好現在的年級', gradePrefilled === 'S1', gradePrefilled);
+
+        await browser.evaluate(`
+            document.getElementById('fGradeEditValue').value = 'S9';
+            document.getElementById('gradeEditForm').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        for (let i = 0; i < 60; i += 1) {
+            if (store.listBooks({ includeUnpublished: true }).some((b) => b.grade === 'S9')) break;
+            await sleep(100);
+        }
+        check('年級真的改到資料庫（S9）', store.listBooks({ includeUnpublished: true }).some((b) => b.grade === 'S9'));
+
+        /* 書架與稽核都要跟著變 */
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await browser.evaluate(`document.getElementById('unitsBackBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('bookShelf').textContent.includes('S9')`, { timeout: 8000 });
+        check('書架顯示新的年級', (await browser.evaluate(`return document.getElementById('bookShelf').textContent.includes('S9');`)) === true);
+
+        /* 重複年級要被擋（S9 → S2，S2 已存在） */
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await browser.evaluate(`document.getElementById('newBookBtn').click(); return true;`);
+        await browser.waitFor(`document.querySelectorAll('#gradeList .grade-row').length >= 2`, { timeout: 8000 });
+        await browser.evaluate(`
+            const row = Array.from(document.querySelectorAll('#gradeList .grade-row')).find((r) => r.textContent.includes('S9'));
+            row.querySelector('[data-action="edit-grade"]').click();
+            document.getElementById('fGradeEditValue').value = 'S2';
+            document.getElementById('gradeEditForm').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('gradeEditMsg').textContent.trim().length > 0`, { timeout: 8000 });
+        const dupMsg = await browser.evaluate(`return document.getElementById('gradeEditMsg').textContent.trim();`);
+        check('改成已經有的年級會顯示錯誤（不是靜默失敗）', dupMsg.length > 0, dupMsg);
+        check('重複被擋時資料沒有被改（還是 S9）', store.listBooks({ includeUnpublished: true }).some((b) => b.grade === 'S9'));
+
+        /* 稽核要有一筆 BOOK_UPDATE（年級改名） */
+        await browser.evaluate(`
+            document.getElementById('gradeEditCancelBtn').click();
+            document.getElementById('navAuditBtn').click();
+            return true;
+        `);
+        await browser.waitFor(`document.querySelectorAll('#auditList .audit-item').length > 0`, { timeout: 8000 });
+        const gradeAuditText = await browser.evaluate(`return document.getElementById('auditList').textContent;`);
+        check('稽核紀錄看得到年級改名', gradeAuditText.includes('S9'), gradeAuditText.slice(0, 80));
+
+        /* ★ 事情做完要把年級改回 S1：後面的段落（含稽核搜尋）都在等 S1，
+         *   不還原的話會變成「前面改了名字、後面找不到」的假失敗。 */
+        await browser.evaluate(`document.getElementById('newBookBtn').click(); return true;`);
+        await browser.waitFor(`document.querySelectorAll('#gradeList .grade-row').length >= 2`, { timeout: 8000 });
+        await browser.evaluate(`
+            const row = Array.from(document.querySelectorAll('#gradeList .grade-row')).find((r) => r.textContent.includes('S9'));
+            row.querySelector('[data-action="edit-grade"]').click();
+            document.getElementById('fGradeEditValue').value = 'S1';
+            document.getElementById('gradeEditForm').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        for (let i = 0; i < 60; i += 1) {
+            if (store.listBooks({ includeUnpublished: true }).some((b) => b.grade === 'S1')) break;
+            await sleep(100);
+        }
+        check('測完把年級改回 S1（後面的段落要用）', store.listBooks({ includeUnpublished: true }).some((b) => b.grade === 'S1'));
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await sleep(300);
+
         /* 稽核細節也要用年級 */
         await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
         await browser.evaluate(`document.getElementById('navAuditBtn').click(); return true;`);

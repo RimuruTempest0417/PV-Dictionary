@@ -44,6 +44,28 @@ function normalizeAudioMime(value) {
 }
 const AUDIO_MAX_BYTES = 1024 * 1024;          // 單筆錄音上限 1MB（Vercel body 上限約 4.5MB）
 const AUDIO_MAX_DURATION_MS = 60 * 1000;
+/* D-3（v0.6.0）：每個單元的錄音段數上限。
+ * 為什麼要有：錄音以 base64 存在資料庫（免費方案 500MB），一個單元幾十段就是幾十 MB；
+ * 沒有上限時「某個單元被錄滿」只會表現在月底的容量爆掉，老師卻完全看不到原因。
+ * 這裡選擇「維持存在資料庫」（不導入 Storage，避免為了容量付費升級），
+ * 但把上限與用量明確顯示給老師看（錄音視窗與單元統計）。 */
+const AUDIO_MAX_PER_UNIT = 60;
+
+/* D-1（v0.6.0）：生字表的伺服器端分頁。
+ * 為什麼：一個單元有幾百個生字時，整包一次送出去會讓手機忙很久（而且大部分用不到）。
+ * 一頁 60 筆（手機一屏約 5～8 張卡，60 筆足夠捲很久），上限 200 筆避免有人自己放大。 */
+const ENTRY_PAGE_SIZE = 60;
+/* 生字的三種狀態（搜尋參數 status= 只認這三個） */
+const ENTRY_PAGE_MAX = 200;
+
+/* 生字搜尋：一個字串比對生字、中文解釋、英文解釋與詞性（全部轉小寫） */
+function matchesEntryQuery(entry, query) {
+    if (!query) return true;
+    const haystack = [entry.headword, entry.zh_meaning, entry.en_definition, entry.part_of_speech, entry.ipa_us]
+        .map((value) => String(value || '').toLowerCase())
+        .join(' ');
+    return haystack.includes(query);
+}
 
 /* 書本封面（老師用手機拍封面後上傳）：只收圖片，2MB 以內 */
 const COVER_MIME_WHITELIST = ['image/jpeg', 'image/png', 'image/webp'];
@@ -79,6 +101,15 @@ function str(value, max) {
 function num(value, fallback = 0) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/* D-2（樂觀鎖）：前端送出它「讀到的那一筆」的 updated_at。
+ * 沒帶（舊前端、腳本）→ 不檢查（維持原本行為）；帶了又不一樣 → 代表別人先改過，
+ * 這時寧可回 409 請他重新載入，也不要無聲蓋掉別人的修改。 */
+function staleWrite(current, body) {
+    const provided = body && (body.version || body.base_updated_at);
+    if (!provided || !current || !current.updated_at) return null;
+    return String(provided) === String(current.updated_at) ? null : current.updated_at;
 }
 
 function boolish(value, fallback = true) {
@@ -148,6 +179,10 @@ function unitView(unit, store, { includeHidden = true } = {}) {
         unit_no: unit.unit_no,
         title: unit.title || '',
         is_published: unit.is_published !== false,
+        updated_at: unit.updated_at || null,
+        /* D-3：這個單元已有幾段老師錄音（上限見 AUDIO_MAX_PER_UNIT） */
+        audio_count: store.listEntries({ unitId: unit.id }).filter((e) => store.findTeacherAudio(e.id)).length,
+        audio_limit: AUDIO_MAX_PER_UNIT,
         entry_count: store.countEntries(unit.id, includeHidden ? null : PUBLISHED_ONLY),
         published_count: store.countEntries(unit.id, PUBLISHED_ONLY),
         pending_count: includeHidden ? store.countEntries(unit.id, ['pending']) : 0
@@ -427,7 +462,8 @@ function createApp(options = {}) {
             id: book.id,
             grade: gradeOf(book),
             is_published: book.is_published !== false,
-            sort_order: Number(book.sort_order || 0)
+            sort_order: Number(book.sort_order || 0),
+            updated_at: book.updated_at || null
         };
     }
 
@@ -497,18 +533,39 @@ function createApp(options = {}) {
          *   其他人（含未登入）      → 只有已發佈 */
         const statuses = includeHidden ? null : (viewerCanEdit ? ['published', 'pending', 'rejected'] : PUBLISHED_ONLY);
         const book = store.getBook(unit.book_id);
-        const entries = store.listEntries({ unitId: unit.id, statuses })
+        /* D-1：一頁一頁送（page／per_page），搜尋（q）與狀態（status）都在伺服器端過濾，
+         * 這樣「幾千個生字」不會整包塞進瀏覽器，手機不用等全部下載完才看到第一張卡。 */
+        const pageParam = Number(req.query.page);
+        const perParam = Number(req.query.per_page);
+        const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
+        const perPage = Number.isFinite(perParam) && perParam > 0
+            ? Math.min(ENTRY_PAGE_MAX, Math.floor(perParam))
+            : ENTRY_PAGE_SIZE;
+        const query = str(req.query.q || '', 60).trim().toLowerCase();
+        const wantedStatus = str(req.query.status || '', 20);
+        let rows = store.listEntries({ unitId: unit.id, statuses });
+        if (wantedStatus && ENTRY_STATUSES.includes(wantedStatus)) {
+            /* 認識的狀態就照它過濾：
+             *   - 看得到這個狀態的身分 → 只回那些（例如老師抓 status=pending 的待審核佇列）
+             *   - 看不到的身分（訪客問 pending）→ 回空清單，不透露別人的草稿
+             * 不認識的值（例如 ?status=all）一律忽略，免得打錯字變成「這個單元沒有生字」的鬼故事。 */
+            const canSeeStatus = statuses === null || statuses.includes(wantedStatus);
+            rows = canSeeStatus ? rows.filter((entry) => entry.status === wantedStatus) : [];
+        }
+        if (query) rows = rows.filter((entry) => matchesEntryQuery(entry, query));
+        const total = rows.length;
+        const start = (page - 1) * perPage;
+        const entries = rows.slice(start, start + perPage)
             .map((entry) => publicEntry(entry, store, { includeStatus: includeHidden || viewerCanEdit }));
         res.json({
-            unit: {
-                id: unit.id,
-                book_id: unit.book_id,
-                unit_no: unit.unit_no,
-                title: unit.title || '',
-                is_published: unit.is_published !== false,
-                grade: gradeOf(book)
-            },
+            /* ★ 用 unitView（單一來源）才不會漏欄位：updated_at（樂觀鎖）與 audio_count／audio_limit（D-3） */
+            unit: Object.assign(unitView(unit, store, { includeHidden }), { grade: gradeOf(book) }),
             entries,
+            /* D-1：前端靠這幾個欄位做「載入更多」與「還有幾筆沒顯示」 */
+            total,
+            page,
+            per_page: perPage,
+            has_more: start + entries.length < total,
             can_edit: viewerCanEdit,
             can_publish: Boolean(req.user && Roles.canPublishUnit(req.user, unit, scoped)),
             can_review: Boolean(req.user && Roles.atLeast(req.user.role, 'teacher')),
@@ -890,6 +947,14 @@ function createApp(options = {}) {
             return res.status(403).json({ error: msg('PUBLISHED_NEEDS_TEACHER'), code: 'PUBLISHED_NEEDS_TEACHER' });
         }
         const body = req.body || {};
+        const stale = staleWrite(entry, body);
+        if (stale) {
+            return res.status(409).json({
+                error: msg('STALE_WRITE'),
+                code: 'STALE_WRITE',
+                details: { current: stale, headword: entry.headword }
+            });
+        }
         const patch = applyEntryInput(Object.assign({}, entry, body));
         if (!patch.headword) return res.status(400).json({ error: msg('HEADWORD_REQUIRED'), code: 'HEADWORD_REQUIRED' });
         const norm = normalizeHeadword(patch.headword);
@@ -1201,6 +1266,18 @@ function createApp(options = {}) {
         }
         // 一個生字只保留一段老師錄音：換新的就把舊的刪掉
         const old = store.findTeacherAudio(entry.id);
+        /* D-3：沒有舊錄音＝這個單元要多一段 → 先看有沒有超過上限 */
+        if (!old) {
+            const unitAudio = store.listEntries({ unitId: entry.unit_id })
+                .filter((row) => store.findTeacherAudio(row.id)).length;
+            if (unitAudio >= AUDIO_MAX_PER_UNIT) {
+                return res.status(400).json({
+                    error: msg('AUDIO_LIMIT_REACHED', { count: unitAudio, limit: AUDIO_MAX_PER_UNIT }),
+                    code: 'AUDIO_LIMIT_REACHED',
+                    details: { count: unitAudio, limit: AUDIO_MAX_PER_UNIT }
+                });
+            }
+        }
         if (old) store.deleteAudio(old.id);
         const audio = store.createAudio({
             entry_id: entry.id,
@@ -1273,11 +1350,25 @@ function createApp(options = {}) {
         const book = store.getBook(req.params.id);
         if (!book) return res.status(404).json({ error: msg('BOOK_NOT_FOUND'), code: 'BOOK_NOT_FOUND' });
         const body = req.body || {};
+        const stale = staleWrite(book, body);
+        if (stale) {
+            return res.status(409).json({ error: msg('STALE_WRITE'), code: 'STALE_WRITE', details: { current: stale, grade: gradeOf(book) } });
+        }
         const patch = {};
         /* 只開放年級／排序／發佈狀態：書名與代號都不再是使用者輸入（v0.5.0） */
         if (body.grade !== undefined) {
             const grade = str(body.grade, 20);
             if (!grade) return res.status(400).json({ error: msg('BOOK_GRADE_REQUIRED'), code: 'BOOK_GRADE_REQUIRED' });
+            /* 年級是書架上的識別：兩個同年級的書會讓學生分不出要點哪一個 */
+            const clash = store.listBooks({ includeUnpublished: true })
+                .find((b) => String(b.id) !== String(book.id) && gradeOf(b).toLowerCase() === grade.toLowerCase());
+            if (clash) {
+                return res.status(409).json({
+                    error: msg('DUPLICATE_GRADE', { grade }),
+                    code: 'DUPLICATE_GRADE',
+                    details: { grade }
+                });
+            }
             patch.grade = grade;
             patch.name = grade;                     /* name 是內部欄位，與年級同步 */
             patch.publisher = '';
@@ -1324,6 +1415,10 @@ function createApp(options = {}) {
         const unit = store.getUnit(req.params.id);
         if (!unit) return res.status(404).json({ error: msg('UNIT_NOT_FOUND'), code: 'UNIT_NOT_FOUND' });
         const body = req.body || {};
+        const stale = staleWrite(unit, body);
+        if (stale) {
+            return res.status(409).json({ error: msg('STALE_WRITE'), code: 'STALE_WRITE', details: { current: stale, unit_no: unit.unit_no } });
+        }
         const patch = {};
         if (body.title !== undefined) patch.title = str(body.title, LIMITS.title);
         if (body.unit_no !== undefined) {
@@ -1661,7 +1756,7 @@ function createApp(options = {}) {
         const rows = result.items.slice().reverse();      /* CSV 由舊到新，跟紙本紀錄的習慣一致 */
         const csv = toCsv(rows);
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', 'attachment; filename="pv-dictionary-audit.csv"');
+        res.setHeader('Content-Disposition', 'attachment; filename="gary-dictionary-audit.csv"');
         res.setHeader('Cache-Control', 'private, no-store');
         logAudit(store, {
             user: req.user, action: 'AUDIT_EXPORT', details: `匯出 ${rows.length} 筆稽核紀錄`, ip: req.ip
@@ -1730,7 +1825,13 @@ function createApp(options = {}) {
             books: { total: books.length, published: books.filter((book) => book.is_published !== false).length },
             units: { total: units.length, published: publishedUnits.length, empty: emptyUnits.length },
             entries: { total: entries.length, published: published.length, pending: pending.length },
-            audio: { total: audio, missing: published.length - audio },
+            audio: {
+                total: audio,
+                missing: published.length - audio,
+                /* D-3：容量意識 —— 錄音以 base64 存在資料庫，這裡回總位元組數（前端換算 MB） */
+                bytes: audioRows.reduce((sum, row) => sum + (Number(row.bytes) || 0), 0),
+                per_unit_limit: AUDIO_MAX_PER_UNIT
+            },
             users: { total: users.length, active: users.filter((user) => user.is_active !== false).length, by_role: byRole, two_factor: users.filter((user) => user.totp_enabled_at).length },
             grants: { total: grants.length },
             recent: { days: 7, total: recent.length, by_action: recentByAction },
@@ -1851,7 +1952,7 @@ function createApp(options = {}) {
         if (err && err.type === 'entity.too.large') {
             return res.status(413).json({ error: msg('TOO_LARGE'), code: 'TOO_LARGE' });
         }
-        console.error('[pv-dictionary] 未預期錯誤：', err);
+        console.error('[gary-dictionary] 未預期錯誤：', err);
         /* 先寫進錯誤日誌再回覆：serverless 在回應送出後會凍結實例，之後才寫就來不及了 */
         try {
             await errorLog.append(Object.assign({

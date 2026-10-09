@@ -18,7 +18,7 @@ const crypto = require('crypto');
 
 const BASE = (() => {
     const i = process.argv.indexOf('--base');
-    return (i > -1 && process.argv[i + 1]) || process.env.LIVE_BASE || 'https://pv-dictionary-mylearning.vercel.app';
+    return (i > -1 && process.argv[i + 1]) || process.env.LIVE_BASE || 'https://gary-dictionary-mylearning.vercel.app';
 })();
 const HOST = new URL(BASE).origin;
 

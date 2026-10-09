@@ -10,6 +10,7 @@
 
     const state = {
         editingId: null,
+        editingEntry: null,          /* D-2：記住讀到的那一筆（送 updated_at 當版本） */
         audioEntryId: null,
         recorder: null,
         recordedChunks: [],
@@ -60,6 +61,14 @@
             if (tab === 'users' || tab === 'grants') window.PDUsers.refresh();
             if (tab === 'unitEdit') fillUnitEditOptions();
         }
+        /* v0.6.0：年級清單與「修改年級」表單跟著「📗 新增年級」分頁一起出現／收起。
+         * ★ 一定要在 return 之前（第一次寫在 return 之後，那段程式永遠不會執行，
+         *   畫面症狀是「點了新增年級，清單卻不出現」）。 */
+        const gradeListBlock = document.getElementById('gradeListBlock');
+        if (gradeListBlock) gradeListBlock.hidden = !(open && tab === 'book');
+        const gradeEditForm = document.getElementById('gradeEditForm');
+        if (gradeEditForm && !(open && tab === 'book')) gradeEditForm.hidden = true;
+        if (open && tab === 'book') renderGradeList();
         return open ? panelId : null;
     }
 
@@ -160,6 +169,7 @@
     function openEntryForm(entry) {
         if (!entry && !requireUnit()) return;
         state.editingId = entry ? entry.id : null;
+        state.editingEntry = entry || null;
         fillEntryForm(entry || null);
         document.getElementById('entryFormTitle').textContent = entry
             ? t('entry.editTitle', { word: entry.headword })
@@ -172,6 +182,7 @@
 
     function closeEntryForm() {
         state.editingId = null;
+        state.editingEntry = null;
         showPanel(null);
         setFormMessage(document.getElementById('entryFormMsg'), '');
     }
@@ -198,7 +209,9 @@
         button.disabled = true;
         try {
             if (state.editingId) {
-                await api.patch(`/api/entries/${state.editingId}`, payload);
+                /* D-2：帶著讀到的版本；別人先改過就會回 409 STALE_WRITE */
+                const version = state.editingEntry ? state.editingEntry.updated_at : undefined;
+                await api.patch(`/api/entries/${state.editingId}`, Object.assign({ version }, payload));
                 setFormMessage(msg, t('entry.saved'), 'ok');
                 toast(t('entry.toastUpdated'));
             } else {
@@ -418,6 +431,78 @@
         }
     }
 
+    /* ---------------- 修改年級（v0.6.0，使用者指定） ----------------
+     * 管理區的「📗 新增年級」分頁順便列出所有年級；每一列有 ✏️ 可以改名。
+     * 為什麼要有：年級就是學生看到的課本（S1／S2），打錯字或升級後要能改，
+     * 不然只能刪掉重建（會連單元與生字一起重來）。 */
+    function renderGradeList() {
+        const list = document.getElementById('gradeList');
+        if (!list) return;
+        list.textContent = '';
+        const books = window.PDState.books || [];
+        if (!books.length) {
+            list.appendChild(el('li', { class: 'grade-row grade-row--empty', text: t('bookEdit.empty') }));
+            return;
+        }
+        const canManage = window.PDAuth.can('can_manage_content');
+        for (const book of books) {
+            const row = el('li', { class: 'grade-row', dataset: { bookId: book.id } });
+            row.appendChild(el('span', { class: 'grade-name', text: book.grade }));
+            row.appendChild(el('span', {
+                class: 'grade-meta',
+                text: t('count.units', { n: book.unit_count || 0 })
+            }));
+            if (canManage) {
+                row.appendChild(el('button', {
+                    class: 'btn btn-ghost btn-icon',
+                    type: 'button',
+                    text: '✏️',
+                    attrs: {
+                        'data-action': 'edit-grade',
+                        'data-book-id': book.id,
+                        'aria-label': t('bookEdit.edit'),
+                        title: t('bookEdit.edit')
+                    }
+                }));
+            }
+            list.appendChild(row);
+        }
+    }
+
+    function openGradeEdit(bookId) {
+        const book = (window.PDState.books || []).find((b) => String(b.id) === String(bookId));
+        if (!book) return;
+        document.getElementById('gradeEditId').value = book.id;
+        document.getElementById('fGradeEditValue').value = book.grade;
+        setFormMessage(document.getElementById('gradeEditMsg'), '');
+        document.getElementById('gradeEditForm').hidden = false;
+        document.getElementById('fGradeEditValue').focus();
+        document.getElementById('fGradeEditValue').select();
+    }
+
+    async function submitGradeEdit(event) {
+        event.preventDefault();
+        const msgEl = document.getElementById('gradeEditMsg');
+        const id = document.getElementById('gradeEditId').value;
+        const grade = document.getElementById('fGradeEditValue').value.trim();
+        const book = (window.PDState.books || []).find((b) => String(b.id) === String(id));
+        try {
+            const result = await api.patch(`/api/books/${id}`, { grade, version: book ? book.updated_at : undefined });
+            setFormMessage(msgEl, t('bookEdit.done', { grade: result.book.grade }), 'ok');
+            toast(t('bookEdit.toast'));
+            document.getElementById('gradeEditForm').hidden = true;
+            await window.PDApp.reloadBooks();
+            renderGradeList();
+        } catch (err) {
+            /* 409 = 別人先改過：重新載入清單並提示（不要讓使用者以為存好了） */
+            if (err && err.code === 'STALE_WRITE') {
+                await window.PDApp.reloadBooks();
+                renderGradeList();
+            }
+            setFormMessage(msgEl, window.PDI18n.errorMessage(err), 'error');
+        }
+    }
+
     /* ---------------- 刪除生字（兩段式確認，不用原生 confirm） ---------------- */
     async function deleteEntry(entryId, button) {
         const entry = (window.PDState.entries || []).find((e) => String(e.id) === String(entryId));
@@ -632,6 +717,14 @@
         setFormMessage(document.getElementById('audioMsg'), entry.has_audio
             ? t('audio.existing')
             : t('audio.note'));
+        /* D-3：讓老師看得到「這個單元還剩幾段可以錄」（單位：段數，不是檔案大小） */
+        const unit = (window.PDState.units || []).find((u) => String(u.id) === String(window.PDState.currentUnitId));
+        const usage = document.getElementById('audioUsage');
+        if (usage) {
+            usage.textContent = unit && unit.audio_limit
+                ? t('audio.usage', { n: unit.audio_count || 0, limit: unit.audio_limit })
+                : '';
+        }
         const del = document.getElementById('audioDeleteBtn');
         del.hidden = !entry.has_audio;
         document.getElementById('audioStopBtn').hidden = true;
@@ -814,9 +907,12 @@
             setFormMessage(msg, t('unitEdit.pick'), 'error');
             return;
         }
+        const unit = (window.PDState.units || []).find((u) => String(u.id) === String(id));
         const body = {
             unit_no: Number(document.getElementById('fUnitEditNo').value),
-            title: document.getElementById('fUnitEditTitle').value.trim()
+            title: document.getElementById('fUnitEditTitle').value.trim(),
+            /* D-2：帶著讀到的版本（沒讀到就不檢查） */
+            version: unit ? unit.updated_at : undefined
         };
         try {
             const result = await api.patch(`/api/units/${id}`, body);
@@ -988,7 +1084,7 @@
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const blob = await res.blob();
             const url = URL.createObjectURL(blob);
-            const link = el('a', { attrs: { href: url, download: 'pv-dictionary-audit.csv' } });
+            const link = el('a', { attrs: { href: url, download: 'gary-dictionary-audit.csv' } });
             document.body.appendChild(link);
             link.click();
             link.remove();
@@ -1043,6 +1139,16 @@
         document.getElementById('navUnitEditBtn').addEventListener('click', () => openUnitEdit(window.PDState.currentUnitId));
         document.getElementById('unitEditCancelBtn').addEventListener('click', () => showPanel(null));
         document.getElementById('bookForm').addEventListener('submit', submitBook);
+        /* v0.6.0：修改年級 */
+        document.getElementById('gradeEditForm').addEventListener('submit', submitGradeEdit);
+        document.getElementById('gradeEditCancelBtn').addEventListener('click', () => {
+            document.getElementById('gradeEditForm').hidden = true;
+            setFormMessage(document.getElementById('gradeEditMsg'), '');
+        });
+        document.getElementById('gradeList').addEventListener('click', (event) => {
+            const button = event.target.closest('[data-action="edit-grade"]');
+            if (button) openGradeEdit(button.dataset.bookId);
+        });
         document.getElementById('newEntryBtn').addEventListener('click', () => openEntryForm(null));
         document.getElementById('newUnitBtn').addEventListener('click', () => {
             const note = document.getElementById('unitFormNote');
@@ -1125,6 +1231,7 @@
         openEntryForm,
         closeEntryForm,
         renderPending,
+        renderGradeList,
         openUnitEdit,
         openAudioModal,
         closeAudioModal

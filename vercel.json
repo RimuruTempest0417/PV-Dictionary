@@ -11,7 +11,7 @@
             "headers": [
                 {
                     "key": "Access-Control-Allow-Origin",
-                    "value": "https://pv-dictionary-mylearning.vercel.app"
+                    "value": "https://gary-dictionary-mylearning.vercel.app"
                 },
                 {
                     "key": "Cross-Origin-Resource-Policy",
@@ -28,7 +28,7 @@
             "headers": [
                 {
                     "key": "Access-Control-Allow-Origin",
-                    "value": "https://pv-dictionary-mylearning.vercel.app"
+                    "value": "https://gary-dictionary-mylearning.vercel.app"
                 },
                 {
                     "key": "Cross-Origin-Resource-Policy",

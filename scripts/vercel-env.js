@@ -6,7 +6,8 @@
  *
  * 用法：
  *   node scripts/vercel-env.js --check     # 只列出「哪些變數在 Vercel 上已經有值／還是佔位」（不印值）
- *   node scripts/vercel-env.js --push      # 把 .env 的值推上去（upsert）
+ *   node scripts/vercel-env.js --push      # 把 .env 的「機密」值推上去（upsert）
+ *   node scripts/vercel-env.js --push-all  # 連一般變數（DATA_BACKEND／SUPABASE_URL／SITE_URL）一起推
  *   node scripts/vercel-env.js --push --deploy   # 推完順便重新部署並等它 READY
  *
  * 需要 .env 有：VERCEL_TOKEN（vercel.com/account/tokens）、JWT_SECRET、SUPABASE_SERVICE_ROLE_KEY
@@ -15,14 +16,20 @@ require('dotenv').config();
 
 const TEAM_ID = 'team_m7zLQ66u3WWs3qY1908y01uu';
 const PROJECT_ID = 'prj_3BytnR5a2EpXnGzyDAF2mHJdcvyx';
-const PROJECT_NAME = 'pv-dictionary';
-const PRODUCTION_URL = 'https://pv-dictionary-mylearning.vercel.app';
+const PROJECT_NAME = 'gary-dictionary';
+const PRODUCTION_URL = 'https://gary-dictionary-mylearning.vercel.app';
 const SECRET_KEYS = ['JWT_SECRET', 'SUPABASE_SERVICE_ROLE_KEY'];
+/* 一般（非機密）變數：只有 --push-all 時才一起更新 */
+const PLAIN_KEYS = ['DATA_BACKEND', 'SUPABASE_URL', 'SITE_URL'];
 
 const args = process.argv.slice(2);
 const CHECK = args.includes('--check');
-const PUSH = args.includes('--push');
+const PUSH = args.includes('--push') || args.includes('--push-all');
 const DEPLOY = args.includes('--deploy');
+/* ★ --push-all：連「一般（非機密）變數」也一起覆寫。
+ *   預設只覆寫機密（JWT_SECRET／SUPABASE_SERVICE_ROLE_KEY），因為一般變數平常不需要動；
+ *   但改網址（SITE_URL）這一類就是一般變數，不帶 --push-all 會以為推上去了其實沒有。 */
+const PUSH_ALL = args.includes('--push-all');
 
 function token() {
     const value = process.env.VERCEL_TOKEN;
@@ -59,7 +66,7 @@ function describe(value) {
 
 async function main() {
     if (!CHECK && !PUSH) {
-        console.error('用法：node scripts/vercel-env.js --check | --push [--deploy]');
+        console.error('用法：node scripts/vercel-env.js --check | --push [--push-all] [--deploy]');
         process.exit(1);
     }
 
@@ -84,7 +91,8 @@ async function main() {
         return;
     }
 
-    for (const key of SECRET_KEYS) {
+    const pushKeys = PUSH_ALL ? [...SECRET_KEYS, ...PLAIN_KEYS] : [...SECRET_KEYS];
+    for (const key of pushKeys) {
         const value = process.env[key];
         if (!value || /^REPLACE_ME/.test(value)) {
             console.error(`✖ .env 的 ${key} 沒有有效值（${describe(value)}）`);
@@ -92,14 +100,23 @@ async function main() {
         }
     }
 
-    const payload = SECRET_KEYS.map((key) => ({
-        key,
-        value: process.env[key],
-        type: 'sensitive',
-        target: ['production', 'preview', 'development']
-    }));
+    /* 機密用 sensitive（推上去之後介面讀不回來）；一般變數用 plain（SITE_URL 這種要能自己看得到） */
+    const payload = [
+        ...SECRET_KEYS.map((key) => ({
+            key,
+            value: process.env[key],
+            type: 'sensitive',
+            target: ['production', 'preview', 'development']
+        })),
+        ...(PUSH_ALL ? PLAIN_KEYS.map((key) => ({
+            key,
+            value: process.env[key],
+            type: 'plain',
+            target: ['production', 'preview', 'development']
+        })) : [])
+    ];
     await vercel('POST', `/v10/projects/${PROJECT_ID}/env?upsert=true&teamId=${TEAM_ID}`, payload);
-    console.log(`✔ 已把 ${SECRET_KEYS.join('、')} 推上 Vercel（values 沒有顯示、也沒有離開這個行程）`);
+    console.log(`✔ 已把 ${pushKeys.join('、')} 推上 Vercel（機密值沒有顯示、也沒有離開這個行程）`);
 
     if (!DEPLOY) {
         console.log('（要順便重新部署請加 --deploy，或在 Vercel 介面按 Redeploy）');

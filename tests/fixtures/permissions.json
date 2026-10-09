@@ -177,6 +177,18 @@
             }
         },
         {
+            "id": "book-rename",
+            "capability": "can_manage_content",
+            "method": "PATCH",
+            "path": "/api/books/:book",
+            "min_role": "teacher",
+            "ui": {
+                "element": "gradeEditForm",
+                "gate": "can('can_manage_content')"
+            },
+            "why": "修改年級名稱（v0.6.0）：年級是學生在書架上看到的識別"
+        },
+        {
             "id": "book-update",
             "capability": "can_manage_content",
             "method": "PATCH",

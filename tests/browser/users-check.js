@@ -940,6 +940,69 @@ async function main() {
         /* 清乾淨這一區造的資料 */
         for (const id of [pendingA.id, pendingB.id, pendingC.id]) store.deleteEntry(id);
 
+        /* 【8f】D-1：生字表分頁（載入更多、伺服器端搜尋） */
+        console.log('\n【8f】生字表分頁：一頁 60 筆、載入更多、搜尋走伺服器（v0.6.0）');
+        {
+            const unitId = await browser.evaluate(`return window.PDState.currentUnitId;`);
+            if (!unitId) {
+                check('有開啟的單元可以測分頁', false, '沒有 currentUnitId');
+            } else {
+                const pageUnit = store.getUnit(unitId);
+                for (let i = 1; i <= 130; i += 1) {
+                    store.createEntry({
+                        unit_id: pageUnit.id,
+                        headword: 'paging' + String(i).padStart(3, '0'),
+                        headword_norm: 'paging' + String(i).padStart(3, '0'),
+                        zh_meaning: '分頁測試', en_definition: 'paging test',
+                        status: 'published', sort_order: 1000 + i, created_by: 'test'
+                    });
+                }
+                await browser.evaluate(`return window.PDApp.reloadUnit({ keepForm: true });`);
+                await browser.waitFor(`document.getElementById('loadMoreBtn').hidden === false`, { timeout: 10000 });
+                const pageFirst = await browser.evaluate(`return {
+                    cards: document.querySelectorAll('#vocabList .vocab-item').length,
+                    note: document.getElementById('loadMoreNote').textContent,
+                    total: window.PDState.entriesMeta.total,
+                    hasMore: window.PDState.entriesMeta.has_more
+                };`);
+                check('第一頁只渲染 60 張卡', pageFirst.cards === 60, JSON.stringify(pageFirst));
+                /* 單元裡本來就有前面段落留下的生字 → 總數用伺服器回的，不要寫死 */
+                check('提示顯示已顯示 60／總數', /60/.test(pageFirst.note) && pageFirst.note.includes(String(pageFirst.total)), pageFirst.note);
+                check('has_more 是 true（還有下一頁）', pageFirst.hasMore === true);
+                check('總數大於一頁（才有分頁可測）', pageFirst.total > 60, pageFirst.total);
+
+                await browser.evaluate(`document.getElementById('loadMoreBtn').click(); return true;`);
+                await browser.waitFor(`document.querySelectorAll('#vocabList .vocab-item').length === 120`, { timeout: 10000 });
+                check('載入更多之後變成 120 張卡', true);
+
+                await browser.evaluate(`document.getElementById('loadMoreBtn').click(); return true;`);
+                await browser.waitFor(`document.getElementById('loadMoreBtn').hidden === true`, { timeout: 10000 });
+                const pageThird = await browser.evaluate(`return document.querySelectorAll('#vocabList .vocab-item').length;`);
+                check('載完所有生字之後按鈕收起', pageThird === pageFirst.total, `${pageThird} / ${pageFirst.total}`);
+
+                /* 搜尋走伺服器：最後一頁的字也找得到 */
+                await browser.evaluate(`
+                    const input = document.getElementById('searchInput');
+                    input.value = 'paging123';
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    return true;
+                `);
+                await browser.waitFor(`document.querySelectorAll('#vocabList .vocab-item').length === 1`, { timeout: 12000 });
+                const pageSearch = await browser.evaluate(`return document.getElementById('vocabList').textContent.trim();`);
+                check('搜尋由伺服器端過濾（只回命中的那一筆）', pageSearch.includes('paging123'), pageSearch.slice(0, 60));
+
+                /* 清掉搜尋 → 回到第一頁 */
+                await browser.evaluate(`
+                    const input = document.getElementById('searchInput');
+                    input.value = '';
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    return true;
+                `);
+                await browser.waitFor(`document.querySelectorAll('#vocabList .vocab-item').length === 60`, { timeout: 12000 });
+                check('清掉搜尋回到第一頁（60 張）', true);
+            }
+        }
+
         console.log('\n【9】收尾：沒有 CSP 違規、例外、下載、截圖');
         const csp = await browser.evaluate(`return window.__cspViolations || [];`);
         check('沒有 CSP 違規', csp.length === 0, JSON.stringify(csp));

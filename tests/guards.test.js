@@ -121,7 +121,7 @@ test('vercel.json：靜態檔要指定自家 CORS，不能讓 CDN 預設的 `*` 
     const staticRule = config.headers.find((rule) => String(rule.source).includes('js'));
     assert.ok(staticRule, '找不到 /js /css /img 的標頭規則');
     const byKey = Object.fromEntries(staticRule.headers.map((header) => [header.key, header.value]));
-    assert.match(byKey['Access-Control-Allow-Origin'] || '', /^https:\/\/pv-dictionary-mylearning\.vercel\.app$/,
+    assert.match(byKey['Access-Control-Allow-Origin'] || '', /^https:\/\/gary-dictionary-mylearning\.vercel\.app$/,
         'ACAO 必須是自家網域，不能是 *');
     assert.equal(byKey['Cross-Origin-Resource-Policy'], 'same-origin');
     assert.equal(byKey['Access-Control-Allow-Origin'].includes('*'), false);

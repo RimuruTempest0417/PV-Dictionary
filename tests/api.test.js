@@ -1592,3 +1592,243 @@ test('帳號救援（C-3）：管理員重設密碼（臨時密碼只回一次�
     const actions = store.listAuditLogs({ limit: 40 }).items.map((row) => row.action);
     assert.ok(actions.includes('USER_PASSWORD_RESET') && actions.includes('USER_2FA_RESET') && actions.includes('TWO_FA_ENABLE'), actions.join(','));
 });
+
+
+/* ============================================================
+ * v0.6.0：修改年級、樂觀鎖（D-2）、每單元錄音上限（D-3）
+ * ============================================================ */
+
+test('v0.6.0 修改年級：只要年級就能改名，重複／空白／舊版本都會被擋', async (t) => {
+    const { base, store, ids } = startServer(t);
+    const teacher = await login(base, 'teacher');
+
+    const before = await api(base, '/api/books');
+    assert.equal(before.data.books[0].grade, 'S1');
+    assert.ok(before.data.books[0].updated_at, '書本要回 updated_at（樂觀鎖要用）');
+
+    /* 1. 改名成功（帶正確的版本） */
+    const renamed = await api(base, `/api/books/${ids.book.id}`, {
+        method: 'PATCH', cookie: teacher.cookie,
+        body: { grade: 'S2', version: before.data.books[0].updated_at }
+    });
+    assert.equal(renamed.status, 200);
+    assert.equal(renamed.data.book.grade, 'S2');
+    assert.equal(store.getBook(ids.book.id).grade, 'S2');
+    assert.equal(store.getBook(ids.book.id).name, 'S2', 'name 是內部欄位，與年級同步');
+
+    /* 2. 再建一個同年級的 → 409（學生會分不出要點哪一個） */
+    const second = await api(base, '/api/books', { method: 'POST', cookie: teacher.cookie, body: { grade: 'S3' } });
+    assert.equal(second.status, 201);
+    const clash = await api(base, `/api/books/${second.data.book.id}`, {
+        method: 'PATCH', cookie: teacher.cookie, body: { grade: 'S2' }
+    });
+    assert.equal(clash.status, 409);
+    assert.equal(clash.data.code, 'DUPLICATE_GRADE');
+    assert.equal(clash.data.details.grade, 'S2');
+
+    /* 3. 空白年級 → 400 */
+    const empty = await api(base, `/api/books/${second.data.book.id}`, {
+        method: 'PATCH', cookie: teacher.cookie, body: { grade: '   ' }
+    });
+    assert.equal(empty.status, 400);
+    assert.equal(empty.data.code, 'BOOK_GRADE_REQUIRED');
+
+    /* 4. 同樣是自己那筆（不算重複）→ 200 */
+    const same = await api(base, `/api/books/${second.data.book.id}`, {
+        method: 'PATCH', cookie: teacher.cookie, body: { grade: 'S3' }
+    });
+    assert.equal(same.status, 200);
+
+    /* 5. 用舊版本送（別人先改過的情境）→ 409 STALE_WRITE */
+    const stale = await api(base, `/api/books/${ids.book.id}`, {
+        method: 'PATCH', cookie: teacher.cookie, body: { grade: 'S9', version: before.data.books[0].updated_at }
+    });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.data.code, 'STALE_WRITE');
+    assert.ok(stale.data.details.current, '要回最新版本讓前端重新整理');
+    assert.equal(store.getBook(ids.book.id).grade, 'S2', '被擋下的請求不可以改到資料');
+
+    /* 6. 稽核有紀錄 */
+    const actions = store.listAuditLogs({ limit: 30 }).items.map((row) => row.action);
+    assert.ok(actions.includes('BOOK_UPDATE'), actions.join(','));
+
+    /* 7. 科代表不能改年級（只有老師以上） */
+    const classrep = await login(base, 'classrep');
+    const denied = await api(base, `/api/books/${ids.book.id}`, {
+        method: 'PATCH', cookie: classrep.cookie, body: { grade: 'S4' }
+    });
+    assert.equal(denied.status, 403);
+});
+
+test('v0.6.0 樂觀鎖（D-2）：生字與單元被別人改過就回 409，不覆蓋別人的修改', async (t) => {
+    const { base, store, ids } = startServer(t);
+    const teacher = await login(base, 'teacher');
+
+    /* 生字：兩次讀取之間有人改過 */
+    const entryId = store.listEntries({ unitId: ids.unit.id })[0].id;
+    const first = await api(base, `/api/units/${ids.unit.id}?status=all`, { cookie: teacher.cookie });
+    const readVersion = first.data.entries.find((e) => e.id === entryId).updated_at;
+
+    const okEdit = await api(base, `/api/entries/${entryId}`, {
+        method: 'PATCH', cookie: teacher.cookie, body: { zh_meaning: '校園（改）', version: readVersion }
+    });
+    assert.equal(okEdit.status, 200);
+    assert.equal(okEdit.data.entry.updated_at !== readVersion, true, '更新後版本要變');
+
+    const conflict = await api(base, `/api/entries/${entryId}`, {
+        method: 'PATCH', cookie: teacher.cookie, body: { zh_meaning: '別人的修改', version: readVersion }
+    });
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.data.code, 'STALE_WRITE');
+    assert.equal(store.getEntry(entryId).zh_meaning, '校園（改）', '衝突的請求不可寫入');
+
+    /* 帶最新版本就沒問題 */
+    const retry = await api(base, `/api/entries/${entryId}`, {
+        method: 'PATCH', cookie: teacher.cookie,
+        body: { zh_meaning: '校園（再改）', version: store.getEntry(entryId).updated_at }
+    });
+    assert.equal(retry.status, 200);
+
+    /* 沒有帶版本（舊前端、腳本）→ 照舊可以寫（不能把人擋在門外） */
+    const noVersion = await api(base, `/api/entries/${entryId}`, {
+        method: 'PATCH', cookie: teacher.cookie, body: { zh_meaning: '沒有版本' }
+    });
+    assert.equal(noVersion.status, 200);
+
+    /* 單元也一樣 */
+    const unitView = await api(base, `/api/units/${ids.unit.id}`, { cookie: teacher.cookie });
+    const unitVersion = unitView.data.unit.updated_at;
+    assert.ok(unitVersion, '單元要回 updated_at');
+    const unitOk = await api(base, `/api/units/${ids.unit.id}`, {
+        method: 'PATCH', cookie: teacher.cookie, body: { title: 'My New School 2', version: unitVersion }
+    });
+    assert.equal(unitOk.status, 200);
+    const unitConflict = await api(base, `/api/units/${ids.unit.id}`, {
+        method: 'PATCH', cookie: teacher.cookie, body: { title: '別人的標題', version: unitVersion }
+    });
+    assert.equal(unitConflict.status, 409);
+    assert.equal(store.getUnit(ids.unit.id).title, 'My New School 2');
+});
+
+test('v0.6.0 每單元錄音上限（D-3）：到上限就擋、同一顆生字換錄音不算新增、用量看得見', async (t) => {
+    const { base, store, ids } = startServer(t);
+    const teacher = await login(base, 'teacher');
+    const tiny = Buffer.from('OggS-not-really-audio-but-base64-is-all-we-check').toString('base64');
+
+    /* 單元用量（0/60） */
+    const empty = await api(base, `/api/units/${ids.unit.id}`, { cookie: teacher.cookie });
+    assert.equal(empty.data.unit.audio_count, 0);
+    assert.equal(empty.data.unit.audio_limit, 60);
+
+    /* 錄一段 → 用量變 1 */
+    const first = await api(base, `/api/entries/${store.listEntries({ unitId: ids.unit.id })[0].id}/audio`, {
+        method: 'POST', cookie: teacher.cookie, body: { data: `data:audio/webm;base64,${tiny}`, duration_ms: 900 }
+    });
+    assert.equal(first.status, 201);
+    const one = await api(base, `/api/units/${ids.unit.id}`, { cookie: teacher.cookie });
+    assert.equal(one.data.unit.audio_count, 1);
+
+    /* 把這個單元塞到上限（直接寫資料層，避免 60 次 HTTP） */
+    const limit = one.data.unit.audio_limit;
+    const existing = store.listEntries({ unitId: ids.unit.id });
+    for (let i = existing.length; i < limit; i += 1) {
+        const entry = store.createEntry({
+            unit_id: ids.unit.id, headword: `filler${i}`, headword_norm: `filler${i}`,
+            status: 'published', sort_order: 100 + i, created_by: 'test'
+        });
+        store.createAudio({ entry_id: entry.id, source: 'teacher', accent: 'en-GB', mime: 'audio/webm', bytes: 12, duration_ms: 500, data: tiny, uploaded_by: 'teacher' });
+    }
+    const full = await api(base, `/api/units/${ids.unit.id}`, { cookie: teacher.cookie });
+    assert.equal(full.data.unit.audio_count, limit, '測試前置：單元已滿');
+
+    /* 已滿 → 新的生字不能再錄（400，並回用量讓前端說明） */
+    const extra = store.createEntry({
+        unit_id: ids.unit.id, headword: 'overflow', headword_norm: 'overflow',
+        status: 'published', sort_order: 900, created_by: 'test'
+    });
+    const blocked = await api(base, `/api/entries/${extra.id}/audio`, {
+        method: 'POST', cookie: teacher.cookie, body: { data: `data:audio/webm;base64,${tiny}` }
+    });
+    assert.equal(blocked.status, 400);
+    assert.equal(blocked.data.code, 'AUDIO_LIMIT_REACHED');
+    assert.equal(blocked.data.details.limit, limit);
+    assert.equal(blocked.data.details.count, limit);
+    assert.equal(store.findTeacherAudio(extra.id), null, '被擋下時不可以寫入');
+
+    /* 但「換掉已有的那一顆」不算新增 → 還是可以錄 */
+    const replaced = await api(base, `/api/entries/${existing[0].id}/audio`, {
+        method: 'POST', cookie: teacher.cookie, body: { data: `data:audio/webm;base64,${tiny}`, duration_ms: 800 }
+    });
+    assert.equal(replaced.status, 201);
+
+    /* 統計（📊 概況）要有容量資訊 */
+    const manager = await login(base, 'manager');
+    const stats = await api(base, '/api/admin/stats', { cookie: manager.cookie });
+    assert.equal(stats.data.audio.per_unit_limit, limit);
+    assert.ok(stats.data.audio.bytes > 0, '要回錄音總位元組數');
+});
+
+
+test('v0.6.0 生字表分頁（D-1）：一頁一頁送、搜尋在伺服器端、待審核另外抓', async (t) => {
+    const { base, store, ids } = startServer(t);
+    const teacher = await login(base, 'teacher');
+
+    /* 這個單元塞 130 個生字（第一頁 60、第二頁 60、第三頁 10） */
+    for (let i = 2; i <= 130; i += 1) {
+        store.createEntry({
+            unit_id: ids.unit.id, headword: `word${String(i).padStart(3, '0')}`, headword_norm: `word${String(i).padStart(3, '0')}`,
+            zh_meaning: i % 2 ? '測試' : '', en_definition: i % 5 === 0 ? 'a searchable definition' : '',
+            status: 'published', sort_order: i, created_by: 'test'
+        });
+    }
+
+    const first = await api(base, `/api/units/${ids.unit.id}`, { cookie: teacher.cookie });
+    assert.equal(first.status, 200);
+    assert.equal(first.data.entries.length, 60, '預設一頁 60 筆');
+    assert.equal(first.data.total, 130);
+    assert.equal(first.data.page, 1);
+    assert.equal(first.data.has_more, true);
+
+    const second = await api(base, `/api/units/${ids.unit.id}?page=2`, { cookie: teacher.cookie });
+    assert.equal(second.data.entries.length, 60);
+    assert.equal(second.data.page, 2);
+    assert.equal(second.data.has_more, true);
+    assert.notEqual(second.data.entries[0].id, first.data.entries[0].id, '第二頁不可以跟第一頁重複');
+
+    const third = await api(base, `/api/units/${ids.unit.id}?page=3`, { cookie: teacher.cookie });
+    assert.equal(third.data.entries.length, 10);
+    assert.equal(third.data.has_more, false);
+
+    const capped = await api(base, `/api/units/${ids.unit.id}?per_page=9999`, { cookie: teacher.cookie });
+    assert.equal(capped.data.entries.length, 130, 'per_page 有上限，超過就回全部（不會爆）');
+    assert.equal(capped.data.per_page, 200, 'per_page 上限是 200');
+
+    /* 搜尋：伺服器端比對生字／中文／英文解釋 */
+    const byWord = await api(base, `/api/units/${ids.unit.id}?q=word007`, { cookie: teacher.cookie });
+    assert.equal(byWord.data.total, 1);
+    assert.equal(byWord.data.entries[0].headword, 'word007');
+
+    const byChinese = await api(base, `/api/units/${ids.unit.id}?q=${encodeURIComponent('校園')}`, { cookie: teacher.cookie });
+    assert.equal(byChinese.data.total, 1, '中文解釋也要搜得到');
+
+    const byEnglish = await api(base, `/api/units/${ids.unit.id}?q=searchable`, { cookie: teacher.cookie });
+    assert.equal(byEnglish.data.total, 26, '130 筆裡每 5 筆一個（含原本的 campus 不算）');
+
+    const none = await api(base, `/api/units/${ids.unit.id}?q=zzz-nothing`, { cookie: teacher.cookie });
+    assert.equal(none.data.total, 0);
+    assert.equal(none.data.entries.length, 0);
+    assert.equal(none.data.has_more, false);
+
+    /* 不認識的 status 要忽略（不要回空的，那會變成「這個單元沒有生字」的鬼故事） */
+    const weird = await api(base, `/api/units/${ids.unit.id}?status=all`, { cookie: teacher.cookie });
+    assert.equal(weird.data.total, 130);
+
+    /* 訪客看不到待審核（teacher 先把一筆改成待審核） */
+    const pendingEntry = store.listEntries({ unitId: ids.unit.id })[1];
+    store.updateEntry(pendingEntry.id, { status: 'pending' });
+    const asGuest = await api(base, `/api/units/${ids.unit.id}?status=pending&per_page=200`);
+    assert.equal(asGuest.data.entries.length, 0, '訪客問 pending 也拿不到別人的草稿');
+    const asTeacher = await api(base, `/api/units/${ids.unit.id}?status=pending&per_page=200`, { cookie: teacher.cookie });
+    assert.equal(asTeacher.data.entries.length, 1);
+    assert.equal(asTeacher.data.entries[0].id, pendingEntry.id);
+});

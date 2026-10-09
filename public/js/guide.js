@@ -41,14 +41,14 @@
         {
             id: 'audio', audience: 'teacher',
             covers: [],
-            title: 'guide.audio.title', steps: ['guide.audio.s1', 'guide.audio.s2'],
+            title: 'guide.audio.title', steps: ['guide.audio.s1', 'guide.audio.s2', 'guide.audio.s3'],
             ids: ['audioModal', 'audioRecordBtn', 'audioFileInput']
         },
         {
             id: 'units', audience: 'teacher',
             covers: ['newUnitBtn', 'navUnitEditBtn', 'newBookBtn'],
-            title: 'guide.units.title', steps: ['guide.units.s1', 'guide.units.s2', 'guide.units.s3'],
-            ids: ['bookForm', 'unitForm', 'unitEditForm'],
+            title: 'guide.units.title', steps: ['guide.units.s1', 'guide.units.s2', 'guide.units.s3', 'guide.units.s4'],
+            ids: ['bookForm', 'unitForm', 'unitEditForm', 'gradeList', 'gradeEditForm'],
             capability: 'can_manage_content'
         },
         {

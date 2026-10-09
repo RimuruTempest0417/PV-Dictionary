@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Gary-Dictionary — an online English vocabulary dictionary: browse words by book and unit, with pronunciation, part of speech, Chinese and English meanings.">
-    <title>Gary-Dictionary v0.5.0</title>
-    <link rel="icon" href="/img/favicon.svg?v=0.5.0" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.5.0">
-    <link rel="stylesheet" href="/css/tokens.css?v=0.5.0">
-    <link rel="stylesheet" href="/css/app.css?v=0.5.0">
-    <link rel="stylesheet" href="/css/print.css?v=0.5.0" media="print">
-    <script src="/js/analytics.js?v=0.5.0"></script>
+    <title>Gary-Dictionary v0.6.0</title>
+    <link rel="icon" href="/img/favicon.svg?v=0.6.0" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.6.0">
+    <link rel="stylesheet" href="/css/tokens.css?v=0.6.0">
+    <link rel="stylesheet" href="/css/app.css?v=0.6.0">
+    <link rel="stylesheet" href="/css/print.css?v=0.6.0" media="print">
+    <script src="/js/analytics.js?v=0.6.0"></script>
     <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
@@ -123,6 +123,10 @@
         </div>
         <p id="unitHint" class="hint" hidden></p>
         <ul id="vocabList" class="vocab-list"></ul>
+        <div class="load-more-wrap">
+            <button id="loadMoreBtn" class="btn btn-ghost" type="button" hidden data-i18n="unit.loadMore">⬇ Load more words</button>
+            <p id="loadMoreNote" class="hint" hidden></p>
+        </div>
         <p id="vocabEmpty" class="empty" hidden data-i18n="unit.empty">No vocabulary in this unit yet.</p>
     </section>
 
@@ -288,6 +292,27 @@
             </div>
         </form>
 
+        <div id="gradeListBlock" class="panel" hidden>
+            <div class="panel-head">
+                <h2 class="panel-title" data-i18n="bookEdit.title">Grades</h2>
+                <p class="panel-note" data-i18n="bookEdit.note"></p>
+            </div>
+            <ul id="gradeList" class="grade-list"></ul>
+        </div>
+
+        <form id="gradeEditForm" class="panel form" hidden>
+            <input type="hidden" id="gradeEditId">
+            <div class="field">
+                <label class="field-label" for="fGradeEditValue" data-i18n="bookEdit.field">Grade *</label>
+                <input id="fGradeEditValue" type="text" maxlength="20" required>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary" type="submit" data-i18n="bookEdit.save">Save grade</button>
+                <button class="btn btn-ghost" type="button" id="gradeEditCancelBtn" data-i18n="bookEdit.cancel">Cancel</button>
+                <span id="gradeEditMsg" class="form-msg" role="status"></span>
+            </div>
+        </form>
+
         <div id="auditBlock" class="panel" hidden>
             <div class="panel-head">
                 <h2 class="panel-title" data-i18n="audit.title">🧾 Recent activity</h2>
@@ -444,7 +469,7 @@
 </main>
 
 <footer class="footer">
-    <span>Gary-Dictionary <span id="versionLabel">v0.5.0</span></span>
+    <span>Gary-Dictionary <span id="versionLabel">v0.6.0</span></span>
     <span class="footer-sep">·</span>
     <span id="backendLabel" class="footer-muted"></span>
     <span class="footer-sep">·</span>
@@ -528,24 +553,25 @@
             <button id="audioDeleteBtn" class="btn btn-danger" type="button" hidden data-i18n="audio.delete">🗑 Delete current recording</button>
             <button id="audioCancelBtn" class="btn btn-ghost" type="button" data-i18n="audio.close">Close</button>
         </div>
+        <p id="audioUsage" class="modal-note"></p>
         <p id="audioMsg" class="form-msg" role="status"></p>
     </div>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="/js/errorlog.js?v=0.5.0"></script>
-<script src="/js/i18n.js?v=0.5.0"></script>
-<script src="/js/api.js?v=0.5.0"></script>
-<script src="/js/ui.js?v=0.5.0"></script>
-<script src="/js/audio.js?v=0.5.0"></script>
-<script src="/js/playlist.js?v=0.5.0"></script>
-<script src="/js/auth.js?v=0.5.0"></script>
-<script src="/js/vocab.js?v=0.5.0"></script>
-<script src="/js/xlsx.js?v=0.5.0"></script>
-<script src="/js/admin.js?v=0.5.0"></script>
-<script src="/js/users.js?v=0.5.0"></script>
-<script src="/js/guide.js?v=0.5.0"></script>
-<script src="/js/app.js?v=0.5.0"></script>
+<script src="/js/errorlog.js?v=0.6.0"></script>
+<script src="/js/i18n.js?v=0.6.0"></script>
+<script src="/js/api.js?v=0.6.0"></script>
+<script src="/js/ui.js?v=0.6.0"></script>
+<script src="/js/audio.js?v=0.6.0"></script>
+<script src="/js/playlist.js?v=0.6.0"></script>
+<script src="/js/auth.js?v=0.6.0"></script>
+<script src="/js/vocab.js?v=0.6.0"></script>
+<script src="/js/xlsx.js?v=0.6.0"></script>
+<script src="/js/admin.js?v=0.6.0"></script>
+<script src="/js/users.js?v=0.6.0"></script>
+<script src="/js/guide.js?v=0.6.0"></script>
+<script src="/js/app.js?v=0.6.0"></script>
 </body>
 </html>

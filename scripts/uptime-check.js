@@ -4,7 +4,7 @@
  * 用途：讓「網站掛掉」這件事在別人發現之前先通知你。
  *   - 手動：`npm run uptime`（或 node scripts/uptime-check.js）
  *   - 排程：放進 Hermes 的 cron 或任何排程器，失敗時 exit code 1（監控服務據此發警報）
- *   - 免費外部監控：把服務指向 https://pv-dictionary-mylearning.vercel.app/api/health
+ *   - 免費外部監控：把服務指向 https://gary-dictionary-mylearning.vercel.app/api/health
  *     （見 docs/監控與錯誤追查.md 的設定步驟），它會每 5 分鐘打一次
  *
  * 檢查項目（全部都要通過才算健康）：
@@ -24,7 +24,7 @@ const arg = (name, fallback) => {
     return hit ? hit.split('=').slice(1).join('=') : fallback;
 };
 
-const SITE = String(arg('site', process.env.SITE_URL || 'https://pv-dictionary-mylearning.vercel.app')).replace(/\/+$/, '');
+const SITE = String(arg('site', process.env.SITE_URL || 'https://gary-dictionary-mylearning.vercel.app')).replace(/\/+$/, '');
 const AS_JSON = process.argv.includes('--json');
 const TIMEOUT_MS = Number(arg('timeout', 15000));
 

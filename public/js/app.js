@@ -17,6 +17,8 @@
         currentBookGrade: '',
         currentUnit: null,
         query: '',
+        /* D-1：分頁狀態（畫面上的清單目前是哪一頁、總共幾筆、還有沒有下一頁） */
+        entriesMeta: { page: 1, per_page: 0, total: 0, has_more: false },
         health: null,
         /* 三個畫面：shelf（書架）→ units（目錄）→ vocab（生字表） */
         view: 'shelf'
@@ -297,6 +299,7 @@
     }
 
     let playingEntryId = null;
+    let searchTimer = null;       /* D-1：搜尋的 debounce 計時器 */
 
     function markPlaying(entry) {
         playingEntryId = entry ? entry.id : null;
@@ -306,13 +309,38 @@
         if (card) card.classList.add('is-playing');
     }
 
-    function togglePlayAll() {
+    /* D-1：連續播放要整個單元的生字 → 先一頁一頁抓完（播放是明確的使用者動作，值得這幾個請求） */
+    async function ensureAllEntriesLoaded() {
+        let meta = state.entriesMeta;
+        let guard = 0;
+        while (meta && meta.has_more && guard < 50) {
+            guard += 1;
+            const data = await api.get(unitPageUrl({ page: (meta.page || 1) + 1 }));
+            const seen = new Set(state.entries.map((entry) => String(entry.id)));
+            for (const entry of (data.entries || [])) {
+                if (!seen.has(String(entry.id))) state.entries.push(entry);
+            }
+            meta = {
+                page: data.page || (meta.page || 1) + 1,
+                per_page: data.per_page || meta.per_page,
+                total: typeof data.total === 'number' ? data.total : meta.total,
+                has_more: Boolean(data.has_more)
+            };
+            state.entriesMeta = meta;
+        }
+        renderVocab();
+        renderLoadMore();
+    }
+
+    async function togglePlayAll() {
         const button = document.getElementById('playAllBtn');
         if (!button) return;
         if (playlist) {
             stopsPlaylist();
             return;
         }
+        /* D-1：分頁之下畫面可能只有第一頁 → 播放全部之前先把整個單元載完 */
+        await ensureAllEntriesLoaded();
         const entries = state.entries.slice();
         if (!entries.length) return;
         button.textContent = t('unit.stopPlay');
@@ -535,6 +563,66 @@
         renderShelf();
     }
 
+    /* D-1：抓目前單元的「待審核」生字（伺服器端過濾；看不到 pending 的身分會拿到空清單） */
+    async function fetchPendingEntries() {
+        if (!state.currentUnitId) return [];
+        if (!window.PDAuth.can('can_edit')) return [];
+        try {
+            const data = await api.get(`/api/units/${state.currentUnitId}?status=pending&per_page=200`);
+            return data.entries || [];
+        } catch (err) {
+            return [];
+        }
+    }
+
+    /* D-1：組出單元生字表的分頁網址（搜尋字串也在這裡帶上） */
+    function unitPageUrl({ page = 1 } = {}) {
+        const params = new URLSearchParams();
+        params.set('page', String(page));
+        const query = (state.query || '').trim();
+        if (query) params.set('q', query);
+        return `/api/units/${state.currentUnitId}?${params.toString()}`;
+    }
+
+    /* D-1：「載入更多」按鈕與「已顯示 n／total」提示 */
+    function renderLoadMore() {
+        const button = document.getElementById('loadMoreBtn');
+        const note = document.getElementById('loadMoreNote');
+        if (!button || !note) return;
+        const meta = state.entriesMeta || { total: state.entries.length, has_more: false };
+        const shown = state.entries.length;
+        const more = Boolean(meta.has_more) && shown < meta.total;
+        button.hidden = !more;
+        button.disabled = false;
+        note.hidden = meta.total <= (meta.per_page || shown) && !more;
+        note.textContent = note.hidden ? '' : t('unit.loadMoreNote', { shown, total: meta.total });
+    }
+
+    async function loadMoreEntries() {
+        const meta = state.entriesMeta;
+        if (!meta || !meta.has_more) return;
+        const button = document.getElementById('loadMoreBtn');
+        button.disabled = true;
+        try {
+            const data = await api.get(unitPageUrl({ page: (meta.page || 1) + 1 }));
+            const seen = new Set(state.entries.map((entry) => String(entry.id)));
+            for (const entry of (data.entries || [])) {
+                if (!seen.has(String(entry.id))) state.entries.push(entry);
+            }
+            state.entriesMeta = {
+                page: data.page || (meta.page || 1) + 1,
+                per_page: data.per_page || meta.per_page,
+                total: typeof data.total === 'number' ? data.total : meta.total,
+                has_more: Boolean(data.has_more)
+            };
+            renderVocab();
+            renderLoadMore();
+        } catch (err) {
+            window.PDUI.toast(window.PDI18n.errorMessage(err), 'error');
+            button.disabled = false;
+        }
+    }
+
     async function reloadUnits(bookId) {
         const data = await api.get(`/api/books/${bookId}/units`);
         state.units = data.units || [];
@@ -544,9 +632,19 @@
 
     async function reloadUnit(options) {
         if (!state.currentUnitId) return;
-        const data = await api.get(`/api/units/${state.currentUnitId}`);
+        /* D-1：一頁一頁抓（page／per_page／q 都交給伺服器）。
+         * state.entries 永遠代表「畫面上這一份清單」，不是「這個單元的所有生字」。 */
+        const firstPage = 1;
+        const data = await api.get(unitPageUrl({ page: firstPage }));
         state.entries = data.entries || [];
+        state.entriesMeta = {
+            page: data.page || firstPage,
+            per_page: data.per_page || (data.entries || []).length,
+            total: typeof data.total === 'number' ? data.total : (data.entries || []).length,
+            has_more: Boolean(data.has_more)
+        };
         state.currentUnit = data.unit;
+        renderLoadMore();
         /* 順便把單元清單的數字更新：新增／刪除／核准生字後，
          * chips 上的生字數也要跟著變，否則畫面上兩個地方的數字會不一致。 */
         if (state.currentBookId) {
@@ -557,7 +655,9 @@
         renderUnitList();
         renderUnitHead();
         renderVocab();
-        window.PDAdmin.renderPending(state.entries);
+        /* D-1：待審核清單不能只看畫面上那一頁（分頁之後可能還有沒載入的待審核生字）
+         * → 另外抓一次「這個單元所有 pending」（老師／科代表才看得到）。 */
+        window.PDAdmin.renderPending(await fetchPendingEntries());
         window.PDAdmin.refreshAvailability();
         if (typeof options === 'object' && options && options.keepForm) {
             /* 表單保持開啟（連續輸入情境） */
@@ -909,8 +1009,17 @@
             const button = event.target.closest('[data-admin-tab]');
             if (button) window.PDAdmin.showPanel(button.dataset.adminTab);
         });
+        document.getElementById('loadMoreBtn').addEventListener('click', () => {
+            loadMoreEntries();
+        });
         document.getElementById('searchInput').addEventListener('input', (event) => {
             state.query = event.target.value;
+            /* D-1：生字表是分頁的 → 搜尋要回伺服器（不能只過濾手上這一頁，否則會找不到還沒載入的字）。
+             * 打太快會一直重抓，所以等手停下來 300ms 再送。 */
+            if (window.clearTimeout(searchTimer)) window.clearTimeout(searchTimer);
+            searchTimer = window.setTimeout(() => {
+                if (state.currentUnitId) reloadUnit({ keepForm: true });
+            }, 300);
             renderVocab();
         });
         document.getElementById('langSwitch').addEventListener('click', (event) => {
@@ -928,7 +1037,8 @@
             renderUnitHead();
             renderVocab();
             updateEmptyState();
-            window.PDAdmin.renderPending(state.entries);
+            /* D-1：待審核清單是另外抓的（非同步）—— 這個監聽器本身不能 await，只好 then */
+            fetchPendingEntries().then((pending) => window.PDAdmin.renderPending(pending));
             window.PDAdmin.refreshAvailability();
             if (!document.getElementById('auditBlock').hidden) window.PDAdmin.loadAudit();
             if (!document.getElementById('usersBlock').hidden) window.PDUsers.refresh();
