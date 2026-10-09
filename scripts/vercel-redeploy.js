@@ -1,10 +1,21 @@
 #!/usr/bin/env node
-/* 重新部署現在的 production 版本，並讀回「專案現在有哪些網域」。
- * 用途：專案改名後，要有一個新的 production 部署，新的 *.vercel.app 網域才會被指派。
+/* 重新部署現在的 main 到 production（Vercel），並讀回專案網域。
+ *
+ * ★ 為什麼不呼叫「redeploy」端點：`POST /v13|v12|v10/deployments/<id>/redeploy` 現在一律回
+ *   404 `not_found`（2026-10 實測；改名後想用它觸發新部署才發現）。
+ *   可用的做法是用 GitHub 整合建立新部署：`POST /v13/deployments` 帶 gitSource（repoId + ref），
+ *   效果等於在 Vercel 介面按 Redeploy，而且會吃到**最新的環境變數**（換網址／改變數後就需要它）。
+ *
+ * 用法：node scripts/vercel-redeploy.js [--wait]
+ *   需要 .env 有 VERCEL_TOKEN。
  */
 require('dotenv').config();
 const TEAM_ID = 'team_m7zLQ66u3WWs3qY1908y01uu';
 const PROJECT_ID = 'prj_3BytnR5a2EpXnGzyDAF2mHJdcvyx';
+const PROJECT_NAME = 'gary-dictionary';
+const REPO_ID = 1408878666;          /* RimuruTempest0417/PV-Dictionary（GET /v9/projects/<id>.link.repoId） */
+const BRANCH = 'main';
+const WAIT = process.argv.includes('--wait');
 
 async function vercel(method, path, body) {
     const res = await fetch(`https://api.vercel.com${path}`, {
@@ -22,20 +33,22 @@ async function vercel(method, path, body) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
-    const list = await vercel('GET', `/v6/deployments?projectId=${PROJECT_ID}&target=production&limit=1&teamId=${TEAM_ID}`);
-    const latest = list.deployments && list.deployments[0];
-    if (!latest) throw new Error('找不到 production 部署');
-    console.log('最新 production 部署：', latest.url, latest.state);
-    /* ★ 清單回的是 uid（不是 id）—— 用 id 會變成 /deployments/undefined/redeploy 404 */
-    const redeploy = await vercel('POST', `/v13/deployments/${latest.uid || latest.id}/redeploy?teamId=${TEAM_ID}&forceNew=1`, { name: 'gary-dictionary' });
-    console.log('已觸發重新部署：', redeploy.id);
-    for (let i = 0; i < 60; i += 1) {
-        await sleep(10000);
-        const state = await vercel('GET', `/v13/deployments/${redeploy.id}?teamId=${TEAM_ID}`);
-        process.stdout.write(`\r狀態：${state.readyState}（第 ${i + 1} 次）   `);
-        if (state.readyState === 'READY' || state.readyState === 'ERROR') {
-            console.log('\n最終狀態：', state.readyState, '｜url:', state.url);
-            break;
+    const created = await vercel('POST', `/v13/deployments?teamId=${TEAM_ID}&forceNew=1`, {
+        name: PROJECT_NAME,
+        project: PROJECT_ID,
+        target: 'production',
+        gitSource: { type: 'github', repoId: REPO_ID, ref: BRANCH }
+    });
+    console.log(`已觸發 production 部署：${created.id}（${created.url || ''}）`);
+    if (WAIT) {
+        for (let i = 0; i < 60; i += 1) {
+            await sleep(10000);
+            const state = await vercel('GET', `/v13/deployments/${created.id}?teamId=${TEAM_ID}`);
+            process.stdout.write(`\r狀態：${state.readyState}（第 ${i + 1} 次）   `);
+            if (state.readyState === 'READY' || state.readyState === 'ERROR') {
+                console.log(`\n最終狀態：${state.readyState}｜url：${state.url}`);
+                break;
+            }
         }
     }
     const domains = await vercel('GET', `/v9/projects/${PROJECT_ID}/domains?teamId=${TEAM_ID}`);
