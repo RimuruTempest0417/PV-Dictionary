@@ -10,6 +10,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { createSupabaseStore } = require('../lib/store/supabase');
+/* ★ v0.6.1：假 PostgREST 要拿這份清單擋「不存在的欄位」——真實的 PostgREST 就是這樣（42703） */
+const { EXPECTED_COLUMNS } = require('../lib/schema');
 const { hashPassword } = require('../lib/passwords');
 
 const TABLES = ['dict_books', 'dict_units', 'dict_entries', 'dict_audio', 'dict_users', 'dict_grants', 'dict_audit_logs'];
@@ -24,6 +26,32 @@ function fakeSupabase() {
 
     function tableOf(pathname) {
         return pathname.split('/').pop();
+    }
+
+
+    /* ★ v0.6.1：真實 PostgREST 對「不存在的欄位」會回 42703：
+     *   Could not find the '<欄位>' column of '<表>' in the schema cache
+     *   假的不擋 → 本機全綠、線上直接 500（v0.6.0 的 dict_audit_logs.updated_at 就是這樣爆的）。
+     *   這裡照樣擋，而且是回一樣的形狀。 */
+    function unknownColumn(table, body) {
+        if (!body || typeof body !== 'object') return null;
+        const allowed = EXPECTED_COLUMNS[String(table).replace(/^dict_/, '')];
+        if (!allowed) return null;
+        for (const key of Object.keys(body)) {
+            if (!allowed.includes(key)) return key;
+        }
+        return null;
+    }
+
+    function schemaError(table, column) {
+        return {
+            ok: false,
+            status: 400,
+            text: async () => JSON.stringify({
+                message: `Could not find the '${column}' column of '${table}' in the schema cache`,
+                code: '42703'
+            })
+        };
     }
 
     global.fetch = async (url, init = {}) => {
@@ -57,6 +85,8 @@ function fakeSupabase() {
             return { ok: true, status: 200, text: async () => JSON.stringify(rows) };
         }
         if (method === 'POST') {
+            const badColumn = unknownColumn(table, body);
+            if (badColumn) return schemaError(table, badColumn);
             const row = Object.assign({}, body);
             if (row.id === undefined || row.id === null) {
                 row.id = db[table].reduce((max, r) => Math.max(max, Number(r.id) || 0), 0) + 1;
@@ -68,6 +98,8 @@ function fakeSupabase() {
             return { ok: true, status: 201, text: async () => JSON.stringify([row]) };
         }
         if (method === 'PATCH') {
+            const badColumn = unknownColumn(table, body);
+            if (badColumn) return schemaError(table, badColumn);
             let touched = 0;
             for (const row of db[table]) {
                 if (wanted && String(row.id) !== String(wanted)) continue;
@@ -386,4 +418,44 @@ test('Supabase 後端：寫回失敗時回 500，並帶上真正的原因（deta
     fake.flags.failWrites = false;
     const after = await (await fetch(`${base}/api/books`)).json();
     assert.deepEqual(after.books, [], '失敗的寫入不能留在記憶體裡');
+});
+
+
+test('v0.6.1 回歸：沒有 updated_at 欄位的表，寫入時不可以帶 updated_at（線上 42703 的元凶）', async () => {
+    const fake = fakeSupabase();
+    const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'test-key', hydrateTtlMs: 0 });
+    await store.hydrate();
+
+    /* 寫一筆稽核（登入時就會產生）→ 假 PostgREST 會比照真實的 PostgREST 擋未知欄位 */
+    store.insertAuditLog({
+        user_id: 1, display_name: 'T', role: 'admin', action: 'LOGIN', target_id: null,
+        details: '測試', ip: '127.0.0.1', created_at: new Date().toISOString(), is_self_test: false
+    });
+    await store.flush();
+
+    const posts = fake.calls.filter((call) => call.method === 'POST' && call.table === 'dict_audit_logs');
+    assert.equal(posts.length, 1);
+    assert.equal('updated_at' in posts[0].body, false, '稽核紀錄沒有 updated_at 欄位，寫了線上會 42703');
+
+    /* 有 updated_at 的表（生字）反過來要帶，否則樂觀鎖對新資料失效 */
+    const book = store.createBook({ code: 'X', name: 'X', grade: 'X', sort_order: 1, is_published: true });
+    const unit = store.createUnit({ book_id: book.id, unit_no: 1, title: 'U', sort_order: 1, is_published: true });
+    store.createEntry({ unit_id: unit.id, headword: 'apple', headword_norm: 'apple', status: 'published', sort_order: 1, created_by: 't' });
+    await store.flush();
+    const entryPost = fake.calls.filter((call) => call.method === 'POST' && call.table === 'dict_entries').pop();
+    assert.ok(entryPost.body.updated_at, '生字要帶 updated_at（樂觀鎖要用）');
+
+    fake.restore();
+    assert.equal(store.backend, 'supabase');
+});
+
+test('v0.6.1：HAS_UPDATED_AT 與 schema 清單一致（欄位有無的唯一來源）', () => {
+    const { HAS_UPDATED_AT, EXPECTED_COLUMNS } = require('../lib/schema');
+    for (const [table, columns] of Object.entries(EXPECTED_COLUMNS)) {
+        assert.equal(HAS_UPDATED_AT.has(table), columns.includes('updated_at'), `${table} 的判斷與清單不一致`);
+    }
+    /* 稽核／音檔／授權三張表確實沒有這個欄位（有測試盯著，未來若要加就要寫遷移檔） */
+    for (const table of ['audit_logs', 'audio', 'grants']) {
+        assert.equal(HAS_UPDATED_AT.has(table), false, `${table} 不應該被當成有 updated_at`);
+    }
 });

@@ -1666,6 +1666,14 @@ code {
 :root[data-font="s"] { font-size: 15px; }
 :root[data-font="l"] { font-size: 18.5px; }
 
+/* 字級切換鈕自己也要「看得出來誰大誰小」（使用者指定：A− 要比 A 小）：
+ * 三顆鈕排成 0.72rem < 0.85rem < 1rem 的階梯，光看按鈕就知道按下去會變大還是變小。 */
+#fontSwitch [data-font-value="s"] { font-size: 0.72rem; }
+#fontSwitch [data-font-value="m"] { font-size: 0.85rem; }
+#fontSwitch [data-font-value="l"] { font-size: 1rem; }
+/* 這三顆鈕用固定高度對齊基線，否則小字那顆會讓整個切換器高度跳動 */
+#fontSwitch button { min-height: 1.9rem; display: inline-flex; align-items: center; }
+
 /* 列印選項（B-5） */
 .print-options {
     display: inline-flex;

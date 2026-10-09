@@ -495,6 +495,28 @@ async function main() {
         check('新增書本後直接進入它的目錄（接著就能新增單元）', true);
         check('書架上也出現新的年級（S2）', (await browser.evaluate(`return document.getElementById('bookShelf').textContent.includes('S2');`)) === true);
 
+        console.log('\n【10b-2】字級切換鈕是階梯：A− < A < A+（使用者指定）');
+        const fontLadder = await browser.evaluate(`return Array.from(document.querySelectorAll('#fontSwitch [data-font-value]')).map((btn) => ({
+            value: btn.dataset.fontValue,
+            size: parseFloat(getComputedStyle(btn).fontSize)
+        }));`);
+        const sizeOf = (value) => (fontLadder.find((row) => row.value === value) || {}).size || 0;
+        check('A− 的字比 A 小（使用者指定）', sizeOf('s') < sizeOf('m'), JSON.stringify(fontLadder));
+        check('A+ 的字比 A 大', sizeOf('l') > sizeOf('m'), JSON.stringify(fontLadder));
+
+        /* 真的按下去：根字級要跟著變（A− 變小、A+ 變大） */
+        const rootSizes = {};
+        for (const value of ['s', 'm', 'l']) {
+            await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="${value}"]').click(); return true;`);
+            await sleep(150);
+            rootSizes[value] = await browser.evaluate(`return parseFloat(getComputedStyle(document.documentElement).fontSize);`);
+        }
+        check('按下 A−／A／A+ 根字級真的變小→中→大',
+            rootSizes.s < rootSizes.m && rootSizes.m < rootSizes.l, JSON.stringify(rootSizes));
+        /* 還原成預設（中） */
+        await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="m"]').click(); return true;`);
+        await sleep(150);
+
         console.log('\n【10c】年級制：新增年級 → 書架只出現年級（v0.5.0）');
         /* 建立年級（管理區只問年級） */
         await browser.evaluate(`document.getElementById('newBookBtn').click(); return true;`);
