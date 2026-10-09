@@ -14,7 +14,7 @@
         entries: [],
         currentBookId: null,
         currentUnitId: null,
-        currentBookName: '',
+        currentBookGrade: '',
         currentUnit: null,
         query: '',
         health: null,
@@ -116,10 +116,10 @@
             for (const unit of data.units) {
                 const chip = el('button', {
                     class: 'my-units-chip',
-                    attrs: { type: 'button', 'data-unit-id': unit.id, 'data-book-id': unit.book_id, title: `${unit.book_name} · Unit ${unit.unit_no}` },
+                    attrs: { type: 'button', 'data-unit-id': unit.id, 'data-book-id': unit.book_id, title: `${unit.grade || ''} · Unit ${unit.unit_no}` },
                     dataset: { unitId: unit.id, bookId: unit.book_id }
                 }, [
-                    el('span', { class: 'my-units-book', text: unit.book_name || '' }),
+                    el('span', { class: 'my-units-book', text: unit.grade || '' }),
                     el('span', { text: `Unit ${unit.unit_no}${unit.title ? ` · ${unit.title}` : ''}` }),
                     el('span', { class: 'cell-hint', text: `${unit.entries}${unit.pending ? ` · ${t('myUnits.pending', { n: unit.pending })}` : ''}` })
                 ]);
@@ -366,29 +366,18 @@
         clear(box);
         for (const book of state.books) {
             const meta = [
-                book.grade,
                 t('count.units', { n: book.unit_count }),
                 t('unit.words', { n: book.entry_count })
             ].filter(Boolean).join(' · ');
-            /* 封面網址帶 cover_updated_at 當版本號：換封面後學生不會看到舊圖（快取） */
-            const cover = book.has_cover
-                ? el('img', {
-                    class: 'shelf-cover-img',
-                    attrs: {
-                        src: `${book.cover_url}?v=${encodeURIComponent(book.cover_updated_at || '1')}`,
-                        alt: '',
-                        loading: 'lazy'
-                    }
-                })
-                : el('span', { class: 'shelf-cover-fallback', text: String(book.code || book.name || '?').slice(0, 6) });
+            /* v0.5.0：書架只看得到年級（封面與書名都不再顯示）。 */
+            const gradeLabel = el('span', { class: 'shelf-grade', text: book.grade || '—' });
             const children = [
                 el('button', {
                     class: 'shelf-card',
-                    attrs: { type: 'button', 'data-book-id': book.id, 'aria-label': book.name },
+                    attrs: { type: 'button', 'data-book-id': book.id, 'aria-label': t('shelf.gradeAria', { grade: book.grade || '—' }) },
                     on: { click: () => selectBook(book.id).catch((err) => toast(errText(err), 'error')) }
                 }, [
-                    el('span', { class: 'shelf-cover' }, [cover]),
-                    el('span', { class: 'shelf-name', text: book.name }),
+                    gradeLabel,
                     el('span', { class: 'shelf-meta', text: meta })
                 ])
             ];
@@ -429,7 +418,7 @@
     function renderUnitList() {
         const box = document.getElementById('unitList');
         clear(box);
-        document.getElementById('unitsTitle').textContent = state.currentBookName || '—';
+        document.getElementById('unitsTitle').textContent = state.currentBookGrade || '—';
         document.getElementById('unitsMeta').textContent = state.units.length
             ? t('count.units', { n: state.units.length })
             : '';
@@ -492,7 +481,7 @@
             = `Unit ${unit.unit_no}${unit.title ? ` · ${unit.title}` : ''}`;
         const published = state.entries.filter((entry) => entry.status === 'published').length;
         const pending = state.entries.filter((entry) => entry.status === 'pending').length;
-        const parts = [unit.book_name || state.currentBookName, t('unit.words', { n: published })];
+        const parts = [unit.grade || state.currentBookGrade, t('unit.words', { n: published })];
         if (pending) parts.push(t('unit.pending', { n: pending }));
         document.getElementById('unitMeta').textContent = parts.filter(Boolean).join(' · ');
         document.getElementById('printBtn').hidden = false;
@@ -549,7 +538,7 @@
     async function reloadUnits(bookId) {
         const data = await api.get(`/api/books/${bookId}/units`);
         state.units = data.units || [];
-        state.currentBookName = data.book ? data.book.name : '';
+        state.currentBookGrade = data.book ? data.book.grade : '';
         renderUnitList();
     }
 
@@ -563,7 +552,7 @@
         if (state.currentBookId) {
             const list = await api.get(`/api/books/${state.currentBookId}/units`);
             state.units = list.units || [];
-            state.currentBookName = list.book ? list.book.name : state.currentBookName;
+            state.currentBookGrade = list.book ? list.book.grade : state.currentBookGrade;
         }
         renderUnitList();
         renderUnitHead();
@@ -941,7 +930,6 @@
             updateEmptyState();
             window.PDAdmin.renderPending(state.entries);
             window.PDAdmin.refreshAvailability();
-            window.PDAdmin.renderCoverPanel();
             if (!document.getElementById('auditBlock').hidden) window.PDAdmin.loadAudit();
             if (!document.getElementById('usersBlock').hidden) window.PDUsers.refresh();
             toast(event.detail.lang === 'zh' ? t('toast.langChanged') : 'Language: English');

@@ -15,7 +15,7 @@ const { Browser, sleep } = require('./lib/cdp');
 const { STUBS, startApp, loginViaUi, logoutViaUi, visibleIds } = require('./lib/harness');
 
 const OVERLAY_IDS = ['loginModal', 'audioModal', 'adminSection', 'pendingBlock', 'auditBlock',
-    'entryForm', 'importForm', 'unitForm', 'bookForm', 'coverPanel', 'usersBlock', 'grantsBlock', 'passwordModal'];
+    'entryForm', 'importForm', 'unitForm', 'bookForm', 'usersBlock', 'grantsBlock', 'passwordModal'];
 /* 開站時「不該出現」的其他畫面（書架以外的兩層）。登出後留在生字表是正常的，所以只在開站檢查。 */
 const VIEW_IDS = ['unitsView', 'unitSection'];
 
@@ -110,14 +110,13 @@ async function main() {
         await browser.evaluate(`document.getElementById('newBookBtn').click(); return true;`);
         await browser.waitFor(`getComputedStyle(document.getElementById('bookForm')).display !== 'none'`);
         await browser.evaluate(`
-            document.getElementById('fBookCode').value = 'B5A';
-            document.getElementById('fBookName').value = 'Book 5A';
+            /* v0.5.0：建立年級只要填年級 */
             document.getElementById('fBookGrade').value = 'S1';
             document.forms.bookForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
             return true;
         `);
-        await browser.waitFor(`document.getElementById('unitsTitle').textContent.includes('Book 5A')`, { timeout: 8000 });
-        check('新增書本後直接進到它的目錄', true);
+        await browser.waitFor(`document.getElementById('unitsTitle').textContent.includes('S1')`, { timeout: 8000 });
+        check('新增年級後直接進到它的目錄', true);
         const hint2 = await browser.evaluate(`return document.getElementById('adminHint').textContent;`);
         check('說明改成「這本書還沒有單元」', hint2.includes('has no units yet'), hint2);
 

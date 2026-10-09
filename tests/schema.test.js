@@ -7,6 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
+const fs = require('fs');
 
 const { EXPECTED_COLUMNS, compareWithMigrations, parseMigrations } = require('../lib/schema');
 
@@ -30,10 +31,13 @@ test('schema：書本封面欄位一定在遷移檔裡（v0.3.2 補的那五個�
     }
 });
 
-test('schema：封面欄位真的有被程式用到（遷移檔不是寫心酸的）', () => {
-    const fs = require('fs');
-    const source = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
+test('schema：封面欄位是舊資料欄位（v0.5.0 起沒有任何端點讀寫它們）', () => {
+    /* 欄位留在資料表裡（不刪欄位以免動到既有資料），但程式不該再碰它們 ——
+     * 所以就連「有沒有人用到」這件事也要反過來守：出現任何讀寫就紅燈。 */
+    const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
     for (const column of ['cover_mime', 'cover_data', 'cover_bytes', 'cover_updated_at', 'cover_by']) {
-        assert.ok(source.includes(column), `server.js 沒有用到 ${column}`);
+        assert.equal(source.includes(column), false, `server.js 不該再用 ${column}（封面功能已移除）`);
     }
+    assert.equal(/\/api\/covers/.test(source), false, '不該再有封面端點');
 });
+

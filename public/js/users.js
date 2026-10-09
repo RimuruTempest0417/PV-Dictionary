@@ -442,7 +442,8 @@
         const books = window.PDState.books || [];
         clear(bookSelect);
         for (const book of books) {
-            bookSelect.appendChild(el('option', { text: `${book.name}${book.grade ? ` · ${book.grade}` : ''}`, attrs: { value: book.id } }));
+            /* v0.5.0：只顯示年級（書名不再出現） */
+            bookSelect.appendChild(el('option', { text: `${book.grade || '—'} · ${t('users.grantWholeBook')}`, attrs: { value: book.id } }));
         }
         if (!books.length) bookSelect.appendChild(el('option', { text: t('grants.selectBook'), attrs: { value: '' } }));
         fillUnitSelect();

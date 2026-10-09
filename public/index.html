@@ -3,14 +3,14 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="PV_Dictionary — an online English vocabulary dictionary: browse words by book and unit, with pronunciation, part of speech, Chinese and English meanings.">
-    <title>PV_Dictionary v0.4.7</title>
-    <link rel="icon" href="/img/favicon.svg?v=0.4.7" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.4.7">
-    <link rel="stylesheet" href="/css/tokens.css?v=0.4.7">
-    <link rel="stylesheet" href="/css/app.css?v=0.4.7">
-    <link rel="stylesheet" href="/css/print.css?v=0.4.7" media="print">
-    <script src="/js/analytics.js?v=0.4.7"></script>
+    <meta name="description" content="Gary-Dictionary — an online English vocabulary dictionary: browse words by book and unit, with pronunciation, part of speech, Chinese and English meanings.">
+    <title>Gary-Dictionary v0.5.0</title>
+    <link rel="icon" href="/img/favicon.svg?v=0.5.0" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.5.0">
+    <link rel="stylesheet" href="/css/tokens.css?v=0.5.0">
+    <link rel="stylesheet" href="/css/app.css?v=0.5.0">
+    <link rel="stylesheet" href="/css/print.css?v=0.5.0" media="print">
+    <script src="/js/analytics.js?v=0.5.0"></script>
     <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
@@ -24,7 +24,7 @@
         <div class="brand">
             <span class="brand-mark" aria-hidden="true">📚</span>
             <span class="brand-text">
-                <span class="brand-title">PV_Dictionary</span>
+                <span class="brand-title">Gary-Dictionary</span>
                 <span class="brand-sub" id="appSubtitle" data-i18n="app.subtitle">English Vocabulary Dictionary</span>
             </span>
         </div>
@@ -161,7 +161,6 @@
             <button id="newUnitBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="unit" data-i18n="admin.newUnit">🏗 New unit</button>
             <button id="navUnitEditBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="unitEdit" data-i18n="admin.editUnit">✏️ Edit unit</button>
             <button id="newBookBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="book" data-i18n="admin.newBook">📗 New book</button>
-            <button id="navCoverBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="cover" data-i18n="admin.cover">🖼 Book cover</button>
             <button id="navAuditBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="audit" data-i18n="audit.title">🧾 Recent activity</button>
             <button id="navErrorsBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="errors" data-i18n="errorLog.title">🐞 Error log</button>
             <button id="navStatsBtn" class="admin-nav-btn" type="button" role="tab" data-admin-tab="stats" data-i18n="stats.title">📊 Overview</button>
@@ -274,41 +273,20 @@
         </form>
 
         <form id="bookForm" class="panel form" hidden>
-            <div class="panel-head"><h2 class="panel-title" data-i18n="bookForm.title">📗 New book</h2>
-                <p class="panel-note" data-i18n="bookForm.note">It will appear in the book picker at the top.</p></div>
+            <div class="panel-head">
+                <h2 class="panel-title" data-i18n="bookForm.title">📗 New grade</h2>
+                <p class="panel-note" data-i18n="bookForm.note"></p>
+            </div>
             <div class="field-grid">
-                <label class="field"><span class="field-label" data-i18n="bookForm.code">Code *</span>
-                    <input id="fBookCode" type="text" maxlength="20" placeholder="B5A" required></label>
-                <label class="field"><span class="field-label" data-i18n="bookForm.name">Book name *</span>
-                    <input id="fBookName" type="text" maxlength="80" placeholder="Book 5A" required></label>
-                <label class="field"><span class="field-label" data-i18n="bookForm.grade">Grade</span>
-                    <input id="fBookGrade" type="text" maxlength="20" placeholder="S1"></label>
+                <label class="field"><span class="field-label" data-i18n="bookForm.grade">Grade *</span>
+                    <input id="fBookGrade" type="text" maxlength="20" placeholder="S1" required></label>
             </div>
             <div class="form-actions">
-                <button class="btn btn-primary" type="submit" data-i18n="bookForm.create">Create book</button>
+                <button class="btn btn-primary" type="submit" data-i18n="bookForm.create">Create grade</button>
                 <button id="bookCancelBtn" class="btn btn-ghost" type="button" data-i18n="entry.cancel">Cancel</button>
                 <span id="bookMsg" class="form-msg" role="status"></span>
             </div>
         </form>
-
-        <div id="coverPanel" class="panel" hidden>
-            <div class="panel-head">
-                <h2 class="panel-title" data-i18n="cover.title">🖼 Book cover</h2>
-                <p class="panel-note" data-i18n="cover.note">Take a photo of the book cover and upload it here. Students see it on the home screen.</p>
-            </div>
-            <label class="field"><span class="field-label" data-i18n="cover.book">Book</span>
-                <select id="coverBook"></select></label>
-            <div class="cover-preview">
-                <img id="coverPreview" alt="" hidden>
-                <p id="coverNone" class="cell-hint" data-i18n="cover.none">This book has no cover yet.</p>
-            </div>
-            <input id="coverFileInput" type="file" accept="image/*" hidden>
-            <div class="form-actions">
-                <button id="coverPickBtn" class="btn btn-secondary" type="button" data-i18n="cover.pick">📁 Choose a photo</button>
-                <button id="coverDeleteBtn" class="btn btn-danger btn-small" type="button" hidden data-i18n="cover.remove">🗑 Remove cover</button>
-            </div>
-            <p id="coverMsg" class="form-msg" role="status"></p>
-        </div>
 
         <div id="auditBlock" class="panel" hidden>
             <div class="panel-head">
@@ -466,7 +444,7 @@
 </main>
 
 <footer class="footer">
-    <span>PV_Dictionary <span id="versionLabel">v0.4.7</span></span>
+    <span>Gary-Dictionary <span id="versionLabel">v0.5.0</span></span>
     <span class="footer-sep">·</span>
     <span id="backendLabel" class="footer-muted"></span>
     <span class="footer-sep">·</span>
@@ -556,18 +534,18 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="/js/errorlog.js?v=0.4.7"></script>
-<script src="/js/i18n.js?v=0.4.7"></script>
-<script src="/js/api.js?v=0.4.7"></script>
-<script src="/js/ui.js?v=0.4.7"></script>
-<script src="/js/audio.js?v=0.4.7"></script>
-<script src="/js/playlist.js?v=0.4.7"></script>
-<script src="/js/auth.js?v=0.4.7"></script>
-<script src="/js/vocab.js?v=0.4.7"></script>
-<script src="/js/xlsx.js?v=0.4.7"></script>
-<script src="/js/admin.js?v=0.4.7"></script>
-<script src="/js/users.js?v=0.4.7"></script>
-<script src="/js/guide.js?v=0.4.7"></script>
-<script src="/js/app.js?v=0.4.7"></script>
+<script src="/js/errorlog.js?v=0.5.0"></script>
+<script src="/js/i18n.js?v=0.5.0"></script>
+<script src="/js/api.js?v=0.5.0"></script>
+<script src="/js/ui.js?v=0.5.0"></script>
+<script src="/js/audio.js?v=0.5.0"></script>
+<script src="/js/playlist.js?v=0.5.0"></script>
+<script src="/js/auth.js?v=0.5.0"></script>
+<script src="/js/vocab.js?v=0.5.0"></script>
+<script src="/js/xlsx.js?v=0.5.0"></script>
+<script src="/js/admin.js?v=0.5.0"></script>
+<script src="/js/users.js?v=0.5.0"></script>
+<script src="/js/guide.js?v=0.5.0"></script>
+<script src="/js/app.js?v=0.5.0"></script>
 </body>
 </html>

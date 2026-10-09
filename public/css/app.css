@@ -1710,3 +1710,18 @@ code {
 :root[data-theme="dark"] .shelf-card {
     box-shadow: none;
 }
+
+/* ---------------- v0.5.0：書架只顯示年級 ---------------- */
+.shelf-grade {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 6.5rem;
+    font-size: 2.4rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: var(--radius);
+}

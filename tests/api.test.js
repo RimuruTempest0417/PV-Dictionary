@@ -30,7 +30,7 @@ function seedStore(store) {
             is_active: true
         });
     }
-    const book = store.createBook({ code: 'B5A', name: 'Book 5A', sort_order: 1, is_published: true });
+    const book = store.createBook({ code: 'B5A', name: 'Book 5A', grade: 'S1', sort_order: 1, is_published: true });
     const unit = store.createUnit({ book_id: book.id, unit_no: 1, title: 'My New School', sort_order: 1, is_published: true });
     const hidden = store.createUnit({ book_id: book.id, unit_no: 9, title: '草稿單元', sort_order: 9, is_published: false });
     store.createEntry({
@@ -636,63 +636,8 @@ test('授權管理：授權某個單元後才能編輯；重複授權會擋；�
     assert.equal(actions.includes('GRANT_DELETE'), true, '移除授權也要留稽核紀錄');
 });
 
-/* ================= v0.2.0 書本封面 ================= */
-
-const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
-
-test('書本封面：老師上傳後誰都讀得到、格式與大小有擋、可以移除', async (t) => {
-    const { base, ids, store } = startServer(t);
-    const teacher = await login(base, 'teacher');
-
-    assert.equal((await api(base, `/api/covers/${ids.book.id}`)).status, 404, '還沒有封面時是 404');
-
-    const wrongType = await api(base, `/api/books/${ids.book.id}/cover`, {
-        method: 'POST', cookie: teacher.cookie, body: { data: `data:image/gif;base64,${PNG_1PX}` }
-    });
-    assert.equal(wrongType.status, 400);
-    assert.equal(wrongType.data.code, 'INVALID_COVER_TYPE');
-
-    const tooBig = await api(base, `/api/books/${ids.book.id}/cover`, {
-        method: 'POST', cookie: teacher.cookie,
-        body: { data: `data:image/png;base64,${Buffer.alloc(2 * 1024 * 1024 + 100, 7).toString('base64')}` }
-    });
-    assert.equal(tooBig.status, 413);
-    assert.equal(tooBig.data.code, 'COVER_TOO_LARGE');
-
-    const uploaded = await api(base, `/api/books/${ids.book.id}/cover`, {
-        method: 'POST', cookie: teacher.cookie, body: { data: `data:image/png;base64,${PNG_1PX}` }
-    });
-    assert.equal(uploaded.status, 201);
-    assert.equal(uploaded.data.book.has_cover, true);
-    assert.equal(uploaded.data.book.cover_data, undefined, '回應不得夾帶封面 base64');
-    assert.match(uploaded.data.book.cover_url, /^\/api\/covers\//);
-
-    const books = await api(base, '/api/books');
-    assert.equal(books.data.books[0].has_cover, true);
-    assert.equal(books.data.books[0].cover_data, undefined, '書本清單不得夾帶封面 base64（會變成幾十 MB）');
-
-    const served = await fetch(`${base}/api/covers/${ids.book.id}`);
-    assert.equal(served.status, 200);
-    assert.equal(served.headers.get('content-type'), 'image/png');
-    assert.equal((await served.arrayBuffer()).byteLength, Buffer.from(PNG_1PX, 'base64').length);
-
-    const student = await login(base, 'student');
-    const denied = await api(base, `/api/books/${ids.book.id}/cover`, {
-        method: 'POST', cookie: student.cookie, body: { data: `data:image/png;base64,${PNG_1PX}` }
-    });
-    assert.equal(denied.status, 403, '學生不能上傳封面');
-
-    const removed = await api(base, `/api/books/${ids.book.id}/cover`, { method: 'DELETE', cookie: teacher.cookie });
-    assert.equal(removed.status, 200);
-    assert.equal(removed.data.book.has_cover, false);
-    assert.equal((await api(base, `/api/covers/${ids.book.id}`)).status, 404);
-
-    const actions = store.listAuditLogs({ limit: 20 }).items.map((row) => row.action);
-    assert.equal(actions.includes('COVER_UPLOAD'), true);
-    assert.equal(actions.includes('COVER_DELETE'), true);
-});
-
-/* ================= v0.2.1 密碼自助 ================= */
+/* ================= v0.5.0：封面功能已移除（不再顯示封面，管理區也沒有上傳）
+ * 原本的上傳／讀取／移除測試整段刪除；資料表的 cover_* 欄位保留為舊資料欄位。 ================= */
 
 test('改自己的密碼：管理員面板可以改，任何登入者也能用 /api/auth/change-password', async (t) => {
     const { base, store } = startServer(t);
@@ -849,7 +794,7 @@ test('修改單元：老師可以改名稱與編號，學生看到的目錄與�
     /* 稽核要留下「書名 + Unit N + 名稱」，之後追查才知道改了什麼 */
     const audit = store.listAuditLogs({ limit: 5 }).items.find((row) => row.action === 'UNIT_UPDATE');
     assert.ok(audit, '改單元要留稽核紀錄');
-    assert.match(audit.details, /Book 5A Unit 7 Unit seven/);
+    assert.match(audit.details, /S1 · Unit 7 Unit seven/, audit.details);
 
     /* 再改回原本的編號，避免影響其他測試的預期 */
     await api(base, `/api/units/${ids.unit.id}`, { method: 'PATCH', cookie: teacher.cookie, body: { unit_no: 1 } });
@@ -873,7 +818,7 @@ test('修改單元：編號的驗證與重複檢查（不能出現兩個 Unit N�
     assert.equal(clash.status, 409);
     assert.equal(clash.data.code, 'DUPLICATE_UNIT');
     assert.equal(clash.data.details.n, 9);
-    assert.match(clash.data.error, /Book 5A/);
+    assert.match(clash.data.error, /S1/);
 
     /* 改成自己原本的編號不算衝突 */
     assert.equal((await patch({ unit_no: 1 })).status, 200);
@@ -1372,7 +1317,7 @@ test('調整順序（B-4）：單元與書本都能上下互換，最邊緣不�
     assert.equal((await api(base, `/api/units/${second.id}/move`, { method: 'POST', cookie: teacher.cookie, body: { direction: 'sideways' } })).status, 400);
 
     /* 書本排序 */
-    const book2 = store.createBook({ code: 'B6B', name: 'Book 6B', sort_order: 9, is_published: true });
+    const book2 = store.createBook({ code: 'B6B', name: 'Book 6B', grade: 'S2', sort_order: 9, is_published: true });
     const moved = await api(base, `/api/books/${book2.id}/move`, { method: 'POST', cookie: teacher.cookie, body: { direction: 'up' } });
     assert.equal(moved.status, 200);
     assert.equal(moved.data.moved, true);
@@ -1480,7 +1425,8 @@ test('我的單元（C-1）：老師看到全部、科代表只看被授權的�
     assert.equal(mine.data.total, mine.data.all, '老師可以編輯全部單元');
     assert.equal(mine.data.units.length, 2);
     const first = mine.data.units[0];
-    assert.ok(first.book_name, '要帶書名（老師才知道是哪一本）');
+    assert.equal(first.grade, 'S1', '要帶年級（畫面上只顯示年級，不出現書名）');
+    assert.equal(first.book_name, undefined, '不可以再回書名');
     assert.equal(first.can_publish, true);
     assert.equal(typeof first.entries, 'number');
     assert.equal(typeof first.pending, 'number', '要能顯示有幾筆待審核');

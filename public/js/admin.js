@@ -26,7 +26,6 @@
         unit: 'unitForm',
         unitEdit: 'unitEditForm',
         book: 'bookForm',
-        cover: 'coverPanel',
         audit: 'auditBlock',
         errors: 'errorsBlock',
         stats: 'statsBlock',
@@ -36,7 +35,7 @@
 
     function tabAllowed(tab) {
         if (tab === 'pending' || tab === 'entry' || tab === 'import') return window.PDAuth.can('can_edit');
-        if (tab === 'unit' || tab === 'unitEdit' || tab === 'book' || tab === 'cover') return window.PDAuth.can('can_manage_content');
+        if (tab === 'unit' || tab === 'unitEdit' || tab === 'book') return window.PDAuth.can('can_manage_content');
         if (tab === 'audit' || tab === 'errors' || tab === 'stats') return window.PDAuth.can('can_view_audit');
         if (tab === 'users' || tab === 'grants') return window.PDAuth.can('can_manage_users');
         return false;
@@ -59,7 +58,6 @@
             if (tab === 'errors') loadErrors();
             if (tab === 'stats') loadStats();
             if (tab === 'users' || tab === 'grants') window.PDUsers.refresh();
-            if (tab === 'cover') renderCoverPanel();
             if (tab === 'unitEdit') fillUnitEditOptions();
         }
         return open ? panelId : null;
@@ -79,17 +77,16 @@
             const allowed = tabAllowed(tab);
             button.hidden = !allowed;
             button.disabled = !allowed
-                || ((tab === 'unit' || tab === 'unitEdit' || tab === 'cover') && !hasBook)
+                || ((tab === 'unit' || tab === 'unitEdit') && !hasBook)
                 || ((tab === 'entry' || tab === 'import') && !hasUnit);
         }
 
         const unitBtn = document.getElementById('newUnitBtn');
         const entryBtn = document.getElementById('newEntryBtn');
         document.getElementById('newBookBtn').title = t('admin.titleNewBook');
-        unitBtn.title = hasBook ? t('admin.titleUnitFor', { book: appState.currentBookName || '—' }) : t('admin.titleNeedBook');
+        unitBtn.title = hasBook ? t('admin.titleUnitFor', { book: appState.currentBookGrade || '—' }) : t('admin.titleNeedBook');
         entryBtn.title = hasUnit ? '' : t('admin.titleNeedUnit');
         document.getElementById('importToggleBtn').title = entryBtn.title;
-        document.getElementById('navCoverBtn').title = hasBook ? '' : t('admin.titleNeedBook');
 
         /* 提示要分清三種情況（使用者回報：目錄明明有單元，卻顯示「這本書還沒有單元」）：
          *   1. 連書本都沒有        → 警告色：先建立書本
@@ -405,15 +402,12 @@
         event.preventDefault();
         const msg = document.getElementById('bookMsg');
         try {
+            /* v0.5.0：只需要年級（代號由伺服器產生；書名不再存在於畫面上） */
             const result = await api.post('/api/books', {
-                code: document.getElementById('fBookCode').value,
-                name: document.getElementById('fBookName').value,
                 grade: document.getElementById('fBookGrade').value
             });
-            setFormMessage(msg, t('bookForm.done', { name: result.book.name }), 'ok');
+            setFormMessage(msg, t('bookForm.done', { grade: result.book.grade }), 'ok');
             toast(t('bookForm.toast'));
-            document.getElementById('fBookCode').value = '';
-            document.getElementById('fBookName').value = '';
             document.getElementById('fBookGrade').value = '';
             showPanel(null);
             /* 書建立後直接進它的目錄（接著就能按「新增單元」），不要把使用者丟回書架 */
@@ -421,108 +415,6 @@
             await window.PDApp.selectBook(result.book.id);
         } catch (err) {
             setFormMessage(msg, window.PDI18n.errorMessage(err), 'error');
-        }
-    }
-
-    /* ---------------- 書本封面（老師用手機拍封面 → 上傳） ---------------- */
-    function fileToDataUrl(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result || ''));
-            reader.onerror = () => reject(new Error('read-failed'));
-            reader.readAsDataURL(file);
-        });
-    }
-
-    function fillCoverBookSelect() {
-        const select = document.getElementById('coverBook');
-        const books = window.PDState.books || [];
-        clear(select);
-        for (const book of books) {
-            select.appendChild(el('option', { text: book.name, attrs: { value: book.id } }));
-        }
-        if (!books.length) select.appendChild(el('option', { text: '—', attrs: { value: '' } }));
-        if (window.PDState.currentBookId) select.value = String(window.PDState.currentBookId);
-    }
-
-    function currentCoverBook() {
-        const id = document.getElementById('coverBook').value;
-        return (window.PDState.books || []).find((b) => String(b.id) === String(id)) || null;
-    }
-
-    function renderCoverPanel() {
-        fillCoverBookSelect();
-        const book = currentCoverBook();
-        const img = document.getElementById('coverPreview');
-        const none = document.getElementById('coverNone');
-        const del = document.getElementById('coverDeleteBtn');
-        if (book && book.has_cover) {
-            img.src = `${book.cover_url}?v=${encodeURIComponent(book.cover_updated_at || '1')}`;
-            img.hidden = false;
-            none.hidden = true;
-            del.hidden = false;
-        } else {
-            img.removeAttribute('src');
-            img.hidden = true;
-            none.hidden = false;
-            del.hidden = true;
-        }
-        document.getElementById('coverPickBtn').disabled = !book;
-        setFormMessage(document.getElementById('coverMsg'), book ? t('cover.note') : t('shelf.empty'));
-    }
-
-    function pickCoverFile() {
-        const input = document.getElementById('coverFileInput');
-        if (!currentCoverBook()) return;
-        input.value = '';
-        input.click();
-    }
-
-    async function onCoverChosen() {
-        const input = document.getElementById('coverFileInput');
-        const file = input.files && input.files[0];
-        const msg = document.getElementById('coverMsg');
-        const book = currentCoverBook();
-        if (!file || !book) return;
-        /* 前端先擋一次大小：2MB 的圖轉成 base64 已經接近 3MB，送出前講清楚比事後報錯好 */
-        if (file.size > 2 * 1024 * 1024) {
-            setFormMessage(msg, t('errors.COVER_TOO_LARGE', { kb: Math.round(file.size / 1024) }), 'error');
-            input.value = '';
-            return;
-        }
-        try {
-            const dataUrl = await fileToDataUrl(file);
-            await api.post(`/api/books/${book.id}/cover`, { data: dataUrl });
-            await window.PDApp.reloadBooks();
-            renderCoverPanel();
-            setFormMessage(msg, t('cover.saved'), 'ok');
-            toast(t('cover.saved'));
-        } catch (err) {
-            setFormMessage(msg, window.PDI18n.errorMessage(err), 'error');
-        } finally {
-            input.value = '';
-        }
-    }
-
-    async function deleteCover(button) {
-        const book = currentCoverBook();
-        if (!book || !book.has_cover) return;
-        if (button && button.dataset.confirm !== '1') {
-            button.dataset.confirm = '1';
-            button.textContent = t('action.deleteConfirm');
-            window.setTimeout(() => {
-                button.dataset.confirm = '';
-                button.textContent = t('cover.remove');
-            }, 4000);
-            return;
-        }
-        try {
-            await api.del(`/api/books/${book.id}/cover`);
-            await window.PDApp.reloadBooks();
-            renderCoverPanel();
-            toast(t('cover.deleted'));
-        } catch (err) {
-            setFormMessage(document.getElementById('coverMsg'), window.PDI18n.errorMessage(err), 'error');
         }
     }
 
@@ -1154,26 +1046,18 @@
         document.getElementById('newEntryBtn').addEventListener('click', () => openEntryForm(null));
         document.getElementById('newUnitBtn').addEventListener('click', () => {
             const note = document.getElementById('unitFormNote');
-            if (note) note.textContent = t('unitForm.note', { book: window.PDState.currentBookName || '—' });
+            if (note) note.textContent = t('unitForm.note', { book: window.PDState.currentBookGrade || '—' });
             showPanel('unit');
             document.getElementById('fUnitNo').focus();
         });
         document.getElementById('newBookBtn').addEventListener('click', () => {
             showPanel('book');
-            document.getElementById('fBookCode').focus();
-        });
-        document.getElementById('navCoverBtn').addEventListener('click', () => {
-            showPanel('cover');
-            document.getElementById('coverBook').focus();
+            document.getElementById('fBookGrade').focus();
         });
         document.getElementById('navPendingBtn').addEventListener('click', () => showPanel('pending'));
         document.getElementById('navAuditBtn').addEventListener('click', () => showPanel('audit'));
         document.getElementById('navUsersBtn').addEventListener('click', () => showPanel('users'));
         document.getElementById('navGrantsBtn').addEventListener('click', () => showPanel('grants'));
-        document.getElementById('coverPickBtn').addEventListener('click', pickCoverFile);
-        document.getElementById('coverFileInput').addEventListener('change', onCoverChosen);
-        document.getElementById('coverBook').addEventListener('change', renderCoverPanel);
-        document.getElementById('coverDeleteBtn').addEventListener('click', (event) => deleteCover(event.currentTarget));
 
         /* 使用者權限不同的分頁按鈕：沒權限的直接不顯示（後端一樣會再擋一次） */
         for (const button of document.querySelectorAll('#adminNav [data-admin-tab]')) {
@@ -1241,7 +1125,6 @@
         openEntryForm,
         closeEntryForm,
         renderPending,
-        renderCoverPanel,
         openUnitEdit,
         openAudioModal,
         closeAudioModal

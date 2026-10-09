@@ -20,7 +20,7 @@ const html = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
 test('package.json 與 index.html 的版本一致（含資產 ?v=）', () => {
     const version = pkg.version;
     assert.match(version, /^\d+\.\d+\.\d+$/, `版本格式不像語意化版本：${version}`);
-    assert.ok(html.includes(`<title>PV_Dictionary v${version}</title>`),
+    assert.ok(html.includes(`<title>Gary-Dictionary v${version}</title>`),
         `index.html 的 title 不是 v${version}`);
     assert.ok(html.includes(`<span id="versionLabel">v${version}</span>`),
         `index.html 的 #versionLabel 不是 v${version}`);
@@ -44,7 +44,7 @@ test('/api/version 回的就是 package.json 的版本，且不碰資料庫', as
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.version, pkg.version);
-    assert.equal(body.name, 'pv-dictionary');
+    assert.equal(body.name, 'gary-dictionary');
 });
 
 test('README 標示的版本與程式一致', () => {

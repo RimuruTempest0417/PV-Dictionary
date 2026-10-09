@@ -45,7 +45,7 @@ function seed(store) {
             password_hash: hashPassword(PASSWORD), is_active: true
         });
     }
-    const book = store.createBook({ code: 'B5A', name: 'Book 5A', sort_order: 1, is_published: true });
+    const book = store.createBook({ code: 'B5A', name: 'Book 5A', grade: 'S1', sort_order: 1, is_published: true });
     const unit = store.createUnit({ book_id: book.id, unit_no: 1, title: 'My New School', sort_order: 1, is_published: true });
     const rows = [
         ['campus', '/ˈkæm.pəs/', 'n.', '校園', 'the land and buildings of a school', 'Our campus is next to the park.', '我們的校園在公園旁邊。'],
@@ -138,7 +138,10 @@ async function main() {
 
         console.log('\n【1-4】訪客：書架（封面）→ 目錄 → 單元 → 生字表 → 聽讀音 → 搜尋');
         const shelf = await browser.evaluate(`return Array.from(document.getElementById('bookShelf').children).map(b => b.textContent);`);
-        check('書架顯示 Book 5A（含單元數與生字數）', shelf.some((t) => t.includes('Book 5A')), shelf.join('/'));
+        check('書架顯示年級 S1（含單元數與生字數）', shelf.some((t) => t.includes('S1')), shelf.join('/'));
+        check('書架上完全沒有書名（v0.5.0）', shelf.every((t) => !t.includes('Book 5A')), shelf.join('/'));
+        check('書架上沒有任何封面圖（v0.5.0）',
+            (await browser.evaluate(`return document.querySelectorAll('#bookShelf img').length;`)) === 0);
         const coverCards = await browser.evaluate(`return document.querySelectorAll('#bookShelf [data-book-id]').length;`);
         check('每個書本都是一個可點的封面卡片', coverCards >= 1, String(coverCards));
         const shelfFirst = await browser.evaluate(`return document.getElementById('shelfView').hidden === false;`);
@@ -466,7 +469,7 @@ async function main() {
             playback.srcs.some((src) => src.includes('/api/audio/')) && playback.spoken.length === 0,
             JSON.stringify(playback));
 
-        console.log('\n【9-10】批次與書本／單元維護');
+        console.log('\n【9-10】批次與年級／單元維護');
         await browser.evaluate(`document.getElementById('newUnitBtn').click(); return true;`);
         await browser.waitFor(`document.getElementById('unitForm').hidden === false`);
         await browser.evaluate(`
@@ -483,67 +486,71 @@ async function main() {
         await browser.evaluate(`document.getElementById('newBookBtn').click(); return true;`);
         await browser.waitFor(`document.getElementById('bookForm').hidden === false`);
         await browser.evaluate(`
-            document.getElementById('fBookCode').value = 'B5B';
-            document.getElementById('fBookName').value = 'Book 5B';
+            /* v0.5.0：建立年級只要填年級 */
+            document.getElementById('fBookGrade').value = 'S2';
             document.forms.bookForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
             return true;
         `);
-        await browser.waitFor(`document.getElementById('unitsView').hidden === false && document.getElementById('unitsTitle').textContent.includes('Book 5B')`, { timeout: 6000 });
+        await browser.waitFor(`document.getElementById('unitsView').hidden === false && document.getElementById('unitsTitle').textContent.includes('S2')`, { timeout: 6000 });
         check('新增書本後直接進入它的目錄（接著就能新增單元）', true);
-        check('書架上也出現新書本', (await browser.evaluate(`return document.getElementById('bookShelf').textContent.includes('Book 5B');`)) === true);
+        check('書架上也出現新的年級（S2）', (await browser.evaluate(`return document.getElementById('bookShelf').textContent.includes('S2');`)) === true);
 
-        console.log('\n【10b】書本封面：上傳照片 → 書架（首頁）用封面顯示');
-        await browser.evaluate(`document.getElementById('navCoverBtn').click(); return true;`);
-        await browser.waitFor(`getComputedStyle(document.getElementById('coverPanel')).display !== 'none'`);
-        const coverBefore = await browser.evaluate(`return {
-            none: document.getElementById('coverNone').hidden === false,
-            imgHidden: document.getElementById('coverPreview').hidden === true,
-            books: Array.from(document.getElementById('coverBook').options).map((o) => o.textContent)
+        console.log('\n【10c】年級制：新增年級 → 書架只出現年級（v0.5.0）');
+        /* 建立年級（管理區只問年級） */
+        await browser.evaluate(`document.getElementById('newBookBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('bookForm').hidden === false`, { timeout: 8000 });
+        const gradeForm = await browser.evaluate(`return {
+            code: document.getElementById('fBookCode') === null,
+            name: document.getElementById('fBookName') === null,
+            grade: Boolean(document.getElementById('fBookGrade')),
+            coverPanel: document.getElementById('coverPanel') === null,
+            coverTab: document.querySelector('[data-admin-tab="cover"]') === null
         };`);
-        check('封面面板列出所有書本，預設顯示「還沒有封面」',
-            coverBefore.none === true && coverBefore.imgHidden === true && coverBefore.books.some((t) => t.includes('Book 5A')),
-            JSON.stringify(coverBefore));
+        check('新增年級只問年級（代號與書名欄位都不見了）',
+            gradeForm.code && gradeForm.name && gradeForm.grade, JSON.stringify(gradeForm));
+        check('封面面板與封面分頁都移除（v0.5.0）', gradeForm.coverPanel && gradeForm.coverTab, JSON.stringify(gradeForm));
 
         await browser.evaluate(`
-            const select = document.getElementById('coverBook');
-            select.value = String((window.PDState.books.find((b) => b.name === 'Book 5A') || {}).id);
-            select.dispatchEvent(new Event('change', { bubbles: true }));
+            document.getElementById('fBookGrade').value = 'S2';
+            document.getElementById('bookForm').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
             return true;
         `);
-        /* 真的用它自己的檔案路徑走一次（選檔 → FileReader → 上傳 API），不繞過 UI */
-        const pngFile = path.join(dir, 'cover-sample.png');
-        fs.writeFileSync(pngFile, Buffer.from(
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==', 'base64'));
-        const coverDoc = await browser.send('DOM.getDocument', { depth: -1 });
-        const coverNode = await browser.send('DOM.querySelector', { nodeId: coverDoc.root.nodeId, selector: '#coverFileInput' });
-        await browser.send('DOM.setFileInputFiles', { nodeId: coverNode.nodeId, files: [pngFile] });
-        let coverSaved = false;
-        try {
-            await browser.waitFor(`document.getElementById('coverMsg').textContent.includes('Cover updated')`, { timeout: 2500 });
-            coverSaved = true;
-        } catch (err) {
-            coverSaved = false;
+        /* demo-check 沒有 waitForStore（那是 users-check 的輔助函式）→ 自己等 */
+        for (let i = 0; i < 40; i += 1) {
+            if (store.listBooks({ includeUnpublished: true }).some((b) => b.grade === 'S2')) break;
+            await sleep(100);
         }
-        if (!coverSaved) {
-            await browser.evaluate(`document.getElementById('coverFileInput').dispatchEvent(new Event('change', { bubbles: true })); return true;`);
-        }
-        await browser.waitFor(`document.getElementById('coverMsg').textContent.includes('Cover updated')`, { timeout: 8000 });
-        check('上傳封面成功', true);
-        check('面板立刻顯示封面預覽',
-            (await browser.evaluate(`return document.getElementById('coverPreview').hidden === false;`)) === true);
+        check('建立年級之後資料庫真的有一筆', store.listBooks({ includeUnpublished: true }).some((b) => b.grade === 'S2'));
 
-        const shelfCover = await browser.evaluate(`return Array.from(document.querySelectorAll('#bookShelf .shelf-cover-img')).map((img) => img.getAttribute('src'));`);
-        check('書架卡片改用封面圖片（學生首頁看得到）',
-            shelfCover.length >= 1 && shelfCover[0].includes('/api/covers/'), JSON.stringify(shelfCover));
-        const coverFetch = await browser.evaluate(`return (async () => {
-            const res = await fetch(${JSON.stringify(shelfCover[0] || '/api/covers/0')}, { cache: 'no-store' });
-            const buf = await res.arrayBuffer();
-            return { status: res.status, type: res.headers.get('content-type'), bytes: buf.byteLength };
-        })();`);
-        check('封面由自家同源端點提供（不開外部網域）',
-            coverFetch.status === 200 && coverFetch.type === 'image/png' && coverFetch.bytes > 50, JSON.stringify(coverFetch));
-        const coverAudit = await browser.evaluate(`return document.getElementById('coverBook').value;`);
-        check('封面面板的書本選單仍可切換', Boolean(coverAudit), coverAudit);
+        /* 書架：兩個年級、沒有書名、沒有封面圖 */
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await browser.evaluate(`document.getElementById('unitsBackBtn').click(); return true;`);
+        await browser.waitFor(`document.querySelectorAll('#bookShelf [data-book-id]').length >= 2`, { timeout: 8000 });
+        const shelfAfter = await browser.evaluate(`return {
+            grades: Array.from(document.querySelectorAll('#bookShelf [data-book-id]')).map((b) => b.textContent.trim()),
+            buttons: document.querySelectorAll('#bookShelf [data-book-id]').length,
+            imgs: document.querySelectorAll('#bookShelf img').length
+        };`);
+        check('書架看得到兩個年級（S1／S2）',
+            shelfAfter.grades.some((t) => t.includes('S1')) && shelfAfter.grades.some((t) => t.includes('S2')),
+            JSON.stringify(shelfAfter.grades));
+        check('書架沒有書名、沒有封面圖（v0.5.0）',
+            shelfAfter.imgs === 0 && shelfAfter.grades.every((t) => !t.includes('Book ')), JSON.stringify(shelfAfter));
+
+        /* 全流程都看不到書名：把整份 HTML 的文字掃一次 */
+        const leaks = await browser.evaluate(`return {
+            html: /Book 5A|Book 6B/.test(document.body.textContent),
+            adminOpen: document.getElementById('adminSection').hidden === false
+        };`);
+        check('畫面上（含管理區）沒有任何書名', leaks.html === false, JSON.stringify(leaks));
+
+        /* 稽核細節也要用年級 */
+        await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
+        await browser.evaluate(`document.getElementById('navAuditBtn').click(); return true;`);
+        await browser.waitFor(`document.querySelectorAll('#auditList .audit-item').length > 0`, { timeout: 8000 });
+        const auditText = await browser.evaluate(`return document.getElementById('auditList').textContent;`);
+        check('稽核紀錄用年級描述（不出現書名）',
+            auditText.includes('S1') && !/Book 5A/.test(auditText), auditText.slice(0, 80));
 
         console.log('\n【11-12】科代表新增 → 老師核准');
         await browser.evaluate(`document.getElementById('logoutBtn').click(); return true;`);
@@ -552,10 +559,10 @@ async function main() {
         await openLogin(browser);
         await typeLogin(browser, 'classrep');
         /* 等書架真的有 Book 5A 再點（登入後書架是非同步重畫的） */
-        await browser.waitFor(`Array.from(document.querySelectorAll('#bookShelf [data-book-id]')).some(b => b.textContent.includes('Book 5A'))`, { timeout: 8000 });
+        await browser.waitFor(`Array.from(document.querySelectorAll('#bookShelf [data-book-id]')).some(b => b.textContent.includes('S1'))`, { timeout: 8000 });
         await browser.evaluate(`
             Array.from(document.querySelectorAll('#bookShelf [data-book-id]'))
-                .find(b => b.textContent.includes('Book 5A')).click();
+                .find(b => b.textContent.includes('S1')).click();
             return true;
         `);
         /* 這裡不能用「目錄畫面已顯示」當條件：切書時它本來就還開著，要等清單真的換成新書的單元 */

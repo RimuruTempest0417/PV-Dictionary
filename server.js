@@ -410,19 +410,25 @@ function createApp(options = {}) {
 
     /* ================= 公開：書本／單元／生字 ================= */
 
-    /* 書本對外的樣子：**絕對不能把封面 base64 一起回傳**（一本書可能好幾 MB，
-     * 清單就會變成幾十 MB 的 JSON），只回有沒封面與網址。 */
+    /* 年級（v0.5.0）：畫面上只顯示年級，書名與封面完全不對外 —— 連管理區也不出現。
+     * 舊資料可能沒有 grade：退回用 code（代號本來就是給人看的短標籤，且不含書名），
+     * 最後才用「未分類」；**絕不會**退回 name（那就是書名）。 */
+    function gradeOf(book) {
+        if (!book) return '';
+        return String(book.grade || book.code || '').trim() || '—';
+    }
+
+    /* 書本對外的樣子：**白名單**（只回年級與統計需要的欄位）。
+     * 之前是「複製全部再刪掉封面」，那種寫法很容易在不注意時洩漏欄位（name／publisher／code），
+     * 現在改成只挑要的欄位出來。 */
     function publicBook(book) {
         if (!book) return book;
-        const copy = Object.assign({}, book);
-        /* ★ 有沒有封面看 cover_bytes / cover_mime，不要看 cover_data：
-         *   封面 base64 已經不進記憶體快取（見 lib/store/supabase.js 的 SELECT_COLUMNS），
-         *   cover_data 在清單裡一律是 null。 */
-        const hasCover = Number(copy.cover_bytes) > 0 || Boolean(copy.cover_mime);
-        delete copy.cover_data;
-        copy.has_cover = hasCover;
-        copy.cover_url = hasCover ? `/api/covers/${copy.id}` : null;
-        return copy;
+        return {
+            id: book.id,
+            grade: gradeOf(book),
+            is_published: book.is_published !== false,
+            sort_order: Number(book.sort_order || 0)
+        };
     }
 
     /* 公開讀取端點的快取標頭（A-11）。
@@ -500,7 +506,7 @@ function createApp(options = {}) {
                 unit_no: unit.unit_no,
                 title: unit.title || '',
                 is_published: unit.is_published !== false,
-                book_name: book ? book.name : ''
+                grade: gradeOf(book)
             },
             entries,
             can_edit: viewerCanEdit,
@@ -604,9 +610,9 @@ function createApp(options = {}) {
     app.get('/api/my/units', requireAuth, (req, res) => {
         const allGrants = grants();
         const books = store.listBooks({ includeUnpublished: true });
-        const bookNameOf = (unit) => {
+        const gradeOfUnit = (unit) => {
             const book = books.find((item) => String(item.id) === String(unit.book_id));
-            return book ? book.name : '';
+            return gradeOf(book);
         };
         const units = store.listUnits({ includeUnpublished: true });
         const entries = store.listEntries({});
@@ -617,7 +623,7 @@ function createApp(options = {}) {
             units: mine.map((unit) => ({
                 id: unit.id,
                 book_id: unit.book_id,
-                book_name: bookNameOf(unit),
+                grade: gradeOfUnit(unit),
                 unit_no: unit.unit_no,
                 title: unit.title || '',
                 is_published: unit.is_published !== false,
@@ -974,7 +980,7 @@ function createApp(options = {}) {
         }
         logAudit(store, {
             user: req.user, action: 'UNIT_DUPLICATE', targetId: copy.id,
-            details: `${book ? book.name : ''} Unit ${unit.unit_no} → Unit ${nextNo}（${title}）：複製 ${copied} 筆生字`, ip: req.ip
+            details: `${gradeOf(book)} · Unit ${unit.unit_no} → Unit ${nextNo}（${title}）：複製 ${copied} 筆生字`, ip: req.ip
         });
         return res.json({ unit: unitView(copy, store), entries: copied });
     });
@@ -1030,7 +1036,7 @@ function createApp(options = {}) {
         store.updateBook(book.id, { sort_order: theirs });
         logAudit(store, {
             user: req.user, action: 'BOOK_MOVE', targetId: book.id,
-            details: `${book.name} ⇄ ${other.name}`, ip: req.ip
+            details: `${gradeOf(book)} ⇄ ${gradeOf(other)}`, ip: req.ip
         });
         return res.json({ moved: true, book: publicBook(store.getBook(book.id)) });
     });
@@ -1235,23 +1241,31 @@ function createApp(options = {}) {
     });
 
     /* ================= 書本／單元維護（老師以上） ================= */
+    /* 新增年級（v0.5.0）：老師只需要填年級。
+     * code 由伺服器產生（唯一即可，用來滿足資料表欄位），name 與年級同步（內部用，不對外顯示）。 */
     app.post('/api/books', requireRole('teacher'), (req, res) => {
         const body = req.body || {};
-        const name = str(body.name, LIMITS.book_name);
-        const code = str(body.code, LIMITS.book_code) || name;
-        if (!name) return res.status(400).json({ error: msg('BOOK_NAME_REQUIRED'), code: 'BOOK_NAME_REQUIRED' });
-        if (store.listBooks({ includeUnpublished: true }).some((b) => b.code === code)) {
-            return res.status(409).json({ error: msg('DUPLICATE_CODE', { code }), code: 'DUPLICATE_CODE', details: { code } });
+        const grade = str(body.grade, 20);
+        if (!grade) return res.status(400).json({ error: msg('BOOK_GRADE_REQUIRED'), code: 'BOOK_GRADE_REQUIRED' });
+        const existing = store.listBooks({ includeUnpublished: true });
+        if (existing.some((book) => gradeOf(book) === grade)) {
+            return res.status(409).json({ error: msg('DUPLICATE_GRADE', { grade }), code: 'DUPLICATE_GRADE', details: { grade } });
+        }
+        let code = `G${existing.length + 1}`;
+        let suffix = 1;
+        while (existing.some((book) => book.code === code)) {
+            suffix += 1;
+            code = `G${existing.length + suffix}`;
         }
         const book = store.createBook({
             code,
-            name,
-            grade: str(body.grade, 20),
-            publisher: str(body.publisher, 60),
-            sort_order: num(body.sort_order, store.listBooks({ includeUnpublished: true }).length + 1),
+            name: grade,
+            grade,
+            publisher: '',
+            sort_order: num(body.sort_order, existing.length + 1),
             is_published: boolish(body.is_published, true)
         });
-        logAudit(store, { user: req.user, action: 'BOOK_CREATE', targetId: book.id, details: book.name, ip: req.ip });
+        logAudit(store, { user: req.user, action: 'BOOK_CREATE', targetId: book.id, details: grade, ip: req.ip });
         return res.status(201).json({ book: publicBook(book) });
     });
 
@@ -1260,82 +1274,23 @@ function createApp(options = {}) {
         if (!book) return res.status(404).json({ error: msg('BOOK_NOT_FOUND'), code: 'BOOK_NOT_FOUND' });
         const body = req.body || {};
         const patch = {};
-        if (body.name !== undefined) patch.name = str(body.name, LIMITS.book_name) || book.name;
-        if (body.grade !== undefined) patch.grade = str(body.grade, 20);
-        if (body.publisher !== undefined) patch.publisher = str(body.publisher, 60);
+        /* 只開放年級／排序／發佈狀態：書名與代號都不再是使用者輸入（v0.5.0） */
+        if (body.grade !== undefined) {
+            const grade = str(body.grade, 20);
+            if (!grade) return res.status(400).json({ error: msg('BOOK_GRADE_REQUIRED'), code: 'BOOK_GRADE_REQUIRED' });
+            patch.grade = grade;
+            patch.name = grade;                     /* name 是內部欄位，與年級同步 */
+            patch.publisher = '';
+        }
         if (body.sort_order !== undefined) patch.sort_order = num(body.sort_order, book.sort_order);
         if (body.is_published !== undefined) patch.is_published = boolish(body.is_published, true);
         const updated = store.updateBook(book.id, patch);
-        logAudit(store, { user: req.user, action: 'BOOK_UPDATE', targetId: book.id, details: updated.name, ip: req.ip });
+        logAudit(store, { user: req.user, action: 'BOOK_UPDATE', targetId: book.id, details: gradeOf(updated), ip: req.ip });
         return res.json({ book: publicBook(updated) });
     });
 
-    /* ================= 書本封面（老師用手機拍封面 → 上傳） ================= */
-    app.get('/api/covers/:id', async (req, res) => {
-        /* 封面 base64 不在記憶體快取裡（見 lib/store/supabase.js）：真的要檔案時才單筆抓 */
-        const book = store.getBook(req.params.id);
-        if (!book) return res.status(404).json({ error: msg('COVER_NOT_FOUND'), code: 'COVER_NOT_FOUND' });
-        const cover = typeof store.getBookCoverData === 'function' ? await store.getBookCoverData(book.id) : book;
-        if (!cover || !cover.cover_data) {
-            return res.status(404).json({ error: msg('COVER_NOT_FOUND'), code: 'COVER_NOT_FOUND' });
-        }
-        res.setHeader('Content-Type', cover.cover_mime || 'image/jpeg');
-        /* 換封面會更新 cover_updated_at，前端用 ?v= 破快取，所以這裡可以久放 */
-        res.setHeader('Cache-Control', 'public, max-age=86400');
-        res.setHeader('X-Content-Type-Options', 'nosniff');
-        return res.send(Buffer.from(cover.cover_data, 'base64'));
-    });
-
-    app.post('/api/books/:id/cover', requireRole('teacher'), (req, res) => {
-        const book = store.getBook(req.params.id);
-        if (!book) return res.status(404).json({ error: msg('BOOK_NOT_FOUND'), code: 'BOOK_NOT_FOUND' });
-        const body = req.body || {};
-        const raw = String(body.data || '');
-        /* 與錄音同一套寫法：純 base64 或 data:image/jpeg;base64,… 都吃 */
-        const match = /^data:([^;,]+)[^,]*;base64,([\s\S]*)$/.exec(raw);
-        const mime = String((match ? match[1] : body.mime) || '').toLowerCase().split(';')[0].trim();
-        const base64 = match ? match[2] : raw;
-        if (!COVER_MIME_WHITELIST.includes(mime)) {
-            return res.status(400).json({
-                error: msg('INVALID_COVER_TYPE', { mime: mime || '?' }), code: 'INVALID_COVER_TYPE',
-                details: { mime: mime || '?' }, allowed: COVER_MIME_WHITELIST
-            });
-        }
-        if (!/^[A-Za-z0-9+/=\s]+$/.test(base64)) {
-            return res.status(400).json({ error: msg('COVER_BAD_BASE64'), code: 'COVER_BAD_BASE64' });
-        }
-        const bytes = Buffer.from(base64, 'base64');
-        if (bytes.length === 0) return res.status(400).json({ error: msg('COVER_EMPTY'), code: 'COVER_EMPTY' });
-        if (bytes.length > COVER_MAX_BYTES) {
-            return res.status(413).json({
-                error: msg('COVER_TOO_LARGE', { kb: Math.round(bytes.length / 1024) }), code: 'COVER_TOO_LARGE',
-                details: { kb: Math.round(bytes.length / 1024) }
-            });
-        }
-        const updated = store.updateBook(book.id, {
-            cover_mime: mime,
-            cover_data: base64.replace(/\s+/g, ''),
-            cover_bytes: bytes.length,
-            cover_updated_at: new Date().toISOString(),
-            cover_by: req.user.username
-        });
-        logAudit(store, {
-            user: req.user, action: 'COVER_UPLOAD', targetId: book.id,
-            details: `${book.name}（${Math.round(bytes.length / 1024)}KB）`, ip: req.ip
-        });
-        return res.status(201).json({ ok: true, book: publicBook(updated) });
-    });
-
-    app.delete('/api/books/:id/cover', requireRole('teacher'), (req, res) => {
-        const book = store.getBook(req.params.id);
-        if (!book) return res.status(404).json({ error: msg('BOOK_NOT_FOUND'), code: 'BOOK_NOT_FOUND' });
-        if (!book.cover_data) return res.status(404).json({ error: msg('COVER_NOT_FOUND'), code: 'COVER_NOT_FOUND' });
-        const updated = store.updateBook(book.id, {
-            cover_mime: '', cover_data: '', cover_bytes: 0, cover_updated_at: null, cover_by: ''
-        });
-        logAudit(store, { user: req.user, action: 'COVER_DELETE', targetId: book.id, details: book.name, ip: req.ip });
-        return res.json({ ok: true, book: publicBook(updated) });
-    });
+    /* 封面功能已移除（v0.5.0：畫面上不再顯示封面，管理區也不再提供上傳）。
+     * 資料表的 cover_* 欄位保留（不刪欄位避免破壞既有資料），但沒有任何端點會讀寫它。 */
 
     app.post('/api/books/:id/units', requireRole('teacher'), (req, res) => {
         const book = store.getBook(req.params.id);
@@ -1346,7 +1301,7 @@ function createApp(options = {}) {
             return res.status(400).json({ error: msg('UNIT_NUMBER'), code: 'UNIT_NUMBER' });
         }
         if (store.findUnitByNo(book.id, unitNo)) {
-            return res.status(409).json({ error: msg('DUPLICATE_UNIT', { book: book.name, n: unitNo }), code: 'DUPLICATE_UNIT', details: { book: book.name, n: unitNo } });
+            return res.status(409).json({ error: msg('DUPLICATE_UNIT', { book: gradeOf(book), n: unitNo }), code: 'DUPLICATE_UNIT', details: { book: gradeOf(book), n: unitNo } });
         }
         const unit = store.createUnit({
             book_id: book.id,
@@ -1359,7 +1314,7 @@ function createApp(options = {}) {
             user: req.user,
             action: 'UNIT_CREATE',
             targetId: unit.id,
-            details: `${book.name} Unit ${unitNo}${unit.title ? ` ${unit.title}` : ''}`,
+            details: `${gradeOf(book)} · Unit ${unitNo}${unit.title ? ` ${unit.title}` : ''}`,
             ip: req.ip
         });
         return res.status(201).json({ unit });
@@ -1382,7 +1337,7 @@ function createApp(options = {}) {
             const clash = store.findUnitByNo(unit.book_id, unitNo);
             if (clash && String(clash.id) !== String(unit.id)) {
                 const book = store.getBook(unit.book_id);
-                const bookName = book ? book.name : '';
+                const bookName = gradeOf(book);
                 return res.status(409).json({
                     error: msg('DUPLICATE_UNIT', { book: bookName, n: unitNo }),
                     code: 'DUPLICATE_UNIT',
@@ -1399,7 +1354,7 @@ function createApp(options = {}) {
             user: req.user,
             action: 'UNIT_UPDATE',
             targetId: unit.id,
-            details: `${book ? `${book.name} ` : ''}Unit ${updated.unit_no}${updated.title ? ` ${updated.title}` : ''}`,
+            details: `${book ? `${gradeOf(book)} · ` : ''}Unit ${updated.unit_no}${updated.title ? ` ${updated.title}` : ''}`,
             ip: req.ip
         });
         return res.json({ unit: updated });
@@ -1601,7 +1556,7 @@ function createApp(options = {}) {
             const unit = grant.unit_id ? store.getUnit(grant.unit_id) : null;
             return Object.assign({}, grant, {
                 username: user ? user.username : '(已刪除)',
-                book_name: book ? book.name : '',
+                grade: gradeOf(book),
                 unit_label: unit ? `Unit ${unit.unit_no}${unit.title ? ` ${unit.title}` : ''}` : ''
             });
         });
@@ -1766,7 +1721,7 @@ function createApp(options = {}) {
         const perUnit = units.map((unit) => ({
             id: unit.id,
             label: `Unit ${unit.unit_no}${unit.title ? ` · ${unit.title}` : ''}`,
-            book: unit.book_name || '',
+            grade: (() => { const book = store.getBook(unit.book_id); return gradeOf(book); })(),
             published: entries.filter((entry) => entry.unit_id === unit.id && entry.status === 'published').length,
             pending: entries.filter((entry) => entry.unit_id === unit.id && entry.status === 'pending').length
         }));

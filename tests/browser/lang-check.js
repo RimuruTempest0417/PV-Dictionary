@@ -64,7 +64,7 @@ async function main() {
         check('標題副標是英文', initial.subtitle.includes('English'), initial.subtitle);
         check('搜尋框提示文字是英文', initial.searchPlaceholder.includes('Search'), initial.searchPlaceholder);
         check('按鈕是英文（Sign in / 書架標題 / Print）',
-            initial.loginBtn.includes('Sign in') && initial.bookLabel === 'Choose a book' && initial.printBtn.includes('Print'),
+            initial.loginBtn.includes('Sign in') && initial.bookLabel === 'Choose a grade' && initial.printBtn.includes('Print'),
             JSON.stringify([initial.loginBtn, initial.bookLabel, initial.printBtn]));
         check('單元空訊息是英文', initial.emptyMsg.includes('No vocabulary'), initial.emptyMsg);
         check('頁腳說明是英文', initial.footerNote.includes('Pronunciations'), initial.footerNote);
@@ -93,7 +93,7 @@ async function main() {
         check('<html lang> 變成 zh-Hant', zhState.lang === 'zh-Hant', zhState.lang);
         check('語言選擇寫進 localStorage', zhState.stored === 'zh', String(zhState.stored));
         check('中文按鈕標記為已選取', zhState.pressed === 'true');
-        check('靜態文字切成中文', zhState.subtitle.includes('英文生字字典') && zhState.bookLabel === '選擇書本'
+        check('靜態文字切成中文', zhState.subtitle.includes('英文生字字典') && zhState.bookLabel === '選擇年級'
             && zhState.printBtn.includes('列印'), JSON.stringify([zhState.subtitle, zhState.bookLabel, zhState.printBtn]));
         check('動態文字（單元空訊息）切成中文', zhState.emptyMsg.includes('還沒有生字'), zhState.emptyMsg);
         check('單元名稱的提示跟著切成中文', zhState.unitTitlePlaceholder === '例如：My Community', zhState.unitTitlePlaceholder);
@@ -171,20 +171,24 @@ async function main() {
 
         console.log('\n【5b】外觀（F-3／F-5）：主題與字級會記住、跟隨系統、鍵盤可用');
         /* 主題：切深色 → 根元素的 data-theme 與實際顏色都要變 */
-        const beforeTheme = await browser.evaluate(`return {
+        /* ★ 這台 headless 瀏覽器的系統偏好是深色，所以「切深色」前後可能一模一樣（都已經是黑底）。
+         *   要驗的是「明確選擇會覆蓋系統」→ 比較明確選淺色與明確選深色的值是否不同。 */
+        await browser.evaluate(`document.querySelector('#themeSwitch [data-theme-value="light"]').click(); return true;`);
+        await sleep(200);
+        const lightTheme = await browser.evaluate(`return {
             theme: document.documentElement.dataset.theme || '',
             bg: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()
         };`);
         await browser.evaluate(`document.querySelector('#themeSwitch [data-theme-value="dark"]').click(); return true;`);
-        await sleep(250);
+        await sleep(200);
         const darkTheme = await browser.evaluate(`return {
             theme: document.documentElement.dataset.theme || '',
             bg: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
             pressed: document.querySelector('#themeSwitch [data-theme-value="dark"]').getAttribute('aria-pressed')
         };`);
-        check('切深色：data-theme 變 dark、顏色真的換了（F-3）',
-            darkTheme.theme === 'dark' && darkTheme.bg !== beforeTheme.bg && darkTheme.pressed === 'true',
-            JSON.stringify([beforeTheme, darkTheme]));
+        check('明確選淺色／深色的顏色真的不一樣（F-3）',
+            lightTheme.theme === 'light' && darkTheme.theme === 'dark' && lightTheme.bg !== darkTheme.bg,
+            JSON.stringify([lightTheme, darkTheme]));
         check('深色時按鈕的 aria-pressed 正確（F-4）',
             (await browser.evaluate(`return document.querySelector('#themeSwitch [data-theme-value="light"]').getAttribute('aria-pressed');`)) === 'false');
 

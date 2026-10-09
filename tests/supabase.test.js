@@ -214,7 +214,7 @@ test('Supabase 資料層：還有沒寫回的異動時不重抓（避免把寫�
     assert.equal(store.listBooks().length, 1, '剛建立的書還在');
 });
 
-test('Supabase 資料層：大欄位（封面／錄音 base64）不會進快取，要檔案時才單筆抓', async (t) => {
+test('Supabase 資料層：大欄位（舊封面／錄音 base64）不會進快取，要檔案時才單筆抓', async (t) => {
     const fake = withFake(t);
     fake.db.dict_books.push({
         id: 1, code: 'B1', name: 'Book 1', sort_order: 1, is_published: true,
@@ -318,14 +318,17 @@ test('Supabase 後端跑起整個 app：API 寫入的資料真的進資料庫（
 
     const created = await fetch(`${base}/api/books`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ code: 'NS1', name: 'NorthStar 1', grade: 'S1' })
+        body: JSON.stringify({ grade: 'S1' })
     });
     assert.equal(created.status, 201);
     const book = (await created.json()).book;
     assert.ok(book.id > 0, '回給前端的 id 要是真的 id');
+    assert.equal(book.grade, 'S1', '對外只給年級');
+    assert.equal(book.name, undefined, '書名不可以出現在 API 回應裡');
 
     assert.equal(fake.db.dict_books.length, 1, '書本要真的寫進（假）資料庫');
-    assert.equal(fake.db.dict_books[0].name, 'NorthStar 1');
+    assert.equal(fake.db.dict_books[0].grade, 'S1');
+    assert.equal(fake.db.dict_books[0].name, 'S1', '內部 name 與年級同步（但不對外）');
     assert.equal(fake.db.dict_books[0].id, book.id);
     assert.equal(fake.db.dict_audit_logs.filter((r) => r.action === 'BOOK_CREATE').length, 1, '稽核也要一起寫進去');
 
@@ -339,7 +342,8 @@ test('Supabase 後端跑起整個 app：API 寫入的資料真的進資料庫（
     /* 每個請求都重新 hydrate：第二個請求看得到第一個請求寫進去的東西 */
     const list = await (await fetch(`${base}/api/books/${book.id}/units`)).json();
     assert.equal(list.units.length, 1);
-    assert.equal(list.book.name, 'NorthStar 1');
+    assert.equal(list.book.grade, 'S1', '書本資訊只回年級');
+    assert.equal(list.book.name, undefined, '書名不出現在任何 API 回應裡');
 });
 
 test('Supabase 後端：寫回失敗時回 500，並帶上真正的原因（details.message）', async (t) => {
@@ -370,7 +374,7 @@ test('Supabase 後端：寫回失敗時回 500，並帶上真正的原因（deta
 
     const res = await fetch(`${base}/api/books`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ code: 'NSX', name: '不會存進去的書' })
+        body: JSON.stringify({ grade: 'S9' })          /* v0.5.0：建書只需要年級 */
     });
     assert.equal(res.status, 500, '寫回失敗不能假裝成功');
     const body = await res.json();

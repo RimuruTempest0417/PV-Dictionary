@@ -46,9 +46,9 @@
         },
         {
             id: 'units', audience: 'teacher',
-            covers: ['newUnitBtn', 'navUnitEditBtn', 'newBookBtn', 'navCoverBtn'],
+            covers: ['newUnitBtn', 'navUnitEditBtn', 'newBookBtn'],
             title: 'guide.units.title', steps: ['guide.units.s1', 'guide.units.s2', 'guide.units.s3'],
-            ids: ['bookForm', 'unitForm', 'unitEditForm', 'coverFileInput'],
+            ids: ['bookForm', 'unitForm', 'unitEditForm'],
             capability: 'can_manage_content'
         },
         {
@@ -87,7 +87,7 @@
             id: 'organise', audience: 'teacher',
             title: 'guide.organise.title', steps: ['guide.organise.s1', 'guide.organise.s2'],
             ids: ['unitList', 'bookShelf'],
-            covers: ['newUnitBtn', 'navUnitEditBtn', 'newBookBtn', 'navCoverBtn'],
+            covers: ['newUnitBtn', 'navUnitEditBtn', 'newBookBtn'],
             capability: 'can_manage_content'
         },
         {

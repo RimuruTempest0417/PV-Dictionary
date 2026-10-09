@@ -31,9 +31,6 @@
         "DELETE /api/audio/:id",
         "POST /api/books",
         "PATCH /api/books/:id",
-        "GET /api/covers/:id",
-        "POST /api/books/:id/cover",
-        "DELETE /api/books/:id/cover",
         "POST /api/books/:id/units",
         "PATCH /api/units/:id",
         "POST /api/units/:id/publish",
@@ -56,7 +53,7 @@
         "PATCH /api/admin/error-logs/:id"
     ],
     "counts": {
-        "routes": 54,
-        "layers": 63
+        "routes": 51,
+        "layers": 60
     }
 }
