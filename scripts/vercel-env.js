@@ -22,6 +22,11 @@ const SECRET_KEYS = ['JWT_SECRET', 'SUPABASE_SERVICE_ROLE_KEY'];
 /* 一般（非機密）變數：只有 --push-all 時才一起更新 */
 const PLAIN_KEYS = ['DATA_BACKEND', 'SUPABASE_URL', 'SITE_URL'];
 
+/* ★ 本機的 .env 為了跑 Demo 會是 DATA_BACKEND=json；
+ *   這個值**絕對不可以**推上 production（推上去線上就變成讀本機檔案、所有資料消失、查不到任何書）。
+ *   所以一般變數有「上線版的值」對照表：--push-all 時用這裡的值，不是 .env 的值。 */
+const PRODUCTION_OVERRIDES = { DATA_BACKEND: 'supabase' };
+
 const args = process.argv.slice(2);
 const CHECK = args.includes('--check');
 const PUSH = args.includes('--push') || args.includes('--push-all');
@@ -93,7 +98,7 @@ async function main() {
 
     const pushKeys = PUSH_ALL ? [...SECRET_KEYS, ...PLAIN_KEYS] : [...SECRET_KEYS];
     for (const key of pushKeys) {
-        const value = process.env[key];
+        const value = PRODUCTION_OVERRIDES[key] !== undefined ? PRODUCTION_OVERRIDES[key] : process.env[key];
         if (!value || /^REPLACE_ME/.test(value)) {
             console.error(`✖ .env 的 ${key} 沒有有效值（${describe(value)}）`);
             process.exit(1);
@@ -110,13 +115,18 @@ async function main() {
         })),
         ...(PUSH_ALL ? PLAIN_KEYS.map((key) => ({
             key,
-            value: process.env[key],
+            value: PRODUCTION_OVERRIDES[key] !== undefined ? PRODUCTION_OVERRIDES[key] : process.env[key],
             type: 'plain',
             target: ['production', 'preview', 'development']
         })) : [])
     ];
     await vercel('POST', `/v10/projects/${PROJECT_ID}/env?upsert=true&teamId=${TEAM_ID}`, payload);
     console.log(`✔ 已把 ${pushKeys.join('、')} 推上 Vercel（機密值沒有顯示、也沒有離開這個行程）`);
+    if (PUSH_ALL) {
+        for (const key of PLAIN_KEYS) {
+            console.log(`   ${key} = ${PRODUCTION_OVERRIDES[key] !== undefined ? PRODUCTION_OVERRIDES[key] : describe(process.env[key])}`);
+        }
+    }
 
     if (!DEPLOY) {
         console.log('（要順便重新部署請加 --deploy，或在 Vercel 介面按 Redeploy）');
