@@ -219,13 +219,77 @@ async function main() {
                 headers: Object.assign({ Cookie: cookie, Origin: HOST }, (options && options.headers) || {})
             }));
 
+            /* ★ 年級用時間戳：第 3 段已經用掉 'ZZ'，再用一次會回 409 DUPLICATE_GRADE（踩過） */
+            const verifyGrade = 'V' + String(Date.now()).slice(-4);
             const created = await authed('/api/books', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ grade: 'ZZ' })
+                body: JSON.stringify({ grade: verifyGrade })
             });
             const createdBody = await created.json();
-            check('臨時教師可以建立年級（HTTP 201）', created.status === 201 && createdBody.book && createdBody.book.grade === 'ZZ', JSON.stringify(createdBody).slice(0, 140));
+            check('臨時教師可以建立年級（HTTP 201）', created.status === 201 && createdBody.book && createdBody.book.grade === verifyGrade, JSON.stringify(createdBody).slice(0, 140));
+            /* 建完就刪（不留在使用者的教材裡）。
+             * ★ 沒有 DELETE /api/books/:id 這條路由（介面上也還不能刪年級）→ 用 REST 直接刪。 */
+            if (createdBody.book && createdBody.book.id && typeof supabase === 'function') {
+                await supabase(`dict_books?id=eq.${createdBody.book.id}`, { method: 'DELETE', body: null }).catch(() => null);
+            }
+            /* ★ 生字完整流程：這是「視窗化資料層」在線上最直接的實證
+             *   （本機真瀏覽器檢查用的是 JSON 資料層，只有這一段真的走 Supabase）。 */
+            if (createdBody.book && createdBody.book.id) {
+                const unitRes = await authed(`/api/books/${createdBody.book.id}/units`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ unit_no: 1, title: 'Live verify unit' })
+                });
+                const unitBody = await unitRes.json();
+                const unitId = unitBody.unit && unitBody.unit.id;
+                check('臨時教師可以建立單元（HTTP 201）', unitRes.status === 201 && Boolean(unitId), JSON.stringify(unitBody).slice(0, 120));
+
+                if (unitId) {
+                    const word = 'verify' + String(Date.now()).slice(-5);
+                    const entryRes = await authed(`/api/units/${unitId}/entries`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ headword: word, zh_meaning: '驗收', en_definition: 'live verify', part_of_speech: 'n.' })
+                    });
+                    const entryBody = await entryRes.json();
+                    const entryId = entryBody.entry && entryBody.entry.id;
+                    check('建立生字（HTTP 201）', entryRes.status === 201 && Boolean(entryId), JSON.stringify(entryBody).slice(0, 140));
+
+                    if (entryId) {
+                        /* 讀單元詳情：生字要在（＝真的寫進 Supabase 而且讀得回來） */
+                        const detail = await (await pvFetch(`${BASE}/api/units/${unitId}?per_page=200`)).json();
+                        const found = (detail.entries || []).find((entry) => entry.headword === word);
+                        check('單元詳情讀得到剛建立的生字（＝真的寫進資料庫）', Boolean(found), JSON.stringify(detail.entries || []).slice(0, 120));
+                        check('單元詳情只回這一頁需要的資料（有 total／has_more）',
+                            typeof detail.total === 'number' && typeof detail.has_more === 'boolean', `total=${detail.total}`);
+                        check('單元用量（D-3）回報了錄音數與上限',
+                            typeof detail.unit.audio_count === 'number' && detail.unit.audio_limit > 0,
+                            JSON.stringify({ count: detail.unit.audio_count, limit: detail.unit.audio_limit }));
+
+                        /* 改生字（樂觀鎖：帶版本才會被檢查） */
+                        const patched = await authed(`/api/entries/${entryId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ zh_meaning: '驗收（改）', version: found && found.updated_at })
+                        });
+                        check('改生字（HTTP 200）', patched.status === 200, (await patched.text()).slice(0, 120));
+
+                        /* 舊版本再送一次 → 409 STALE_WRITE（樂觀鎖在線上真的有效） */
+                        const stale = await authed(`/api/entries/${entryId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ zh_meaning: '不該寫進去', version: found && found.updated_at })
+                        });
+                        const staleBody = await stale.json();
+                        check('用舊版本改生字會被擋（409 STALE_WRITE）', stale.status === 409 && staleBody.code === 'STALE_WRITE', `HTTP ${stale.status}`);
+
+                        /* 刪生字（連音檔一起） */
+                        const removed = await authed(`/api/entries/${entryId}`, { method: 'DELETE' });
+                        check('刪生字（HTTP 200）', removed.status === 200, (await removed.text()).slice(0, 120));
+                    }
+                }
+            }
             check('年級物件沒有書名與封面欄位',
                 createdBody.book && createdBody.book.name === undefined && createdBody.book.code === undefined && createdBody.book.has_cover === undefined,
                 JSON.stringify(createdBody.book || {}));

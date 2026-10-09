@@ -301,8 +301,13 @@ function createApp(options = {}) {
         const DB_FREE = /^\/(api\/version|api\/logs\/error|api\/admin\/error-logs)\/?$/;
         app.use('/api', async (req, res, next) => {
             if (DB_FREE.test(String(req.originalUrl || '').split('?')[0])) return next();
+            /* v0.6.1（D-1b）：視窗化資料層。
+             *   hydrate() 只抓小表（books／units／users／grants）；
+             *   prefetch() 依「這一條路由會用到什麼」抓生字／音檔／稽核的切片。
+             *   沒有被 prefetch 到的範圍，存取時會直接拋 STORE_WINDOW_MISSING（大聲失敗，不靜默回空）。 */
+            const storeContext = typeof store.attach === 'function' ? store.attach() : null;
             try {
-                await store.hydrate();
+                await store.hydrate({ full: !storeContext });
             } catch (err) {
                 console.error('[store] 讀取 Supabase 失敗：', err.message);
                 writeErrorLog({ source: 'server', code: 'DB_UNAVAILABLE', message: err.message, path: String(req.originalUrl || '').split('?')[0] }, req);
@@ -311,6 +316,28 @@ function createApp(options = {}) {
                     code: 'DB_UNAVAILABLE',
                     details: { message: err.message }
                 });
+            }
+            if (storeContext) {
+                try {
+                    /* ★ 一定要在 runWithContext 裡面跑：prefetch 是往「這個請求的視窗」丟資料，
+                     *   跑在外面會拿不到視窗（win() 是 null）→ 視窗永遠空的 → 路由存取時全部拋錯。 */
+                    await store.runWithContext(storeContext, async () => {
+                        await store.prefetch({
+                            method: req.method,
+                            path: String(req.path || ''),
+                            query: req.query || {},
+                            body: req.body || {}
+                        });
+                    });
+                } catch (err) {
+                    console.error('[store] prefetch 失敗：', err.message);
+                    writeErrorLog({ source: 'server', code: 'DB_WINDOW_FAILED', message: err.message, path: String(req.originalUrl || '').split('?')[0] }, req);
+                    return res.status(503).json({
+                        error: msg('DB_UNAVAILABLE', { message: err.message }),
+                        code: 'DB_UNAVAILABLE',
+                        details: { message: err.message }
+                    });
+                }
             }
             const originalJson = res.json.bind(res);
             res.json = (body) => {
@@ -329,6 +356,8 @@ function createApp(options = {}) {
                     });
                 return res;
             };
+            /* ★ 後續（同步的）路由一定要在同一個請求上下文裡跑，才讀得到剛才抓的視窗 */
+            if (storeContext) return store.runWithContext(storeContext, next);
             return next();
         });
     }
@@ -672,7 +701,7 @@ function createApp(options = {}) {
             return gradeOf(book);
         };
         const units = store.listUnits({ includeUnpublished: true });
-        const entries = store.listEntries({});
+        /* v0.6.1（D-1b）：不要為了算數字把整表生字搬進記憶體 → 用資料層的計數 */
         const mine = units.filter((unit) => Roles.canEditUnit(req.user, unit, allGrants));
         return res.json({
             total: mine.length,
@@ -684,8 +713,8 @@ function createApp(options = {}) {
                 unit_no: unit.unit_no,
                 title: unit.title || '',
                 is_published: unit.is_published !== false,
-                entries: entries.filter((entry) => entry.unit_id === unit.id && entry.status === 'published').length,
-                pending: entries.filter((entry) => entry.unit_id === unit.id && entry.status === 'pending').length,
+                entries: store.countEntries(unit.id, PUBLISHED_ONLY),
+                pending: store.countEntries(unit.id, ['pending']),
                 can_publish: Roles.canPublishUnit(req.user, unit, allGrants)
             }))
         });
@@ -1798,10 +1827,9 @@ function createApp(options = {}) {
         const books = store.listBooks({ includeUnpublished: true });
         const units = store.listUnits({ includeUnpublished: true });
         const publishedUnits = units.filter((unit) => unit.is_published !== false);
-        const entries = store.listEntries({});                       /* 全部（含未發佈與待審核） */
+        /* v0.6.1（D-1b）：統計只要數字 —— 用資料層的計數查詢，不把整表生字搬進記憶體 */
+        const entryTotals = store.countAllEntries();
         const audioRows = store.listAudio ? store.listAudio({}) : [];
-        const published = entries.filter((entry) => entry.status === 'published');
-        const pending = entries.filter((entry) => entry.status === 'pending');
         const users = store.listUsers();
         const grants = store.listGrants({});
         const audio = audioRows.filter((row) => row.source === 'teacher').length;
@@ -1817,17 +1845,17 @@ function createApp(options = {}) {
             id: unit.id,
             label: `Unit ${unit.unit_no}${unit.title ? ` · ${unit.title}` : ''}`,
             grade: (() => { const book = store.getBook(unit.book_id); return gradeOf(book); })(),
-            published: entries.filter((entry) => entry.unit_id === unit.id && entry.status === 'published').length,
-            pending: entries.filter((entry) => entry.unit_id === unit.id && entry.status === 'pending').length
+            published: store.countEntries(unit.id, PUBLISHED_ONLY),
+            pending: store.countEntries(unit.id, ['pending'])
         }));
         const emptyUnits = perUnit.filter((unit) => unit.published === 0 && unit.pending === 0);
         return res.json({
             books: { total: books.length, published: books.filter((book) => book.is_published !== false).length },
             units: { total: units.length, published: publishedUnits.length, empty: emptyUnits.length },
-            entries: { total: entries.length, published: published.length, pending: pending.length },
+            entries: { total: entryTotals.total, published: entryTotals.published, pending: entryTotals.pending },
             audio: {
                 total: audio,
-                missing: published.length - audio,
+                missing: Math.max(0, entryTotals.published - audio),
                 /* D-3：容量意識 —— 錄音以 base64 存在資料庫，這裡回總位元組數（前端換算 MB） */
                 bytes: audioRows.reduce((sum, row) => sum + (Number(row.bytes) || 0), 0),
                 per_unit_limit: AUDIO_MAX_PER_UNIT

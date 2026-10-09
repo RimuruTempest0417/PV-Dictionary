@@ -81,8 +81,41 @@ function fakeSupabase() {
                 }
                 return out;
             };
-            const rows = (wanted ? db[table].filter((r) => String(r.id) === String(wanted)) : db[table].slice()).map(picked);
-            return { ok: true, status: 200, text: async () => JSON.stringify(rows) };
+            /* v0.6.1：視窗化資料層會用 in.(1,2,3) 這種篩選、也會要 count */
+            const inFilters = [];
+            for (const [key, value] of parsed.searchParams.entries()) {
+                if (!value.startsWith('in.(')) continue;
+                const ids = value.slice(4, -1).split(',').map((item) => item.trim());
+                inFilters.push({ key, ids });
+            }
+            const limit = Number(parsed.searchParams.get('limit')) || null;
+            const offset = Number(parsed.searchParams.get('offset')) || 0;
+            let matched = wanted ? db[table].filter((r) => String(r.id) === String(wanted)) : db[table].slice();
+            for (const filter of inFilters) {
+                matched = matched.filter((row) => filter.ids.includes(String(row[filter.key])));
+            }
+            /* Ordering matters: the windowed store picks the next id with order=id.desc&limit=1,
+             * and the real PostgREST sorts. Without sorting here the fake returns row #1 and the
+             * store hands out duplicate ids (this is exactly what broke the app-level test). */
+            const order = parsed.searchParams.get('order');
+            if (order) {
+                for (const clause of order.split(',').reverse()) {
+                    const [column, dirRaw] = clause.split('.');
+                    const dir = String(dirRaw || 'asc').toLowerCase().startsWith('desc') ? -1 : 1;
+                    matched = matched.slice().sort((a, b) => {
+                        const av = a[column];
+                        const bv = b[column];
+                        if (av === bv) return 0;
+                        if (av === undefined || av === null) return 1;
+                        if (bv === undefined || bv === null) return -1;
+                        return (av < bv ? -1 : 1) * dir;
+                    });
+                }
+            }
+            const total = matched.length;
+            const rows = matched.slice(offset, limit === null ? undefined : offset + limit).map(picked);
+            const headers = { get: (name) => (String(name).toLowerCase() === 'content-range' ? `0-${Math.max(0, rows.length - 1)}/${total}` : null) };
+            return { ok: true, status: 200, headers, text: async () => JSON.stringify(rows) };
         }
         if (method === 'POST') {
             const badColumn = unknownColumn(table, body);
@@ -95,7 +128,7 @@ function fakeSupabase() {
                 return { ok: false, status: 409, text: async () => JSON.stringify({ message: 'duplicate key value violates unique constraint' }) };
             }
             db[table].push(row);
-            return { ok: true, status: 201, text: async () => JSON.stringify([row]) };
+            return { ok: true, status: 201, headers: { get: () => null }, text: async () => JSON.stringify([row]) };
         }
         if (method === 'PATCH') {
             const badColumn = unknownColumn(table, body);
@@ -352,6 +385,7 @@ test('Supabase 後端跑起整個 app：API 寫入的資料真的進資料庫（
         method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
         body: JSON.stringify({ grade: 'S1' })
     });
+    if (created.status !== 201) console.log('DEBUG book body:', JSON.stringify(await created.clone().text()));
     assert.equal(created.status, 201);
     const book = (await created.json()).book;
     assert.ok(book.id > 0, '回給前端的 id 要是真的 id');
@@ -458,4 +492,94 @@ test('v0.6.1：HAS_UPDATED_AT 與 schema 清單一致（欄位有無的唯一來
     for (const table of ['audit_logs', 'audio', 'grants']) {
         assert.equal(HAS_UPDATED_AT.has(table), false, `${table} 不應該被當成有 updated_at`);
     }
+});
+
+
+/* ============================================================
+ * v0.6.1（D-1b）視窗化資料層
+ * ============================================================ */
+
+test('視窗化資料層：看一個單元不會把整張生字表抓下來，而且沒載入的範圍會大聲失敗', async () => {
+    const fake = fakeSupabase();
+    /* 先用 full 模式把資料準備好（模擬資料庫已經有兩本、兩個單元、各 3 個生字） */
+    const seedStore = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k', hydrateTtlMs: 0 });
+    await seedStore.hydrate({ full: true });
+    const book = seedStore.createBook({ code: 'B', name: 'B', grade: 'S1', sort_order: 1, is_published: true });
+    const unitA = seedStore.createUnit({ book_id: book.id, unit_no: 1, title: 'A', sort_order: 1, is_published: true });
+    const unitB = seedStore.createUnit({ book_id: book.id, unit_no: 2, title: 'B', sort_order: 2, is_published: true });
+    for (const [unit, tag] of [[unitA, 'a'], [unitB, 'b']]) {
+        for (let i = 1; i <= 3; i += 1) {
+            seedStore.createEntry({
+                unit_id: unit.id, headword: `${tag}${i}`, headword_norm: `${tag}${i}`,
+                status: 'published', sort_order: i, created_by: 'seed'
+            });
+        }
+    }
+    await seedStore.flush();
+
+    /* 接著用「請求模式」跑一次：只看單元 A */
+    const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k', hydrateTtlMs: 0 });
+    const context = store.attach();
+    await store.hydrate({ full: false });
+    await store.runWithContext(context, async () => {
+        await store.prefetch({ method: 'GET', path: `/units/${unitA.id}`, query: {}, body: {} });
+    });
+
+    const callsBefore = fake.calls.length;
+    let rows = [];
+    let missing = null;
+    store.runWithContext(context, () => {
+        rows = store.listEntries({ unitId: unitA.id });
+        try {
+            store.listEntries({ unitId: unitB.id });          /* 沒有載入的單元 → 應該拋錯 */
+        } catch (err) {
+            missing = err;
+        }
+    });
+
+    assert.equal(rows.length, 3, '單元 A 的 3 個生字要看得到');
+    assert.equal(rows.every((row) => String(row.unit_id) === String(unitA.id)), true, '不可以混到別的單元');
+    assert.ok(missing, '沒有載入的範圍要拋錯，不能靜默回空');
+    assert.equal(missing.code, 'STORE_WINDOW_MISSING');
+
+    /* 關鍵：這一段沒有再打任何資料庫（不含整表查詢），而且抓的是單元範圍 */
+    const windowCalls = fake.calls.slice(callsBefore);
+    assert.equal(windowCalls.filter((call) => call.table === 'dict_entries').length, 0, '讀取時不應該再打資料庫');
+    assert.equal(store.planFor({ method: 'GET', path: `/units/${unitA.id}` }).entryUnits.has(String(unitA.id)), true);
+    assert.equal(store.planFor({ method: 'GET', path: `/units/${unitA.id}` }).entryUnits.size, 1, '只抓被指定的那一個單元');
+    assert.equal(store.planFor({ method: 'GET', path: '/admin/stats' }).counts, true, '統計頁只抓計數');
+
+    fake.restore();
+});
+
+test('視窗化資料層：統計與書架用計數，不需要生字內容', async () => {
+    const fake = fakeSupabase();
+    const seedStore = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k', hydrateTtlMs: 0 });
+    await seedStore.hydrate({ full: true });
+    const book = seedStore.createBook({ code: 'B', name: 'B', grade: 'S1', sort_order: 1, is_published: true });
+    const unit = seedStore.createUnit({ book_id: book.id, unit_no: 1, title: 'A', sort_order: 1, is_published: true });
+    for (let i = 1; i <= 5; i += 1) {
+        seedStore.createEntry({
+            unit_id: unit.id, headword: `w${i}`, headword_norm: `w${i}`,
+            status: i <= 3 ? 'published' : 'pending', sort_order: i, created_by: 'seed'
+        });
+    }
+    await seedStore.flush();
+    const allRows = fake.calls.filter((call) => call.method === 'POST' && call.table === 'dict_entries').length;
+    assert.equal(allRows, 5);
+
+    const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k', hydrateTtlMs: 0 });
+    const context = store.attach();
+    await store.hydrate({ full: false });
+    await store.runWithContext(context, () => store.prefetch({ method: 'GET', path: '/books', query: {}, body: {} }));
+
+    store.runWithContext(context, () => {
+        assert.deepEqual(store.countAllEntries(), { total: 5, published: 3, pending: 2, rejected: 0 });
+        assert.equal(store.countEntries(unit.id, ['published']), 3);
+        assert.equal(store.countEntries(unit.id, null), 5);
+    });
+
+    /* 生字內容沒被搬進來：manifest 裡的生字工作集是空的 */
+    assert.equal(context.entries.length, 0, '只看書架不應該把生字搬進記憶體');
+    fake.restore();
 });
