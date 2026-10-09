@@ -156,6 +156,13 @@ Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-sout
   詳見 `docs/監控與錯誤追查.md`。
 - **稽核匯出與清理**（v0.4.4）：「🧾 稽核紀錄」可以依目前篩選條件**匯出 CSV**（帶 UTF-8 BOM，Excel 直接開；
   以 `= + - @` 開頭的值會補單引號防公式注入），也可以**清理舊紀錄**（第一次按只預覽，第二次才真的刪；保留天數下限 30 天）。
+- **修改年級**（v0.6.0）：管理區「📗 新增年級」下方列出所有年級，每一列有 ✏️ 可以改名；
+  改成已經有的年級會被擋（409），稽核紀錄會留一筆 `BOOK_UPDATE`。
+- **編輯衝突保護**（v0.6.0，D-2）：生字／單元／年級存檔時帶著讀到的版本，別人先改過就回 409
+  並重新載入（不再無聲蓋掉別人的修改）。
+- **生字表分頁**（v0.6.0，D-1）：一頁 60 筆、底部「⬇ 載入更多生字」、搜尋由伺服器端過濾；
+  一個單元 3,000 個生字時，第一頁的回應從 1,131 KB 降到 22 KB（省 98.1%，見 `npm run perf:entries`）。
+- **每單元錄音上限**（v0.6.0，D-3）：上限 60 段，錄音視窗顯示用量，📊 概況回報錄音總容量。
 - **年級制**（v0.5.0，使用者指定）：書架只看得到**年級**（例：S1／S2），點年級直接看到它的單元；
   **書名與封面在整個流程裡都不再出現（包括管理區）**，管理區的「📗 新增年級」只要填年級。
   封面上傳／讀取端點與面板整個移除（資料表欄位保留為舊資料欄位）。
@@ -247,8 +254,11 @@ guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin
 ```bash
 npm run check:syntax   # 所有 JS 語法檢查 + server.js 模組載入檢查
 npm run check:schema   # 程式要用的欄位 vs migrations/*.sql（不用網路）
-npm test               # 83 項：角色權限矩陣、資料層（JSON 與 Supabase）、schema 守門、路由快照與覆蓋、版本一致、i18n、API 端到端
-npm run check:browser  # 四支真 Chrome 檢查（劇本 59 ＋ 空白起步 33 ＋ 語言切換 28 ＋ 帳號管理 58）
+npm test               # 155 項：角色權限矩陣、資料層（JSON 與 Supabase）、schema 守門、路由快照與覆蓋、版本一致、i18n、
+                       #        說明頁分頁守門、權限對照表、.xlsx、連續播放、修改年級／樂觀鎖／錄音上限／生字表分頁、API 端到端
+npm run check:browser  # 四支真 Chrome 檢查（劇本 103 ＋ 空白起步 33 ＋ 語言切換 40 ＋ 帳號管理 128 ＝ 304 項）
+npm run check:live-browser  # 打正式站的真瀏覽器「訪客視角」檢查（16 項；不寫截圖、不下載、不登入）
+npm run perf:entries   # D-1 效能實測：一個單元塞 3000 個生字，量分頁省下多少（預設 3000）
 npm run check:deps     # 依賴套件弱點掃描（需要網路；--all 才含開發依賴）
 npm run uptime         # 線上健康檢查（版本／資料庫／公開讀取／首頁），失敗 exit 1
 npm run triage         # 巡檢錯誤日誌（唯讀，依出現次數分組）
@@ -263,7 +273,7 @@ node scripts/live-verify.js             # 線上版端到端：schema、帶封�
 DATA_BACKEND=supabase npm run seed -- --prune-accounts   # 在正式資料庫建立／重設帳號
 ```
 
-發版的完整順序（`npm run check` 是 `check:syntax + check:schema + test`）：
+發版的完整順序（`npm run check` 是 `check:syntax + check:schema + test`；**線上版額外跑 `check:live-browser`**）：
 
 ```bash
 npm run check && npm run check:browser && npm run check:deps
@@ -313,7 +323,7 @@ tests/fixtures/             # 路由快照等測試基準檔
 
 版號同時出現在 `package.json`、`public/index.html` 的 `<title>`／`#versionLabel` 與所有資產的 `?v=`；
 `tests/version-consistency.test.js` 會擋住任何一處忘了改（含 `/api/version` 與 `README.md`）。
-發版流程：`npm run check:syntax && npm test && npm run check:browser` → commit → annotated tag → push → GitHub Release。
+發版流程：`npm run check:syntax && npm test && npm run check:browser && npm run check:live-browser` → commit → annotated tag → push → GitHub Release。
 
 **版本說明檔一律放在 `docs/release/`**（`docs/release/release-vX.Y.Z.md`，使用者指定：集中放比較整齊），
 發 Release 時用 `node scripts/gh-release.js <tag> docs/release/release-vX.Y.Z.md "<標題後半>"`。

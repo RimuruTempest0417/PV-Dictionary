@@ -159,3 +159,16 @@ test('.env 沒有被版控追蹤（.gitignore 有涵蓋）', () => {
     assert.match(ignore, /^\.env$/m);
     assert.match(ignore, /^data\/$/m);
 });
+
+/* 品牌名不可以寫死在程式裡（v0.6.0）：v0.5.0 更名時 app.js 的 document.title 漏改，
+ * 線上分頁標題一直是 PV_Dictionary，直到正式站的真瀏覽器檢查（E-3）才抓到。
+ * 這裡直接掃描前端與 HTML，出現舊名字就紅燈。 */
+test('前端不可以再出現舊品牌名 PV_Dictionary（更名漏改守門）', () => {
+    const roots = ['public/index.html', 'public/js/app.js', 'public/js/i18n.js', 'public/img/favicon.svg'];
+    for (const rel of roots) {
+        const source = fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
+        assert.equal(/PV_Dictionary/.test(source), false, `${rel} 還有舊品牌名 PV_Dictionary`);
+    }
+    const app = fs.readFileSync(path.join(__dirname, '..', 'public/js/app.js'), 'utf8');
+    assert.match(app, /document\.title = `Gary-Dictionary v\$\{info\.version\}`/, 'document.title 要用新名字');
+});

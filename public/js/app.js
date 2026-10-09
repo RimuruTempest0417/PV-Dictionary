@@ -44,7 +44,8 @@
         try {
             const info = await api.get('/api/version');
             document.getElementById('versionLabel').textContent = `v${info.version}`;
-            document.title = `PV_Dictionary v${info.version}`;
+            /* ★ 標題不要寫死品牌名：v0.5.0 更名時這裡漏改，線上分頁標題一直是舊名字（E-3 的真瀏覽器檢查抓到） */
+            document.title = `Gary-Dictionary v${info.version}`;
         } catch (err) {
             /* 版本顯示失敗不影響使用 */
         }

@@ -1,4 +1,4 @@
-/* PV_Dictionary 版面與互動
+/* Gary-Dictionary 版面與互動
  * 規則：
  * - 顏色一律走 tokens.css 的變數（不得寫死色碼）
  * - 不使用行內 style、不使用行內事件（CSP 為 script-src 'self' / style-src 'self'）

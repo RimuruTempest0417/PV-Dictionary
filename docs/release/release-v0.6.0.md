@@ -63,7 +63,20 @@
   **iPhone 寬度（390×844）不橫向溢出**、有「跳至主要內容」連結。
 - 依你指定的規則：**不寫任何截圖檔、不觸發任何下載、不登入、不改任何資料**。
 
-### 6. 網址更名 Gary-Dictionary
+### 6. 更名與一個踩到的坑（要記下來）
+
+**Vercel 專案改名時**：新網址要等**下一次部署**才會被指派（改名後直接打會是 `DEPLOYMENT_NOT_FOUND`），
+所以流程是「改名 → 推一次 main → 驗證新網址」。
+
+★ **本機的 `DATA_BACKEND=json` 一度被推上 production**：`scripts/vercel-env.js` 原本只推機密變數，
+我為了改 `SITE_URL` 加了 `--push-all`（連一般變數一起推），結果把本機 Demo 用的 `DATA_BACKEND=json`
+也推上去了 → **線上變成讀本機檔案**（畫面上 0 本書、資料庫看起來像空的）。
+現在有兩道防線：
+1. `PRODUCTION_OVERRIDES`：`DATA_BACKEND` 上線一律用 `supabase`（不管 .env 寫什麼）。
+2. `--push-all` 會把「即將推上去的一般變數值」印出來，可以當場核對。
+修好之後 `/api/health` 回 `backend: supabase`、書本 1 本、稽核 44 筆（你的資料都還在）。
+
+### 7. 網址更名 Gary-Dictionary
 
 - Vercel 專案 `pv-dictionary` → **`gary-dictionary`**（網址跟著換，詳見 README 的發版紀錄）。
 - `.env`／Vercel 的 `SITE_URL`、檢查腳本的預設網址、文件一併更新。
@@ -75,7 +88,7 @@
 |---|---|---|
 | 語法 | `npm run check:syntax` | 69/69 通過 |
 | 單元／API／守門 | `npm test` | **154 通過 / 0 失敗**（新增 4 支：修改年級、樂觀鎖、錄音上限、分頁與搜尋） |
-| 真 Chrome（本機） | `npm run check:browser` | NUMBER_BROWSER |
-| 正式站（真 Chrome） | `npm run check:live-browser` | NUMBER_LIVE |
-| 線上 HTTP 驗收 | `node scripts/live-verify.js --no-auth` | NUMBER_LIVEVERIFY |
-| 線上健康檢查 | `npm run uptime` | NUMBER_UPTIME |
+| 真 Chrome（本機） | `npm run check:browser` | **304 項全綠**：demo 103（＋8：修改年級、重複被擋、稽核）＋ empty-start 33 ＋ lang 40 ＋ users 128（＋8：載入更多、伺服器端搜尋） |
+| 正式站（真 Chrome） | `npm run check:live-browser` | **16 通過 / 0 失敗**（訪客視角、不寫截圖、不下載；第一次跑就抓到「分頁標題還是舊品牌名」的真問題） |
+| 線上 HTTP 驗收 | `node scripts/live-verify.js --no-auth` | 14 通過 / 0 失敗 / 2 略過 |
+| 線上健康檢查 | `npm run uptime` | 4 項全綠（版本 0.6.0、資料庫 ok、公開讀取 1 本、首頁 200） |
