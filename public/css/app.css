@@ -63,7 +63,10 @@ code {
 }
 
 .topbar-inner {
-    max-width: 67.5rem;
+    /* ★ 固定 px：內容欄寬不隨字級改變。v0.6.3 曾寫成 67.5rem，
+     *   結果 A− 時整頁縮窄、空間利用率變差（使用者回報）。
+     *   字級切換只改「介面元件的大小」，不改版面可用寬度。 */
+    max-width: 1080px;
     margin: 0 auto;
     padding: var(--space-3) var(--space-4);
     display: flex;
@@ -195,7 +198,10 @@ code {
 
 /* ---------------- 頁面容器 ---------------- */
 .page {
-    max-width: 67.5rem;
+    /* ★ 固定 px：內容欄寬不隨字級改變。v0.6.3 曾寫成 67.5rem，
+     *   結果 A− 時整頁縮窄、空間利用率變差（使用者回報）。
+     *   字級切換只改「介面元件的大小」，不改版面可用寬度。 */
+    max-width: 1080px;
     margin: 0 auto;
     padding: var(--space-5) var(--space-4) 4.5rem;
     display: flex;
@@ -1010,7 +1016,10 @@ code {
 
 /* ---------------- 頁腳 ---------------- */
 .footer {
-    max-width: 67.5rem;
+    /* ★ 固定 px：內容欄寬不隨字級改變。v0.6.3 曾寫成 67.5rem，
+     *   結果 A− 時整頁縮窄、空間利用率變差（使用者回報）。
+     *   字級切換只改「介面元件的大小」，不改版面可用寬度。 */
+    max-width: 1080px;
     margin: 0 auto;
     padding: var(--space-4) var(--space-4) var(--space-6);
     font-size: var(--fs-small);
@@ -1690,10 +1699,12 @@ code {
 :root[data-font="l"] { font-size: 19px; }
 
 /* 字級切換鈕自己也要「看得出來誰大誰小」（使用者指定：A− 要比 A 小）：
- * 三顆鈕排成 0.72rem < 0.85rem < 1rem 的階梯，光看按鈕就知道按下去會變大還是變小。 */
-#fontSwitch [data-font-value="s"] { font-size: 0.72rem; }
+ * 三顆鈕排成 0.7rem < 0.85rem < 1.05rem 的階梯，光看按鈕就知道按下去會變大還是變小。
+ * ★ 符號用 ASCII 連字號（A-）：字體會把「−」（U+2212）畫在數學軸上、比「A」還高，
+ *   看起來就像 A− 比 A 大（使用者回報「A+ 最大、然後 A−、最後 A」）。 */
+#fontSwitch [data-font-value="s"] { font-size: 0.7rem; }
 #fontSwitch [data-font-value="m"] { font-size: 0.85rem; }
-#fontSwitch [data-font-value="l"] { font-size: 1rem; }
+#fontSwitch [data-font-value="l"] { font-size: 1.05rem; }
 /* 這三顆鈕用固定高度對齊基線，否則小字那顆會讓整個切換器高度跳動 */
 #fontSwitch button { min-height: 1.9rem; display: inline-flex; align-items: center; }
 

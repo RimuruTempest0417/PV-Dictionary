@@ -556,11 +556,25 @@ async function main() {
         };
         check('整個介面跟著字級縮放：字級切換鈕的寬度', scalesOk((row) => row.chip && row.chip.w), JSON.stringify(scaleSamples));
         check('整個介面跟著字級縮放：字級切換鈕的高度', scalesOk((row) => row.chip && row.chip.h), JSON.stringify(scaleSamples));
-        check('整個介面跟著字級縮放：內容欄寬（.page）', scalesOk((row) => row.page && row.page.w), JSON.stringify(scaleSamples));
+        /* ★ v0.6.4：內容欄寬**不可以**跟著字級變（v0.6.3 用 rem 讓 A− 時整頁縮窄、
+         *   空間利用率變差，使用者回報）。字級只改介面元件大小，不改版面可用寬度。 */
+        const sameWidth = (row) => row.page && Math.abs(row.page.w - scaleSamples.m.page.w) <= 3;
+        check('內容欄寬不隨字級改變（空間利用率不變）',
+            sameWidth(scaleSamples.s) && sameWidth(scaleSamples.l),
+            JSON.stringify(['s', 'm', 'l'].map((value) => (scaleSamples[value].page || {}).w)));
         check('整個介面跟著字級縮放：頂欄（.topbar-inner）高度', scalesOk((row) => row.topbar && row.topbar.h), JSON.stringify(scaleSamples));
         check('三種字級都沒有水平溢出（不會出現橫向捲軸）',
             ['s', 'm', 'l'].every((value) => scaleSamples[value].overflow <= 2),
             JSON.stringify(['s', 'm', 'l'].map((value) => scaleSamples[value].overflow)));
+        /* ★ v0.6.4：三個標籤自己要有大小階梯（使用者指定「A− 要比 A 小」），
+         *   這樣光看按鈕就知道哪個會變大、哪個會變小。 */
+        const labelSizes = await browser.evaluate(`
+            return Array.from(document.querySelectorAll('#fontSwitch button'))
+                .map((b) => Math.round(parseFloat(getComputedStyle(b).fontSize) * 100) / 100);
+        `);
+        check('A−／A／A+ 標籤的字級有階梯（A− < A < A+）',
+            labelSizes.length === 3 && labelSizes[0] < labelSizes[1] && labelSizes[1] < labelSizes[2],
+            JSON.stringify(labelSizes));
         /* 還原成預設（中） */
         await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="m"]').click(); return true;`);
         await sleep(150);
