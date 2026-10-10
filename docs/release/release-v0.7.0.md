@@ -46,8 +46,15 @@
 | 單元／API／守門 | `npm test` | 168 通過 / 0 失敗 |
 | 真 Chrome（本機） | `npm run check:browser` | **329 項全綠**（demo 118 ＋ empty 33 ＋ lang 42 ＋ users 136） |
 | 線上 schema／函式 | `npm run check:schema:live` | 通過（含 v0.7.0 兩個函式都存在） |
-| 線上驗收 | `live-verify --ephemeral-teacher` | 見下方收尾數字 |
-| 正式站真瀏覽器 | `npm run check:live-browser` | 見下方收尾數字 |
+| 線上驗收 | `live-verify --ephemeral-teacher` | **26 通過 / 0 失敗 / 1 略過**（資料筆數回到開始前） |
+| 正式站真瀏覽器 | `npm run check:live-browser` | **22 通過 / 0 失敗**（含新增的「Help 面板手機不溢出」兩項） |
+
+**上線後讀回（實測）**
+
+- 四個網址的 `/api/version` 都是 `0.7.0`。
+- `/api/health` 的 `usage`：`{"available":true,"bytes":13072051,"human":"12.47 MB","quota_human":"500.00 MB","percent":2.5,"warn_percent":70,"warn":false,"source":"dict_db_size()"}`。
+- `npm run uptime` 多了一行：**`✔ 資料庫容量 → 12.47 MB / 500.00 MB｜2.5%｜門檻 70%`**。
+- 書架 API（D-1c 實際走的路徑）在正式站回 `unit_count:1, entry_count:1` —— 聚合函式在 production 正常運作。
 
 ### 需要你在 Supabase 做的那一步（已完成）
 
