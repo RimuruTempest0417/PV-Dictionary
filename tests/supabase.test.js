@@ -637,6 +637,22 @@ test('視窗化資料層（D-11）：單元詳情頁只向資料庫要「這一�
     assert.equal(String((pageCalls[0].headers || {}).Prefer || ''), 'count=exact', '要 Prefer: count=exact');
     assert.match(String(pageCalls[0].url || ''), /unit_id=eq\./, '要在資料庫端就限定單元');
 
+    /* ★ 回歸測試（v0.11.0 部署後真的壞過）：這一頁的生字都要被標記「音檔已載入」，
+     *   沒有老師錄音的也要 —— 否則 publicEntry → findTeacherAudio() 會拋 STORE_WINDOW_MISSING，
+     *   正式站的 /api/units/:id 就是這樣 500 的。a3／a4 沒有錄音，a1／a2 有。 */
+    store.runWithContext(context, () => {
+        assert.equal(store.findTeacherAudio(page.rows[0].id), null, '沒有錄音的生字要回 null，不是拋錯');
+        assert.equal(store.findTeacherAudio(page.rows[1].id), null, '沒有錄音的生字要回 null，不是拋錯');
+    });
+    let firstPage = null;
+    await store.runWithContext(context, async () => {
+        firstPage = await store.listEntriesPage({ unitId: unitA.id, page: 1, perPage: 2 });
+    });
+    store.runWithContext(context, () => {
+        const audio = store.findTeacherAudio(firstPage.rows[0].id);
+        assert.ok(audio && audio.entry_id !== undefined, '有老師錄音的生字要查得到那筆錄音');
+    });
+
     /* 搜尋也下推到資料庫（or=…ilike…），不是在 JS 過濾 */
     let found = null;
     await store.runWithContext(context, async () => {
