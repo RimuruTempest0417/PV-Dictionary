@@ -53,7 +53,56 @@ npm run uptime && node scripts/live-verify.js --ephemeral-teacher   # 確認回�
 **唯一的資料風險**：切換後若在 Neon 上新增／修改了資料，回滾到 Supabase 會看不到那些變更
 （兩邊不會自動同步）。真要回滾，先 `npm run backup`（此時備份的是 Neon 的內容）再說。
 
-## 五、要記得的事
+## 五、金鑰輪替（2026-10-10 演練完成）
+
+兩種「輪替」要分清楚，做法完全不同：
+
+### A. 只換 token（同一個簽章金鑰）—— 已實測可行，零停機
+
+```bash
+node scripts/switch-backend.js --rotate-jwt      # 重新簽一張寫回 .env（會先備份 .env）
+node scripts/vercel-env.js --push-all --deploy   # 推上 Vercel 並重新部署
+npm run uptime                                    # 確認「資料庫金鑰效期」變成新的到期日
+```
+
+- 實測：輪替後正式站正常（`live-verify` 25/0/1、`uptime` 全綠）、**舊 token 到期前仍然有效**。
+- ★ **換 token ≠ 撤銷舊 token**：同一個簽章金鑰簽出來的都有效到各自的 `exp`。
+  演練證據：輪替後拿 .env.bak 裡的舊 token 打 Neon 仍回 **200**。
+- 使用者感受：沒有停機、不用重新登入（網站用的是伺服器端的 token，跟使用者登入無關）。
+
+### B. 換簽章金鑰（真撤銷）—— 需要 Neon Console 一步，程序如下
+
+演練中發現的關鍵事實：**Neon 會快取 JWKS**。
+把第二把公鑰加到 `public/keys/jwks.json` 並部署（線上確實有兩個 kid）之後，
+用第二把金鑰簽的 token 打 Neon 仍然回 **400 `jwk not found`** —— 表示 Neon 不會因為 URL 內容變了就自動重抓。
+
+因此程序是：
+
+1. 產生新金鑰：`node scripts/neon-jwt.js --make-keys`
+   （公鑰寫 `public/keys/jwks.json`、私鑰寫 `.env`；**舊私鑰要先備份**，否則舊 token 立刻簽不出來）。
+2. **一次放兩把公鑰**（舊＋新）到 `public/keys/jwks.json`，commit ＋ push（部署，讓 Neon 抓得到）。
+3. **到 Neon Console → Data API → Settings → 重新加一次 provider（同一條 JWKS URL）**，
+   逼 Neon 重抓 —— 這一步不能省。
+4. 驗證新金鑰可用（把新 token 放進環境變數、用下面這行打終點，回 200 才算成功）：
+   ```bash
+   T=$(node scripts/neon-jwt.js --quiet --aud="gary-dictionary")
+   curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $T" \
+     "$NEON_DATA_API_URL/rest/v1/dict_books?select=id"    # 200 = 通過
+   ```
+5. 換 `.env` 的私鑰與 token → `node scripts/vercel-env.js --push-all --deploy` → `npm run uptime`。
+6. 確認沒問題後，把舊公鑰從 JWKS 移除 → 部署 → **再一次** 到 Console 重加 provider（此時舊 token 才真的失效）。
+
+**沒做過的部分（要誠實說）**：第 3／6 步的 Console 重加 provider 我沒辦法代跑，
+所以「換金鑰後 Neon 會立刻生效」還沒有實測過；上面第 4 步的驗證指令就是驗收標準。
+
+### C. 到期提醒
+
+`npm run uptime` 會解出 token 的 `exp`：**剩不到 30 天**這一項就算失敗（回非 0），
+訊息裡直接寫「要重簽：`node scripts/neon-jwt.js` → 更新 `.env` → `vercel-env.js --push-all --deploy`」。
+演練證據：拿一張只剩 20 天的 token 跑，得到「✖ 資料庫金鑰效期（Neon JWT）→ 還有 19 天到期」且**結束碼 1**；
+非 JWT 的金鑰（例如舊的 Supabase service key）會跳過這一項，不會誤報。
+
+## 六、要記得的事
 
 - **JWT 一年到期**（`scripts/neon-jwt.js`）：`npm run uptime` 會在**剩不到 30 天**時回非 0 提醒；
   重簽 → 更新 `.env` → `node scripts/vercel-env.js --push-all --deploy`。
