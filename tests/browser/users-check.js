@@ -985,6 +985,34 @@ async function main() {
             }
         }
 
+        console.log('\n【8e3】管理區也跟著字級縮放（v0.6.3：整個介面，不是只有字）');
+        {
+            const rows = {};
+            for (const value of ['s', 'm', 'l']) {
+                await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="${value}"]').click(); return true;`);
+                await sleep(300);
+                rows[value] = await browser.evaluate(`
+                    const tr = document.querySelector('#usersTableBody tr');
+                    const cell = document.querySelector('#usersTableBody td');
+                    const r = tr ? tr.getBoundingClientRect() : null;
+                    return {
+                        rowHeight: r ? Math.round(r.height) : null,
+                        cellFont: cell ? Math.round(parseFloat(getComputedStyle(cell).fontSize) * 10) / 10 : null,
+                        overflow: document.documentElement.scrollWidth - window.innerWidth
+                    };
+                `);
+            }
+            const scaled = (key) => rows.m[key] > 0 && rows.l[key] >= rows.m[key] * 1.1 && rows.s[key] <= rows.m[key] * 0.92;
+            check('管理區帳號表格的列高跟著字級縮放', scaled('rowHeight'), JSON.stringify(rows));
+            check('管理區帳號表格的字級跟著字級縮放', scaled('cellFont'), JSON.stringify(rows));
+            check('管理區在三種字級都沒有水平溢出',
+                ['s', 'm', 'l'].every((value) => rows[value].overflow <= 2),
+                JSON.stringify(['s', 'm', 'l'].map((value) => rows[value].overflow)));
+            /* 還原成預設（中） */
+            await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="m"]').click(); return true;`);
+            await sleep(200);
+        }
+
         console.log('\n【8f】生字表分頁：一頁 60 筆、載入更多、搜尋走伺服器（v0.6.0）');
         {
             const unitId = await browser.evaluate(`return window.PDState.currentUnitId;`);

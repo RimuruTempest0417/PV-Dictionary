@@ -48,7 +48,7 @@ code {
     font-size: 0.9em;
     background-color: var(--accent-soft);
     border-radius: var(--radius-sm);
-    padding: 1px 5px;
+    padding: 1px 0.3125rem;
 }
 
 /* ---------------- 頂部導覽（半透明材質 + 內容在其下滑動） ---------------- */
@@ -63,7 +63,7 @@ code {
 }
 
 .topbar-inner {
-    max-width: 1080px;
+    max-width: 67.5rem;
     margin: 0 auto;
     padding: var(--space-3) var(--space-4);
     display: flex;
@@ -119,7 +119,7 @@ code {
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-pill);
     padding: 0 var(--space-3);
-    min-width: 260px;
+    min-width: 16.25rem;
 }
 
 .search-icon {
@@ -161,7 +161,7 @@ code {
     font: inherit;
     font-size: 0.75rem;
     font-weight: 600;
-    padding: 5px 11px;
+    padding: 0.3125rem 0.6875rem;
     border-radius: var(--radius-pill);
     cursor: pointer;
     white-space: nowrap;
@@ -184,7 +184,7 @@ code {
     gap: var(--space-2);
     background-color: var(--accent-soft);
     border-radius: var(--radius-pill);
-    padding: 5px 12px;
+    padding: 0.3125rem 0.75rem;
     font-size: var(--fs-small);
     white-space: nowrap;
 }
@@ -195,9 +195,9 @@ code {
 
 /* ---------------- 頁面容器 ---------------- */
 .page {
-    max-width: 1080px;
+    max-width: 67.5rem;
     margin: 0 auto;
-    padding: var(--space-5) var(--space-4) 72px;
+    padding: var(--space-5) var(--space-4) 4.5rem;
     display: flex;
     flex-direction: column;
     gap: var(--space-5);
@@ -246,7 +246,7 @@ code {
     font: inherit;
     font-size: var(--fs-small);
     font-weight: 550;
-    padding: 7px 16px;
+    padding: 0.4375rem 1rem;
     border-radius: var(--radius-pill);
     cursor: pointer;
     white-space: nowrap;
@@ -276,7 +276,7 @@ code {
     color: var(--text);
     font: inherit;
     font-size: var(--fs-small);
-    padding: 6px 14px;
+    padding: 0.375rem 0.875rem;
     border-radius: var(--radius-pill);
     cursor: pointer;
     white-space: nowrap;
@@ -295,7 +295,7 @@ code {
 
 .chips .chip-count {
     opacity: 0.75;
-    margin-left: 4px;
+    margin-left: 0.25rem;
 }
 
 /* ---------------- 單元卡片 ---------------- */
@@ -375,7 +375,7 @@ code {
 }
 
 .empty-state-steps li {
-    margin-bottom: 4px;
+    margin-bottom: 0.25rem;
 }
 
 /* ---------------- 生字清單 ---------------- */
@@ -426,8 +426,8 @@ code {
 /* 播放鈕：按下瞬間就有回饋（原則 1） */
 .speak-btn {
     flex: 0 0 auto;
-    width: 46px;
-    height: 46px;
+    width: 2.875rem;
+    height: 2.875rem;
     border-radius: var(--radius-pill);
     border: 1px solid var(--line-strong);
     background-color: var(--surface-solid);
@@ -490,7 +490,7 @@ code {
     color: var(--accent);
     background-color: var(--accent-soft);
     border-radius: var(--radius-sm);
-    padding: 2px 8px;
+    padding: 2px 0.5rem;
 }
 
 .tag-badge {
@@ -499,7 +499,7 @@ code {
     color: var(--ok);
     background-color: var(--ok-soft);
     border-radius: var(--radius-pill);
-    padding: 2px 10px;
+    padding: 2px 0.625rem;
 }
 
 .tag-badge.is-pending {
@@ -554,10 +554,10 @@ code {
     font-weight: 550;
     border-radius: var(--radius-pill);
     border: 1px solid transparent;
-    padding: 8px 16px;
+    padding: 0.5rem 1rem;
     cursor: pointer;
     white-space: nowrap;
-    min-height: 36px;
+    min-height: 2.25rem;
     transition: transform 100ms ease-out, background-color 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 
@@ -614,8 +614,8 @@ code {
 }
 
 .btn-small {
-    padding: 5px 11px;
-    min-height: 30px;
+    padding: 0.3125rem 0.6875rem;
+    min-height: 1.875rem;
     font-size: 0.75rem;
 }
 
@@ -670,9 +670,9 @@ code {
     background-color: var(--warn);
     color: var(--card);
     border-radius: var(--radius-pill);
-    padding: 0 8px;
+    padding: 0 0.5rem;
     font-size: 0.75rem;
-    margin-left: 4px;
+    margin-left: 0.25rem;
 }
 
 .pending-list,
@@ -787,7 +787,7 @@ code {
     font-size: 0.75rem;
     font-weight: 600;
     border-radius: var(--radius-pill);
-    padding: 2px 10px;
+    padding: 2px 0.625rem;
     white-space: nowrap;
     color: var(--text);
     background-color: var(--surface-solid);
@@ -855,7 +855,7 @@ code {
     background-color: var(--field);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius);
-    padding: 9px 12px;
+    padding: 0.5625rem 0.75rem;
     width: 100%;
     min-width: 0;
     max-width: 100%;
@@ -959,13 +959,13 @@ code {
 
 #audioModal .modal-actions {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(12.5rem, 1fr));
     gap: var(--space-3);
     margin-top: 0;
 }
 
 #audioModal .modal-actions .btn {
-    min-height: 50px;
+    min-height: 3.125rem;
     font-size: var(--fs-body);
     justify-content: center;
 }
@@ -995,7 +995,7 @@ code {
     background-color: var(--text);
     color: var(--bg);
     border-radius: var(--radius-pill);
-    padding: 10px 20px;
+    padding: 0.625rem 1.25rem;
     font-size: var(--fs-small);
     box-shadow: var(--shadow-pop);
     z-index: 50;
@@ -1010,7 +1010,7 @@ code {
 
 /* ---------------- 頁腳 ---------------- */
 .footer {
-    max-width: 1080px;
+    max-width: 67.5rem;
     margin: 0 auto;
     padding: var(--space-4) var(--space-4) var(--space-6);
     font-size: var(--fs-small);
@@ -1041,7 +1041,7 @@ code {
     }
 
     .page {
-        padding: var(--space-4) var(--space-3) 64px;
+        padding: var(--space-4) var(--space-3) 4rem;
     }
 
     .unit-card,
@@ -1156,12 +1156,12 @@ code {
     background-color: var(--field);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
-    padding: 6px 8px;
-    min-height: 32px;
+    padding: 0.375rem 0.5rem;
+    min-height: 2rem;
 }
 
 .inline-input {
-    min-width: 200px;
+    min-width: 12.5rem;
 }
 
 .row-sub td {
@@ -1180,7 +1180,7 @@ code {
     align-items: center;
     gap: var(--space-2);
     font-size: var(--fs-small);
-    min-height: 44px;
+    min-height: 2.75rem;
 }
 
 .badge.is-ok {
@@ -1348,7 +1348,7 @@ code {
     margin: 0;
     padding: 0;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
     gap: var(--space-4);
 }
 
@@ -1443,7 +1443,7 @@ code {
     font: inherit;
     text-align: left;
     cursor: pointer;
-    min-height: 56px;
+    min-height: 3.5rem;
 }
 
 .unit-row-btn:hover {
@@ -1486,8 +1486,8 @@ code {
 
 .unit-row-edit {
     flex: 0 0 auto;
-    width: 52px;
-    min-height: 56px;
+    width: 3.25rem;
+    min-height: 3.5rem;
     border: 0;
     border-left: 1px solid var(--line);
     background: none;
@@ -1526,8 +1526,8 @@ code {
 .admin-nav-btn {
     font: inherit;
     font-size: var(--fs-small);
-    padding: 8px 14px;
-    min-height: 36px;
+    padding: 0.5rem 0.875rem;
+    min-height: 2.25rem;
     border-radius: var(--radius-pill);
     border: 1px solid var(--line-strong);
     background-color: var(--card);
@@ -1564,7 +1564,7 @@ code {
 }
 
 .cover-preview img {
-    width: 180px;
+    width: 11.25rem;
     aspect-ratio: 3 / 4;
     object-fit: cover;
     border-radius: var(--radius);

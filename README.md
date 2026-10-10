@@ -3,7 +3,7 @@
 線上英文生字字典：學生**點書本封面 → 選單元 → 看生字表**（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.6.2（本機 Demo ＋ 線上版已上線）**
+- 目前版本：**v0.6.3（本機 Demo ＋ 線上版已上線）**
 - 規劃書（**待完成的事都在這**）：`docs/規劃書-待完成.md`｜決策與各版結果：`docs/規劃書-v0.0.1.md`｜部署：`docs/deploy-vercel.md`
 - 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie、介面預設英文可切中文
 - 線上：**已上線** https://gary-dictionary-mylearning.vercel.app （Vercel `gary-dictionary` ＋ Supabase；環境變數已設好）

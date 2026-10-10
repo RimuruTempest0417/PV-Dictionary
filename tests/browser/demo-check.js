@@ -525,6 +525,42 @@ async function main() {
         }
         check('按下 A−／A／A+ 根字級真的變小→中→大',
             rootSizes.s < rootSizes.m && rootSizes.m < rootSizes.l, JSON.stringify(rootSizes));
+
+        /* ★ v0.6.3：使用者說「不是這三個字的問題，是整個介面沒有按照這個大小變化」——
+         *   所以不能只量標題的字。這裡量的是**尺寸**：卡片、內容欄寬、頂欄高度。
+         *   真因：間距（--space-*）與各處 padding/height 原本是固定 px → 只有文字會變。 */
+        const scaleSamples = {};
+        for (const value of ['s', 'm', 'l']) {
+            await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="${value}"]').click(); return true;`);
+            await sleep(250);
+            scaleSamples[value] = await browser.evaluate(`
+                const box = (sel) => {
+                    const el = document.querySelector(sel);
+                    if (!el) return null;
+                    const r = el.getBoundingClientRect();
+                    return { w: Math.round(r.width), h: Math.round(r.height) };
+                };
+                return {
+                    /* 不要量書架卡片：跑到這一段時書架可能是空的（前面的步驟會改動資料），
+                       量「一定在」的東西：字級切換鈕、內容欄、頂欄。 */
+                    chip: box('#fontSwitch'),
+                    page: box('.page'),
+                    topbar: box('.topbar-inner'),
+                    overflow: document.documentElement.scrollWidth - window.innerWidth
+                };
+            `);
+        }
+        const scalesOk = (pick) => {
+            const base = pick(scaleSamples.m);
+            return base > 0 && pick(scaleSamples.l) >= base * 1.1 && pick(scaleSamples.s) <= base * 0.92;
+        };
+        check('整個介面跟著字級縮放：字級切換鈕的寬度', scalesOk((row) => row.chip && row.chip.w), JSON.stringify(scaleSamples));
+        check('整個介面跟著字級縮放：字級切換鈕的高度', scalesOk((row) => row.chip && row.chip.h), JSON.stringify(scaleSamples));
+        check('整個介面跟著字級縮放：內容欄寬（.page）', scalesOk((row) => row.page && row.page.w), JSON.stringify(scaleSamples));
+        check('整個介面跟著字級縮放：頂欄（.topbar-inner）高度', scalesOk((row) => row.topbar && row.topbar.h), JSON.stringify(scaleSamples));
+        check('三種字級都沒有水平溢出（不會出現橫向捲軸）',
+            ['s', 'm', 'l'].every((value) => scaleSamples[value].overflow <= 2),
+            JSON.stringify(['s', 'm', 'l'].map((value) => scaleSamples[value].overflow)));
         /* 還原成預設（中） */
         await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="m"]').click(); return true;`);
         await sleep(150);
