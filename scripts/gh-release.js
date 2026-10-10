@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 
 const OWNER = 'RimuruTempest0417';
-const REPO = 'PV-Dictionary';
+const REPO = 'Gary-Dictionary';
 
 function token() {
     const out = execFileSync('git', ['credential', 'fill'], {

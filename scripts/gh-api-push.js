@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 
 const OWNER = 'RimuruTempest0417';
-const REPO = 'PV-Dictionary';
+const REPO = 'Gary-Dictionary';
 const BRANCH = 'main';
 const ROOT = path.resolve(__dirname, '..');
 

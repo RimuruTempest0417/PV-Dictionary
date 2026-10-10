@@ -13,7 +13,7 @@ require('dotenv').config();
 const TEAM_ID = 'team_m7zLQ66u3WWs3qY1908y01uu';
 const PROJECT_ID = 'prj_3BytnR5a2EpXnGzyDAF2mHJdcvyx';
 const PROJECT_NAME = 'gary-dictionary';
-const REPO_ID = 1408878666;          /* RimuruTempest0417/PV-Dictionary（GET /v9/projects/<id>.link.repoId） */
+const REPO_ID = 1408878666;          /* RimuruTempest0417/Gary-Dictionary（GET /v9/projects/<id>.link.repoId） */
 const BRANCH = 'main';
 const WAIT = process.argv.includes('--wait');
 

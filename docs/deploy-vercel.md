@@ -5,7 +5,7 @@
 
 - Vercel 專案：`gary-dictionary`（team `mylearning`；v0.6.0 起由 `pv-dictionary` 更名）
 - Production 網址：https://gary-dictionary-mylearning.vercel.app（v0.6.0 起由 pv-dictionary 更名）
-- 已連結 GitHub：`RimuruTempest0417/PV-Dictionary`（**push 到 `main` 就會自動部署**）
+- 已連結 GitHub：`RimuruTempest0417/Gary-Dictionary`（v0.6.1 由 PV-Dictionary 更名）（**push 到 `main` 就會自動部署**）
 - 資料庫：Supabase 專案 `pv-dictionary`（ref `hckozqluooeobvyltcyf`，region ap-southeast-1）
 
 ## 一、Vercel 上的環境變數（Settings → Environment Variables）
