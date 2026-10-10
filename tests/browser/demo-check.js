@@ -360,9 +360,17 @@ async function main() {
         console.log('\n【5-7】管理員：新增生字 → 批次貼上 → 刪除（管理區在編輯後已收起）');
         await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
         await browser.waitFor(`document.getElementById('adminSection').hidden === false`);
+        /* ★ 等「新增生字」真的可用再點：登入後／畫面重畫時它會短暫 disabled，
+         *   太早點下去等於沒點（entryForm 永遠不會開 → 偶發紅燈，實際踩過）。
+         *   真的沒開就再點一次（第一次可能落在重畫中間）。 */
+        await browser.waitFor(`(() => { const b = document.getElementById('newEntryBtn'); return Boolean(b) && !b.disabled; })()`, { timeout: 15000 });
         await browser.evaluate(`document.getElementById('newEntryBtn').click(); return true;`);
-        /* 逾時給寬一點：連續滿載跑多輪時，開啟表單會比平常慢（曾偶發紅燈） */
-        await browser.waitFor(`document.getElementById('entryForm').hidden === false`, { timeout: 15000 });
+        try {
+            await browser.waitFor(`document.getElementById('entryForm').hidden === false`, { timeout: 7000 });
+        } catch (err) {
+            await browser.evaluate(`document.getElementById('newEntryBtn').click(); return true;`);
+            await browser.waitFor(`document.getElementById('entryForm').hidden === false`, { timeout: 15000 });
+        }
         await browser.evaluate(`
             document.getElementById('fHeadword').value = 'laboratory';
             document.getElementById('fPos').value = 'n.';
@@ -683,9 +691,18 @@ async function main() {
             return true;
         `);
         await browser.waitFor(`document.querySelectorAll('.vocab-item').length > 0`);
+        /* ★ 先等按鈕真的可用（跟【5-7】同一個理由：重畫中點下去等於沒點） */
         await browser.evaluate(`
             document.getElementById('adminToggleBtn').click();
+            return true;
+        `);
+        await browser.waitFor(`(() => { const b = document.getElementById('newEntryBtn'); return Boolean(b) && !b.disabled; })()`, { timeout: 15000 });
+        await browser.evaluate(`
             document.getElementById('newEntryBtn').click();
+            return true;
+        `);
+        await browser.waitFor(`document.getElementById('entryForm').hidden === false`, { timeout: 15000 });
+        await browser.evaluate(`
             document.getElementById('fHeadword').value = 'diligent';
             document.getElementById('fZh').value = '勤奮的';
             document.getElementById('fEn').value = 'working hard and carefully';
