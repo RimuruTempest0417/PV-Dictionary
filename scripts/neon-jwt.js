@@ -82,6 +82,7 @@ function sign() {
     const kid = jwkFromPublicKey(publicPem).kid;
     const days = Number(arg('days', 365));
     const role = arg('role', 'authenticated');
+    const aud = arg('aud', '');
     const now = Math.floor(Date.now() / 1000);
     const header = { alg: 'RS256', typ: 'JWT', kid };
     const payload = {
@@ -91,6 +92,9 @@ function sign() {
         iat: now,
         exp: now + days * 24 * 60 * 60
     };
+    /* Neon Data API 的 Settings 可以設定 JWT Audience —— 有設的話，token 必須帶一樣的 aud，
+     * 否則會回 `missing required audience`（v0.8.0 實測踩到）。 */
+    if (aud) payload.aud = aud;
     const signingInput = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(payload))}`;
     const signature = crypto.sign('RSA-SHA256', Buffer.from(signingInput), privatePem);
     const token = `${signingInput}.${base64url(signature)}`;

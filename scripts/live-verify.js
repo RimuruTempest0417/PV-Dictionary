@@ -97,13 +97,17 @@ async function maxAuditId() {
  * 驗收時要等它過期，否則會誤判成「寫進去了但讀不到」。 */
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function cleanup(bookIds, auditWatermark = 0) {
+async function cleanup(bookIds, auditWatermark = null) {
     for (const id of bookIds.filter((value) => value)) {
         await supabase(`dict_books?id=eq.${id}`, { method: 'DELETE', body: null });
     }
     await supabase(`dict_books?code=eq.${TEST_CODE}`, { method: 'DELETE', body: null });
-    /* 只刪這次驗收之後新增的稽核列（水線以上的），使用者的舊紀錄一律不動 */
-    if (auditWatermark) {
+    /* 只刪這次驗收之後新增的稽核列（水線以上的），使用者的舊紀錄一律不動。
+     * ★ v0.8.0（Neon 影子驗證時踩到）：水線可能是 **0**（資料庫一筆稽核都沒有的全新環境），
+     *   以前寫 `if (auditWatermark)` —— 0 是 falsy，整段被跳過，於是「筆數回到開始前」
+     *   在全新資料庫上**一定失敗**（這次驗收產生的 6 筆稽核留著）。
+     *   改成「有拿到數字（含 0）就刪」，預設值改 null 代表「呼叫者沒給水線 → 不要動稽核」。 */
+    if (Number.isFinite(auditWatermark) && auditWatermark >= 0) {
         await supabase(`dict_audit_logs?id=gt.${auditWatermark}`, { method: 'DELETE', body: null });
     }
     /* 臨時帳號（--ephemeral-teacher 用的） */
