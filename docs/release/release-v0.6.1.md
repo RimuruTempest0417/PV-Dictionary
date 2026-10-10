@@ -63,7 +63,7 @@ B-9 列印學習單加強、F-1 手機實測、F-2 PWA、F-5 學生端小功能�
 |---|---|---|
 | 語法 | `npm run check:syntax` | 71/71 通過 |
 | 單元／API／守門 | `npm test` | **159 通過 / 0 失敗**（新增：欄位回歸 2 支、視窗化 2 支） |
-| 真 Chrome（本機） | `npm run check:browser` | NUMBER_BROWSER |
-| 線上（含生字完整流程） | `node scripts/live-verify.js --no-auth --ephemeral-teacher` | NUMBER_LIVEVERIFY |
-| 線上健康檢查 | `npm run uptime` | NUMBER_UPTIME |
-| 正式站真瀏覽器 | `npm run check:live-browser` | NUMBER_LIVECHECK |
+| 真 Chrome（本機） | `npm run check:browser` | **307 項全綠**：demo 106（＋3：字級鈕階梯）＋ empty-start 33 ＋ lang 40 ＋ users 128 |
+| 線上（含生字完整流程） | `node scripts/live-verify.js --no-auth --ephemeral-teacher` | **26 通過 / 0 失敗 / 1 略過**（含生字完整流程：建立年級→單元→生字→讀回→改→舊版本被擋→刪除→清理） |
+| 線上健康檢查 | `npm run uptime` | 4 項全綠（版本 0.6.1、資料庫 ok、公開讀取、首頁） |
+| 正式站真瀏覽器 | `npm run check:live-browser` | **16 通過 / 0 失敗** |

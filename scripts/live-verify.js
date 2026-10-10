@@ -228,11 +228,8 @@ async function main() {
             });
             const createdBody = await created.json();
             check('臨時教師可以建立年級（HTTP 201）', created.status === 201 && createdBody.book && createdBody.book.grade === verifyGrade, JSON.stringify(createdBody).slice(0, 140));
-            /* 建完就刪（不留在使用者的教材裡）。
-             * ★ 沒有 DELETE /api/books/:id 這條路由（介面上也還不能刪年級）→ 用 REST 直接刪。 */
-            if (createdBody.book && createdBody.book.id && typeof supabase === 'function') {
-                await supabase(`dict_books?id=eq.${createdBody.book.id}`, { method: 'DELETE', body: null }).catch(() => null);
-            }
+            /* ★ 先不要刪年級：下面的生字流程要用它（太早刪會讓建單元撞外鍵）。
+             *   全部跑完之後在最下面用 REST 清掉（沒有 DELETE /api/books/:id 這條路由）。 */
             /* ★ 生字完整流程：這是「視窗化資料層」在線上最直接的實證
              *   （本機真瀏覽器檢查用的是 JSON 資料層，只有這一段真的走 Supabase）。 */
             if (createdBody.book && createdBody.book.id) {
@@ -287,6 +284,12 @@ async function main() {
                         /* 刪生字（連音檔一起） */
                         const removed = await authed(`/api/entries/${entryId}`, { method: 'DELETE' });
                         check('刪生字（HTTP 200）', removed.status === 200, (await removed.text()).slice(0, 120));
+                    }
+                    /* 收尾：把這個臨時年級連同它的單元清掉（不留在使用者的教材裡） */
+                    if (typeof supabase === 'function') {
+                        await supabase(`dict_units?book_id=eq.${createdBody.book.id}`, { method: 'DELETE', body: null }).catch(() => null);
+                        await supabase(`dict_books?id=eq.${createdBody.book.id}`, { method: 'DELETE', body: null }).catch(() => null);
+                        check('臨時年級與單元已清掉', true);
                     }
                 }
             }
