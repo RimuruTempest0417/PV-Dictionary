@@ -1,6 +1,6 @@
 /* D-6（v0.7.0）：容量門檻與用量狀態的單元測試
  *
- * 這一組數字（500MB 配額、70% 警告）現在只存在 `lib/limits.js` 一處；
+ * 這一組數字（1GB／1024MB 配額、70% 警告）現在只存在 `lib/limits.js` 一處；
  * 這裡驗的是「算得對」與「不知道時誠實說不知道」這兩件事。
  */
 const test = require('node:test');
@@ -24,7 +24,7 @@ test('D-6：百分比換算（含四捨五入到一位小數）', () => {
     assert.equal(usagePercent(DB_QUOTA_BYTES * 0.7), 70);
     /* 350MB + 1 byte → 70.0%（一位小數） */
     assert.equal(usagePercent(DB_QUOTA_BYTES * 0.7 + 1), 70);
-    /* 0.1MB 的顆粒度：250.05MB / 500MB */
+    /* 0.1MB 的顆粒度：約 512MB / 1024MB（1GB／1024MB） */
     assert.equal(usagePercent(Math.round(DB_QUOTA_BYTES * 0.5001)), 50);
     /* 不知道的數字 → null（不是 0） */
     assert.equal(usagePercent(NaN), null);

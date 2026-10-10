@@ -1,9 +1,9 @@
-# PV_Dictionary
+# Gary-Dictionary
 
-線上英文生字字典：學生**點書本封面 → 選單元 → 看生字表**（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
+線上英文生字字典：學生**點年級 → 選單元 → 看生字表**（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.10.0（本機 Demo ＋ 線上版已上線；資料庫已從 Supabase 搬到 Neon）**
+- 目前版本：**v0.10.1（本機 Demo ＋ 線上版已上線；資料庫在 Neon）**
 - 規劃書（**待完成的事都在這**）：`docs/規劃書-待完成.md`｜決策與各版結果：`docs/規劃書-v0.0.1.md`｜部署：`docs/deploy-vercel.md`
 - 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie、介面預設英文可切中文
 - 資料層：**Neon（PostgreSQL）的 Data API**（PostgREST 相容）—— v0.10.0 從 Supabase 搬過去，**程式碼沒有改**
@@ -16,15 +16,15 @@
 
 ```
 ① 書架（首頁）        ② 目錄                    ③ 生字表
-┌──────────┐         Book 5A                  Unit 1 · My New School
-│  封面圖  │  點一下  ┌────────────────────┐    campus /ˈkæm.pəs/ n. 校園 🔊
-│ Book 5A  │  ──────▶ │ Unit 1  My New…  3 │ ─▶  …
+┌──────────┐         S2                       Unit 1 · My New School
+│   年級   │  點一下  ┌────────────────────┐    campus /ˈkæm.pəs/ n. 校園 🔊
+│    S2    │  ──────▶ │ Unit 1  My New…  3 │ ─▶  …
 └──────────┘         │ Unit 2  School…  0 │
                      └────────────────────┘
                      ← Books（回首頁）        ← Units（回目錄）
 ```
 
-- 圖是**老師用手機拍的書本封面**（沒有封面時顯示書名代碼的色塊卡片）。
+- 書架上是**年級卡片**（例：S1／S2）；點一下進到該年級的單元列表。
 - 本機預設**只有一個帳號 `Gary`**（網站管理員）；其他帳號由他登入後在介面上自己建立。
 
 ---
@@ -47,7 +47,7 @@ grep SEED_ .env
 |---|---|---|
 | `Gary` | 網站管理員（`web_manager`） | 最高權限：全部功能（含帳號管理、授權、稽核紀錄） |
 | （自己建立） | 網頁管理員（`admin`） | 全部功能（含使用者管理、稽核紀錄） |
-| （自己建立） | 老師（`teacher`） | 新增／修改／刪除生字、核准科代表的生字、上傳錄音、維護書本與單元、上傳封面 |
+| （自己建立） | 老師（`teacher`） | 新增／修改／刪除生字、核准科代表的生字、上傳錄音、維護書本與單元 |
 | （自己建立） | 科代表（`class_rep`） | 新增生字（進「待審核」）、批次匯入 |
 | （未登入） | 訪客／學生 | 瀏覽、搜尋、聽讀音——**學生不需要登入** |
 
@@ -84,13 +84,16 @@ grep SEED_ .env
 | 環境 | 資料層 | 狀態 |
 |---|---|---|
 | 本機 Demo | 本機 JSON（`data/store.json`，不進 Git） | 可用，內容由你手動加入 |
-| 線上（Vercel） | Supabase PostgreSQL | **已上線運行中**（https://gary-dictionary-mylearning.vercel.app ） |
+| 線上（Vercel） | **Neon（PostgreSQL）的 Data API**（PostgREST 相容） | **已上線運行中**（https://gary-dictionary-mylearning.vercel.app ） |
 
-Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-southeast-1`，免費方案），
-7 張表 `dict_*` 已依 `migrations/2026-10-08-v0.0.1-init.sql` 建立，RLS 全開且不加 policy、
-已撤銷 anon／authenticated 權限（只有 service_role 進得去）。
+**Neon（v0.10.0 起）**：專案 `Gary-dictionary`（`aws-ap-southeast-1`，免費方案，branch storage 1 GB），
+8 張表 `dict_*`（含 `dict_error_logs`）＋ 兩支函式（`dict_entry_counts`／`dict_db_size`）。
+授權是**自簽 JWT ＋ GRANT／RLS**（沒有 JWT 一律 400）；簽章工具 `scripts/neon-jwt.js`、
+公鑰在 `public/keys/jwks.json`（Neon 用這個 JWKS URL 驗簽）。切換／回滾用 `scripts/switch-backend.js`
+（細節見 `docs/搬家到Neon.md`）。**Supabase 專案還在（一句指令可切回去），但已經不是線上資料庫。**
 
-資料層怎麼運作（`lib/store/supabase.js` 開頭有完整說明）：**每個 /api 請求先抓下 7 張表 → 路由照舊同步讀寫 →
+資料層怎麼運作（`lib/store/supabase.js` 開頭有完整說明）：**每個 /api 請求先抓「這一條請求要用的切片」
+（v0.6.1 起只抓需要的生字／音檔／稽核，不再整表進記憶體）→ 路由照舊同步讀寫 →
 回應送出「之前」把異動寫回**（寫回失敗回 500，不假裝成功）。這樣做是因為路由是同步風格，
 而且 serverless 在回應送出後會凍結實例、不能之後才寫資料庫。
 
@@ -129,9 +132,7 @@ Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-sout
 
 ## 功能（v0.0.1 起，v0.2.0 更新）
 
-- **三層動線**：書架（封面＋書名）→ 目錄（單元列表）→ 生字表，各有返回按鈕；搜尋框只在生字表出現。
-- **書本封面**：老師拍照上傳（JPEG／PNG／WebP、2MB 內），存在資料庫並用自家同源端點 `GET /api/covers/:id` 提供
-  （不放外部圖床、CSP 不用放寬）。書本清單本身不夾帶圖片內容。
+- **三層動線**：書架（年級）→ 目錄（單元列表）→ 生字表，各有返回按鈕；搜尋框只在生字表出現。
 - **讀音**：有老師錄音 → 播錄音；沒有 → 用瀏覽器語音合成（TTS）。同一顆 🔊，使用者不必理解差異。
 - **搜尋**：即時過濾生字、中文、英文解釋、音標、詞性。
 - **管理選單（老師以上）**：管理區分成 `⏳ 待審核｜➕ 新增生字｜📋 批次貼上｜🏗 新增單元｜✏️ 修改單元｜📗 新增年級｜🧾 稽核紀錄｜🐞 錯誤紀錄｜📊 概況｜👥 帳號管理｜🔑 授權管理`（右上角另有 **❓ 使用說明**：依身分顯示，中英雙語，可列印），
@@ -149,7 +150,7 @@ Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-sout
 - **單元級授權**：授權某人在某本書或某個單元編輯（可加「也可以發佈」）。
 - **審核流程**：科代表新增 → 「待審核」（學生看不到）→ 老師核准 → 學生才看得到。
 - **列印**：單元頁可列印成生字表（`public/css/print.css`）。
-- **稽核**：登入／登出、生字與書本的每一次新增、修改、刪除、發佈、核准、帳號與授權、封面上傳都有紀錄。
+- **稽核**：登入／登出、生字與書本的每一次新增、修改、刪除、發佈、核准、帳號與授權都有紀錄。
   可以依動作／帳號／日期篩選，每個動作有顏色分類（新增綠、修改黃、刪除紅、審核藍、登入灰）；
   **自動化檢查的動作預設會濾掉**，不會混在你的操作紀錄裡。
 - **錯誤紀錄**（v0.4.2）：前端例外與伺服器 500 會自動記到後台「🐞 錯誤紀錄」，可依等級／來源／狀態／日期篩選，
@@ -162,7 +163,7 @@ Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-sout
   （含每個檔案的 sha256）推到**私有** GitHub repo（保留最近 30 份，只讀不動正式站）；
   `npm run restore` 可檢查或還原（沒有 `--confirm` 只檢查、不寫入）。
   演練過把正式站備份還原到 Neon 空庫、8 張表筆數全對；詳見 `docs/備份與還原.md`。
-- **資料層視窗化**（v0.6.1，D-1b）：Supabase 只抓「這一條請求需要的」生字／音檔／稽核切片；
+- **資料層視窗化**（v0.6.1，D-1b）：資料庫只抓「這一條請求需要的」生字／音檔／稽核切片；
   存取沒被載入的範圍會**大聲失敗**（STORE_WINDOW_MISSING），不會靜默回空資料。書架／統計只抓兩個小欄位算數字。
 - **修改年級**（v0.6.0）：管理區「📗 新增年級」下方列出所有年級，每一列有 ✏️ 可以改名；
   改成已經有的年級會被擋（409），稽核紀錄會留一筆 `BOOK_UPDATE`。
@@ -245,12 +246,12 @@ guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin
 ## 資料
 
 `DATA_BACKEND=json`（Demo 預設）→ 資料存在 `data/store.json`（已列入 `.gitignore`），老師錄音以 base64 存在同一個檔案內。
-`migrations/2026-10-08-v0.0.1-init.sql` 是 Supabase 的等價 schema（表名前綴 `dict_`），v0.1.0 會實作 `DATA_BACKEND=supabase`。
+`migrations/2026-10-08-v0.0.1-init.sql` 是 Supabase 的等價 schema（表名前綴 `dict_`）；`DATA_BACKEND=supabase`（PostgREST 相容 adapter）**已實作完成**，v0.10.0 起線上指向 Neon（見 `docs/搬家到Neon.md`）。
 
 ### 已知限制（誠實揭露）
 
 - **JSON 資料層只適合本機單一實例**：多個實例同時寫入會互相覆蓋；**也無法部署到 Vercel**（serverless 沒有持久磁碟）。
-  要上線給老師與學生用，必須先完成 v0.1.0 的 Supabase adapter。
+  要上線給老師與學生用，用的是**已完成**的 PostgREST adapter（`DATA_BACKEND=supabase`；v0.10.0 起指向 Neon）。
 - TTS 的聲音取決於裝置與瀏覽器，不是「字典的標準發音」；iOS Safari 必須在點擊（使用者手勢）中播放；
   瀏覽器不支援語音合成時，沒有老師錄音的生字無法播放（介面會提示）。
 - 單筆錄音上限 1MB／60 秒；錯誤登入 10 次會在 15 分鐘內鎖定該網路。
@@ -258,7 +259,7 @@ guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin
 ### 環境變數（`.env`，不進版控）
 
 `NODE_ENV`、`PORT`、`JWT_SECRET`、`DATA_BACKEND`、`DATA_FILE`、`SITE_URL`、`CORS_ALLOWED_ORIGINS`、
-`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`（v0.1.0）、`SEED_*_PASSWORD`。範例見 `.env.example`。
+`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`（PostgREST 相容；現指向 Neon）、`SEED_*_PASSWORD`。範例見 `.env.example`。
 
 ---
 
@@ -267,9 +268,9 @@ guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin
 ```bash
 npm run check:syntax   # 所有 JS 語法檢查 + server.js 模組載入檢查
 npm run check:schema   # 程式要用的欄位 vs migrations/*.sql（不用網路）
-npm test               # 155 項：角色權限矩陣、資料層（JSON 與 Supabase）、schema 守門、路由快照與覆蓋、版本一致、i18n、
+npm test               # 183 項：角色權限矩陣、資料層（JSON 與 Supabase）、schema 守門、路由快照與覆蓋、版本一致、i18n、
                        #        說明頁分頁守門、權限對照表、.xlsx、連續播放、修改年級／樂觀鎖／錄音上限／生字表分頁、API 端到端
-npm run check:browser  # 四支真 Chrome 檢查（劇本 103 ＋ 空白起步 33 ＋ 語言切換 40 ＋ 帳號管理 128 ＝ 304 項）
+npm run check:browser  # 四支真 Chrome 檢查（劇本 118 ＋ 空白起步 33 ＋ 語言切換 42 ＋ 帳號管理 136 ＝ 329 項）
 npm run check:live-browser  # 打正式站的真瀏覽器「訪客視角」檢查（16 項；不寫截圖、不下載、不登入）
 npm run perf:entries   # D-1 效能實測：一個單元塞 3000 個生字，量分頁省下多少（預設 3000）
 npm run check:deps     # 依賴套件弱點掃描（需要網路；--all 才含開發依賴）
@@ -279,10 +280,10 @@ npm run usage          # 各表筆數與用量提醒
 npm run cleanup:logs   # 清理舊日誌（預設只預覽，--apply 才真的刪）
 npm run routes         # 列出所有後端路由與註冊順序（路由快照的來源）
 npm run routes:snapshot  # 更新 tests/fixtures/route-inventory.json（新增／移除路由後要跑）
-npm run check:schema:live        # 同一份欄位清單 vs 線上 Supabase 實際 schema
+npm run check:schema:live        # 同一份欄位清單 vs 線上（Neon）實際 schema
 node scripts/supabase-smoke.js          # 線上資料庫：連線／schema／各表筆數
 node scripts/supabase-smoke.js --write  # 線上資料庫：寫入 → 新連線讀回 → 清理 → 確認乾淨
-node scripts/live-verify.js             # 線上版端到端：schema、帶封面的書往返、登入後上傳封面（不留測試資料）
+node scripts/live-verify.js             # 線上版端到端：schema、建立年級／單元／生字往返（不留測試資料）
 DATA_BACKEND=supabase npm run seed -- --prune-accounts   # 在正式資料庫建立／重設帳號
 ```
 
@@ -294,7 +295,7 @@ npm run check && npm run check:browser && npm run check:deps
 
 > `check:deps` 刻意**不在** `npm run check` 裡：`npm audit` 需要連外，而 `check` 要能離線跑完。
 
-瀏覽器驗收涵蓋：**書架（封面）→ 目錄 → 生字表的三層動線**、**上傳書本封面後書架換成封面圖**、
+瀏覽器驗收涵蓋：**書架（年級）→ 目錄 → 生字表的三層動線**、
 訪客瀏覽與 TTS 播放、搜尋、管理員新增／批次匯入／刪除（兩段式確認）、
 老師錄音上傳與播放來源切換、新增單元與書本、科代表待審核 → 老師核准 → 訪客可見、
 **帳號管理（建立／改角色／重設密碼／停用／刪除）與授權管理（授權單元後真的能編輯、移除後又不行）**、
@@ -313,14 +314,14 @@ lib/roles.js                # 角色與權限（唯一權威）
 lib/messages.js             # 後端錯誤訊息（英文，唯一來源）與 error code
 lib/auth.js                 # JWT、cookie、CSRF 來源檢查、CORS、安全標頭
 lib/audit.js                # 稽核動作與中文標籤
-lib/store/{index,json}.js   # 資料層介面與本機 JSON 實作（Supabase adapter 待實作）
+lib/store/{index,json}.js   # 資料層介面與本機 JSON 實作（PostgREST 相容的 adapter 在 lib/store/supabase.js）
 public/index.html           # 版面（文字用 data-i18n 標記，不寫死語言）
 public/js/i18n.js           # 所有介面文字的英中對照與 t()／語言切換
 public/                     # 前端（index.html + css/ + js/，零行內樣式與行內事件）
 scripts/seed.js             # 種子帳號（預設不填任何生字；--with-sample 才載入示範教材）
 scripts/check-syntax.js     # 語法 + 模組載入檢查
 tests/                      # node:test 單元／API 測試、tests/browser 真 Chrome 驗收
-migrations/                 # Supabase schema（v0.1.0 使用）
+migrations/                 # schema 快照（Supabase 版；schema 守門會讀）＋ migrations/neon/（Neon 版）
 docs/規劃書-待完成.md        # 待完成任務與版本計畫（只放還沒做的事）
 docs/規劃書-v0.0.1.md        # 規劃書（決策與各版實作結果）
 docs/金鑰輪替.md            # 金鑰輪替步驟與紀錄

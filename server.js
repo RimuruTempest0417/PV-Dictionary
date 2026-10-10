@@ -124,9 +124,15 @@ function boolish(value, fallback = true) {
  * 每行：生字 ⇥ 讀音 ⇥ 詞性 ⇥ 中文解釋 ⇥ 英文解釋
  * 也接受「兩個以上空白」或「逗號後接非空白」當分隔（老師從 Word／Excel 貼過來常見） */
 /* 前端解析好的列（CSV／.xlsx）：每一筆是 {headword, ipa_us, part_of_speech, zh_meaning, en_definition, example_en, example_zh} */
+/* 一次匯入的列數上限（CSV／.xlsx 與批次貼上共用）
+ * ★ v0.10.0 修：以前只有 CSV／xlsx 這條路有 500 列上限，貼上文字沒有 ——
+ *   認證使用者可以貼近 4MB 的文字、產生數十萬列寫入（PostgREST 模式每列各發一次 INSERT）
+ *   就是寫入放大／阻斷服務。兩條路現在共用同一個上限。 */
+const IMPORT_MAX_ROWS = 500;
+
 function parseImportRows(input) {
     const rows = [];
-    for (const raw of input.slice(0, 500)) {
+    for (const raw of input.slice(0, IMPORT_MAX_ROWS)) {
         if (!raw || typeof raw !== 'object') continue;
         const headword = str(raw.headword, LIMITS.headword);
         if (!headword) continue;
@@ -150,6 +156,13 @@ function parseImportText(text) {
     const errors = [];
     const lines = String(text || '').split(/\r?\n/);
     lines.forEach((rawLine, index) => {
+        /* 列數上限：超過就只回一筆說明，不再繼續處理（見 IMPORT_MAX_ROWS 的註解） */
+        if (rows.length >= IMPORT_MAX_ROWS) {
+            if (!errors.some((item) => String(item.reason || '').includes('上限'))) {
+                errors.push({ line: index + 1, reason: `一次最多 ${IMPORT_MAX_ROWS} 列，後面的沒有處理`, text: '' });
+            }
+            return;
+        }
         const line = rawLine.trim();
         if (!line) return;
         const cells = line.split(/\t|,(?=\S)|\s{2,}/).map((c) => c.trim()).filter((c) => c !== '');
@@ -466,6 +479,9 @@ function createApp(options = {}) {
          * 頁尾標籤要顯示真正的服務，不然搬家後還寫 Supabase 會誤導人（與 i18n 的 backend.* 對應）。 */
         const backendKind = store.backend === 'supabase' && /neon\.tech/.test(String(process.env.SUPABASE_URL || ''))
             ? 'neon' : store.backend;
+        /* ★ v0.10.0 修（安全）：診斷細節（金鑰角色、專案 ref、主機、最後一次資料庫錯誤）以前對**任何人**都回，
+         *   等於把後端資訊白送出去。監控只需要「活著／schema 就緒／資料庫正常」→ 對外只留這些。 */
+        const isDbAdmin = Boolean(req.user) && ['admin', 'web_manager'].includes(req.user.role);
         res.json({
             version: PACKAGE.version,
             backend: store.backend,
@@ -475,7 +491,7 @@ function createApp(options = {}) {
             schema_ready: store.backend === 'supabase' ? Boolean(db && db.hydrate_ok) : true,
             jwt_secret_configured: Boolean(process.env.JWT_SECRET) && !/^REPLACE_ME/.test(String(process.env.JWT_SECRET)),
             counts: store.tableCounts(),
-            db,
+            db: isDbAdmin ? db : (db ? { hydrate_ok: db.hydrate_ok } : null),
             /* D-6（v0.7.0）：資料庫用量百分比（門檻 70%）。
              * ★ 抓不到（dict_db_size() 還沒建立、權限沒開）時回 `available:false` ——
              *   誠實說「不知道」，不假裝是 0%（那會讓監控以為很空）。 */
@@ -541,6 +557,7 @@ function createApp(options = {}) {
     });
 
     app.get('/api/books/:id/units', (req, res) => {
+        setReadCache(req, res);
         const book = store.getBook(req.params.id);
         if (!book) return res.status(404).json({ error: msg('BOOK_NOT_FOUND'), code: 'BOOK_NOT_FOUND' });
         const includeHidden = canSeeUnpublished(req);

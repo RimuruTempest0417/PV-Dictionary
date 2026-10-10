@@ -1,7 +1,7 @@
 {
     "name": "gary-dictionary",
-    "version": "0.10.0",
-    "description": "PV_Dictionary — 線上英文生字字典（Express 5 + Supabase）",
+    "version": "0.10.1",
+    "description": "Gary-Dictionary — 線上英文生字字典（Express 5 + Neon Data API／PostgREST 相容）",
     "main": "server.js",
     "type": "commonjs",
     "scripts": {
@@ -26,6 +26,12 @@
         "backup": "node scripts/backup.js",
         "restore": "node scripts/restore.js",
         "load:test": "node scripts/load-test.js",
+        "verify:live": "node scripts/live-verify.js",
+        "smoke:supabase": "node scripts/supabase-smoke.js",
+        "backend": "node scripts/switch-backend.js --status",
+        "neon:keys": "node scripts/neon-jwt.js --make-keys",
+        "push:api": "node scripts/gh-api-push.js",
+        "redeploy": "node scripts/vercel-redeploy.js",
         "cleanup:test-data": "node scripts/cleanup-test-data.js"
     },
     "keywords": [

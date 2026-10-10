@@ -98,7 +98,7 @@ function sign() {
     const signingInput = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(payload))}`;
     const signature = crypto.sign('RSA-SHA256', Buffer.from(signingInput), privatePem);
     const token = `${signingInput}.${base64url(signature)}`;
-    console.log(QUIET ? token : `${token}\n\n（role=${role}｜exp=${new Date((now + days * 86400) * 1000).toISOString()}｜kid=${kid}）`);
+    console.log(QUIET || process.argv.includes('--print') ? token : `（已簽好 JWT，**沒有印出**：role=${role}｜aud=${aud || '（未設）'}｜exp=${new Date((now + days * 86400) * 1000).toISOString()}｜kid=${kid}）\n要用它請明確加 --print（腳本請用 --quiet 取值，值不會經過任何輸出）`);
 }
 
 if (process.argv.includes('--make-keys')) makeKeys();

@@ -19,7 +19,7 @@ test('schema：程式要用的欄位，遷移檔裡都有（忘了寫遷移檔�
     assert.deepEqual(pretty, [], `遷移檔缺少欄位：${pretty.join('、')}`);
 });
 
-test('schema：遷移檔解析得到 7 張表，且欄位與程式清單一致', () => {
+test('schema：遷移檔解析得到 8 張表，且欄位與程式清單一致', () => {
     const { tables } = parseMigrations(MIGRATIONS_DIR);
     assert.deepEqual(Object.keys(tables).sort(), Object.keys(EXPECTED_COLUMNS).sort());
 });

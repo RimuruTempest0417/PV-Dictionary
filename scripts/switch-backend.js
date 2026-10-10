@@ -63,6 +63,11 @@ function backupEnv() {
     const target = path.join(ROOT, `.env.bak-${stamp}`);
     fs.copyFileSync(ENV_PATH, target);
     fs.chmodSync(target, 0o600);
+    /* 只保留最近 3 份：這些備份含機密（跟 .env 一樣），沒必要一直堆 */
+    const olds = fs.readdirSync(ROOT).filter((name) => name.startsWith('.env.bak-')).sort();
+    for (const name of olds.slice(0, Math.max(0, olds.length - 3))) {
+        fs.rmSync(path.join(ROOT, name), { force: true });
+    }
     return path.basename(target);
 }
 

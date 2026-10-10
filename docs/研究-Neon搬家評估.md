@@ -63,10 +63,11 @@
    （金鑰本身沒有壞掉就不用換；要換就 `--make-keys` ＋ 更新 Neon 的 JWKS。）
 4. **小地方要跟著改**
    - `lib/limits.js` 的 `DB_QUOTA_MB` 500 → **1024**（Neon 是 1 GB），門檻 70% 不變。
-   - `scripts/schema-check.js` 的線上 schema 檢查用 Supabase 的 OpenAPI 位置；Neon 在 `/rest/v1/openapi.json`
-     （要加一個分支，或改成兩邊都支援）。
+   - `scripts/schema-check.js` 的線上 schema 檢查用 Supabase 的 OpenAPI 位置；原本評估 Neon 在 `/rest/v1/openapi.json`，
+     **但實測回 404 —— Neon 的 Data API 不提供 OpenAPI**，因此改用**逐表探測**（`lib/schema.js` 的 `probeLiveColumns`）。
+     ★ 結論已被實作推翻：最後不是「加一個分支走 Neon 的 OpenAPI」，而是換成探測法（見 `docs/搬家到Neon.md`）。
    - `scripts/uptime-check.js`／`db-usage.js` 不用改（走我們的 `/api/health`）。
-5. **正式切換（v0.9.0 的內容）**
+5. **正式切換（v0.10.0 的內容）**
    - 資料搬遷：Supabase 匯出 → Neon 匯入（`pg_dump`／CSV＋`psql \copy`），搬完比對每張表筆數與
      `dict_db_size()`；音檔是 base64 存在 `dict_audio.data`，一併帶過去。
    - 建議：`vercel-dev` 分支先切（Vercel 已自動建好這個 Neon 分支），確認後再切 `production`。

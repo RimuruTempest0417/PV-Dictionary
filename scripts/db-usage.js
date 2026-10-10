@@ -88,7 +88,18 @@ async function supabaseUsage() {
         usage = usageState(null, { reason: `呼叫 dict_db_size() 失敗：${err.message}` });
     }
 
-    return { backend: 'supabase', project: String(process.env.SUPABASE_URL || '').replace(/^https?:\/\//, '').split('.')[0], counts, error_log_rows: errorRows, usage };
+    const targetUrl = String(process.env.SUPABASE_URL || '');
+    /* 同一個 PostgREST 相容 adapter 可能指向 Supabase 或 Neon（v0.10.0 搬家）→ 標籤要說實話，
+     * 不然搬家後 `npm run usage` 還印「supabase」會誤導（跟 server.js 的 backend_kind 用同一招判斷）。 */
+    const kind = /neon\.tech/.test(targetUrl) ? 'neon' : 'supabase';
+    return {
+        backend: kind,
+        backend_label: kind === 'neon' ? 'Neon（PostgreSQL）' : 'Supabase（PostgreSQL）',
+        project: targetUrl.replace(/^https?:\/\//, '').split('.')[0],
+        counts,
+        error_log_rows: errorRows,
+        usage
+    };
 }
 
 async function main() {

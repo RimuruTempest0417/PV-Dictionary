@@ -690,3 +690,45 @@ test('v0.7.0（D-6）：/health 回真實資料庫大小與百分比；函式不
     assert.match(String(unknown.reason), /PGRST202|schema cache/);
     fake.flags.failRpc = false;
 });
+
+/* ★ v0.10.0 回歸（正式站真的壞過）：後台這幾條路由在視窗模式下曾經直接 500。
+ * 原因：舊設計是「照路由的篩選抓一片 ＋ 指紋比對」，但每個處理器用的 limit／日期範圍都不一樣
+ * （列表 50、清理 200、匯出 5000、統計 100000）→ 指紋一定對不上 → STORE_WINDOW_MISSING。
+ * 修法：後台稽核路由改成整批載入（見 planFor 的 plan.audit.all）。這裡驗「不會再拋錯、資料是對的」。 */
+test('v0.10.0 回歸：後台稽核路由（統計／列表／匯出／清理）在視窗模式下不再 500', async () => {
+    const fake = fakeSupabase();
+    const seed = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k', hydrateTtlMs: 0 });
+    await seed.hydrate({ full: true });
+    for (let i = 1; i <= 120; i += 1) {
+        seed.insertAuditLog({
+            user_id: 'seed', display_name: 'Seed', role: 'admin',
+            action: i % 2 ? 'ENTRY_CREATE' : 'LOGIN', target_id: String(i),
+            details: `row ${i}`, ip: '127.0.0.1', created_at: new Date(Date.now() - i * 60000).toISOString()
+        });
+    }
+    await seed.flush();
+
+    const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k', hydrateTtlMs: 0 });
+    await store.hydrate({ full: false });
+
+    /* 四條路由各自用不同的 limit／篩選呼叫 —— 以前第一條之後就會炸 */
+    const cases = [
+        ['/admin/stats', { limit: 100000, offset: 0, hide_self_test: true }],
+        ['/admin/audit-logs', { limit: 50, offset: 0 }],
+        ['/admin/audit-logs/export', { limit: 5000, offset: 0, hide_self_test: true }],
+        ['/admin/audit-logs/cleanup', { limit: 200, offset: 0, hide_self_test: false }]
+    ];
+    for (const [path, options] of cases) {
+        const context = store.attach();
+        await store.runWithContext(context, () => store.prefetch({ method: path.endsWith('cleanup') ? 'POST' : 'GET', path, query: {}, body: {} }));
+        const result = store.runWithContext(context, () => store.listAuditLogs(options));
+        assert.ok(result.total > 0, `${path} 要拿得到稽核紀錄（以前這裡會拋 STORE_WINDOW_MISSING）`);
+        assert.ok(result.items.length > 0, `${path} 要有回傳列`);
+    }
+
+    /* 統計頁與後台稽核路由都要走「整批」模式，一般列表頁才可以照篩選抓切片 */
+    assert.equal(store.planFor({ method: 'GET', path: '/admin/stats' }).audit.all, true, '統計頁要走整批稽核');
+    assert.equal(store.planFor({ method: 'GET', path: '/admin/audit-logs/export' }).audit.all, true, '匯出要走整批稽核');
+    assert.equal(store.planFor({ method: 'GET', path: '/admin/audit-logs' }).audit.all, true, '稽核列表也要走整批稽核');
+    fake.restore();
+});

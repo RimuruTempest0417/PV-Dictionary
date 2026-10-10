@@ -42,6 +42,22 @@ async function main() {
         show(local.extra, '多');
     }
 
+    /* ★ v0.10.1：Neon 版 schema 也要一起守 —— v0.10.0 起真正在線上跑的是 migrations/neon/，
+     * 以前只看 migrations/，Neon 版漂移（少欄位）不會被發現。 */
+    try {
+        const neon = compareWithMigrations(path.join(MIGRATIONS_DIR, 'neon'));
+        console.log(`   Neon 版${neon.files.length ? `（${neon.files.join('、')}）` : ''}：`);
+        if (neon.missing.length) {
+            fail += 1;
+            console.log('   ✖ Neon 版 schema 缺少這些欄位（Neon 線上會直接 500）：');
+            show(neon.missing, '缺');
+        } else {
+            console.log('   ✔ Neon 版 schema 也涵蓋程式要用的欄位');
+        }
+    } catch (error) {
+        console.log(`   ⚠  沒有 migrations/neon/ 可檢查（${error.message}）`);
+    }
+
     if (OFFLINE) {
         console.log(`\n===== schema 檢查（只看遷移檔）：${fail ? '失敗' : '通過'} =====`);
         process.exitCode = fail ? 1 : 0;

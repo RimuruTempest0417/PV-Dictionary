@@ -1,5 +1,8 @@
 # 部署到 Vercel（線上版）
 
+> ⚠ **本文件是 Supabase 時期的部署步驟（保留供對照）。** v0.10.0 起資料庫是 **Neon（Data API，PostgREST 相容）**；
+> 現行的切換與回滾見 `docs/搬家到Neon.md`。以下 Supabase 的專案資訊與環境變數請當作歷史紀錄。
+
 線上版跟本機 Demo 的差別只有一個：資料放在 **Supabase**（本機是 `data/store.json`）。
 程式碼本身不用改 —— `DATA_BACKEND=supabase` 就會換過去。
 
@@ -56,7 +59,7 @@ curl -s -o /dev/null -w "%{http_code}\n" https://gary-dictionary-mylearning.verc
 - **RLS 全開、沒有任何 policy**，並撤銷了 `anon` / `authenticated` 的權限：
   只有 `service_role`（後端）進得去，瀏覽器拿不到資料庫金鑰（前端只跟自家 API 講話）。
 - 老師錄音與書本封面以 base64 存在資料庫（錄音 1MB、封面 2MB 上限），
-  由自家端點 `GET /api/audio/:id`、`GET /api/covers/:id` 提供，不需要外部儲存。
+  由自家端點 `GET /api/audio/:id` 提供（`GET /api/covers/:id` **已於 v0.5.0 移除**），不需要外部儲存。
 - 資料層是「每個請求先抓下來、回應前寫回去」（見 `lib/store/supabase.js` 開頭說明）：
   讀取一定是最新的，但**同一瞬間的兩個寫入請求可能互相覆蓋** —— 學校規模的老師編輯可以接受；
   要更嚴格就得改成資料庫交易。
