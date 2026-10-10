@@ -880,9 +880,16 @@ async function main() {
         check('「▶ 播放全部」按下去會進入播放狀態（B-2）',
             /停止|Stop/i.test(playing.label) && playing.marked >= 1, JSON.stringify(playing));
         await browser.evaluate(`document.getElementById('playAllBtn').click(); return true;`);
-        await sleep(200);
-        check('再按一次會停止，標記也會清掉（B-2）',
-            (await browser.evaluate(`return document.querySelectorAll('#vocabList .vocab-item.is-playing').length;`)) === 0);
+        /* ★ 停止是「非同步」的（要等播放器收尾）→ 不能只 sleep 200ms 就斷言，
+         *   機器忙的時候會偶發紅燈（真的踩過）。改成等狀態真的收乾淨。 */
+        let stopped = false;
+        try {
+            await browser.waitFor(`document.querySelectorAll('#vocabList .vocab-item.is-playing').length === 0`, { timeout: 5000 });
+            stopped = true;
+        } catch (err) {
+            stopped = (await browser.evaluate(`return document.querySelectorAll('#vocabList .vocab-item.is-playing').length;`)) === 0;
+        }
+        check('再按一次會停止，標記也會清掉（B-2）', stopped);
 
         /* 沒有老師錄音的生字要看得到「電腦語音」徽章（B-2 的誠實原則） */
         check('沒有老師錄音的生字標示「電腦語音」（B-2）',
@@ -941,6 +948,43 @@ async function main() {
         for (const id of [pendingA.id, pendingB.id, pendingC.id]) store.deleteEntry(id);
 
         /* 【8f】D-1：生字表分頁（載入更多、伺服器端搜尋） */
+        console.log('\n【8e2】帳號表格排版：操作欄按鈕同一行、列高一致（使用者回報的錯位）');
+        {
+            const layout = await browser.evaluate(`
+                const rows = Array.from(document.querySelectorAll('#usersTableBody tr'));
+                return rows.map((tr) => {
+                    const buttons = Array.from(tr.querySelectorAll('.cell-actions button'));
+                    const tops = buttons.map((b) => Math.round(b.getBoundingClientRect().top));
+                    const cell = tr.querySelector('.cell-actions');
+                    return {
+                        who: (tr.querySelector('strong') || {}).textContent || '',
+                        height: Math.round(tr.getBoundingClientRect().height),
+                        buttons: buttons.length,
+                        distinctTops: Array.from(new Set(tops)).length,
+                        align: cell ? getComputedStyle(cell).textAlign : null,
+                        empty: Boolean(tr.querySelector('.cell-actions .actions-empty'))
+                    };
+                });
+            `);
+            const withButtons = layout.filter((row) => row.buttons > 0);
+            const heights = layout.map((row) => row.height);
+            check('每一列的按鈕都在同一行（沒有疊成一欄）', withButtons.every((row) => row.distinctTops === 1), JSON.stringify(layout));
+            check('每一列的列高一致（差 ≤ 4px）', Math.max(...heights) - Math.min(...heights) <= 4, JSON.stringify(heights));
+            check('操作欄靠右對齊', layout.every((row) => row.align === 'right'), JSON.stringify(layout.map((row) => row.align)));
+            check('沒有操作可按的那一列顯示「—」（不是空白）', layout.some((row) => row.empty) || layout.every((row) => row.buttons > 0), JSON.stringify(layout));
+
+            /* 授權清單要看得到年級（v0.6.2 修：前端原本讀已經不存在的 book_name） */
+            const grantItems = await browser.evaluate(`
+                const items = Array.from(document.querySelectorAll('#grantList .grant-item'));
+                return items.map((item) => item.textContent.trim().replace(/\\s+/g, ' ').slice(0, 80));
+            `);
+            if (grantItems.length) {
+                check('授權清單顯示年級（不是空一格）', grantItems.every((row) => /S\d/.test(row)), JSON.stringify(grantItems));
+            } else {
+                check('授權清單（目前沒有授權資料，略過內容檢查）', true);
+            }
+        }
+
         console.log('\n【8f】生字表分頁：一頁 60 筆、載入更多、搜尋走伺服器（v0.6.0）');
         {
             const unitId = await browser.evaluate(`return window.PDState.currentUnitId;`);

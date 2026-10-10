@@ -221,7 +221,9 @@ class Browser {
         return true;
     }
 
-    async waitFor(expression, { timeout = 8000, interval = 100 } = {}) {
+    /* 預設逾時 12 秒（原本 8 秒）：連續滿載跑多輪檢查時，開啟表單／切畫面會比平常慢，
+     * 8 秒會偶發紅燈（真的踩過）。明確需要更短的地方自己傳 timeout。 */
+    async waitFor(expression, { timeout = 12000, interval = 100 } = {}) {
         const deadline = Date.now() + timeout;
         let lastErr = null;
         while (Date.now() < deadline) {

@@ -235,7 +235,16 @@
                 })]),
                 el('td', { text: user.last_login_at ? formatDateTime(user.last_login_at) : t('users.never') }),
                 el('td', {}, [twoFactorCell(user)]),
-                el('td', { class: 'cell-actions' }, actionButtons(user))
+                /* v0.6.2：按鈕包在內層 —— td 不可以自己變成 flex 容器（會讓按鈕疊成一欄）；
+                 * 沒有按鈕的那一列（你自己）顯示「—」，欄位才不會看起來像漏掉了。 */
+                (() => {
+                    const actions = actionButtons(user);
+                    return el('td', { class: 'cell-actions' }, [
+                        actions.length
+                            ? el('div', { class: 'actions-row' }, actions)
+                            : el('span', { class: 'actions-empty', text: '—' })
+                    ]);
+                })()
             ]));
             if (tempPassword && tempPassword.id === user.id) body.appendChild(tempPasswordRow(user));
             if (resetting === user.id) body.appendChild(resetRow(user));
@@ -376,7 +385,8 @@
 
     function scopeLabel(grant) {
         if (grant.unit_label) return grant.unit_label;
-        if (grant.book_name) return grant.book_name;
+        /* v0.6.2：後端從 v0.5.0 起回的是 grade（書名已移除），前端還在讀 book_name → 授權範圍一直空一格 */
+        if (grant.grade) return grant.grade;
         return '—';
     }
 
@@ -393,7 +403,7 @@
             list.appendChild(el('li', { class: 'grant-item' }, [
                 el('div', { class: 'grant-main' }, [
                     el('strong', { text: grant.username }),
-                    el('span', { class: 'grant-scope', text: `${grant.book_name || ''}${grant.unit_label ? ` · ${grant.unit_label}` : ''}` }),
+                    el('span', { class: 'grant-scope', text: `${grant.grade || ''}${grant.unit_label ? ` · ${grant.unit_label}` : ''}` }),
                     el('span', {
                         class: grant.can_publish ? 'badge is-ok' : 'badge',
                         text: grant.can_publish ? t('grants.editPublish') : t('grants.editOnly')

@@ -361,7 +361,8 @@ async function main() {
         await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
         await browser.waitFor(`document.getElementById('adminSection').hidden === false`);
         await browser.evaluate(`document.getElementById('newEntryBtn').click(); return true;`);
-        await browser.waitFor(`document.getElementById('entryForm').hidden === false`);
+        /* 逾時給寬一點：連續滿載跑多輪時，開啟表單會比平常慢（曾偶發紅燈） */
+        await browser.waitFor(`document.getElementById('entryForm').hidden === false`, { timeout: 15000 });
         await browser.evaluate(`
             document.getElementById('fHeadword').value = 'laboratory';
             document.getElementById('fPos').value = 'n.';
@@ -503,6 +504,9 @@ async function main() {
         const sizeOf = (value) => (fontLadder.find((row) => row.value === value) || {}).size || 0;
         check('A− 的字比 A 小（使用者指定）', sizeOf('s') < sizeOf('m'), JSON.stringify(fontLadder));
         check('A+ 的字比 A 大', sizeOf('l') > sizeOf('m'), JSON.stringify(fontLadder));
+        /* v0.6.2：原本 A− 只小 1px（15 vs 16）＝等於沒變（使用者回報）→ 改成要有明確幅度 */
+        check('A− 至少比 A 小 10%（幅度看得出來）', sizeOf('s') <= sizeOf('m') * 0.9, JSON.stringify(fontLadder));
+        check('A+ 至少比 A 大 15%（幅度看得出來）', sizeOf('l') >= sizeOf('m') * 1.15, JSON.stringify(fontLadder));
 
         /* 真的按下去：根字級要跟著變（A− 變小、A+ 變大） */
         const rootSizes = {};

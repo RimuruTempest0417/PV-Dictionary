@@ -1122,10 +1122,31 @@ code {
     margin-top: 2px;
 }
 
-.cell-actions {
-    display: flex;
+/* ★ v0.6.2：這裡原本是 `display: flex` —— 但這是套在 <td> 上，
+ *   把表格儲存格變成 flex 容器之後，欄寬計算與垂直對齊都會壞掉：
+ *   實測 6 顆按鈕會**疊成一欄**（每顆 y 座標都不同），列高被撐高、其他欄看起來就「錯位」，
+ *   而且溢出列高被裁掉，使用者只看到第一顆（Gary 2026-10-10 回報）。
+ *   正確做法：td 保持表格儲存格，flex 放在裡面的一層。 */
+/* ★ 特異度要注意：`.data-table td`（0-1-1）比 `.cell-actions`（0-1-0）高，
+ *   所以一定要寫成 `.data-table td.cell-actions`（0-2-1）才蓋得掉它的 text-align／white-space。
+ *   第一版就是因為寫 `.cell-actions` 而被蓋掉，按鈕仍然換行、列高 156px（Gary 回報的錯位）。 */
+.data-table td.cell-actions {
+    white-space: nowrap;          /* 操作按鈕不要換行：換行會讓不同列的列高不一致 */
+    text-align: right;
+    width: 1%;                    /* 讓它只佔內容需要的寬度，其餘欄位自己撐 */
+}
+
+.actions-row {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
     gap: var(--space-1);
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+}
+
+/* 沒有操作可按的那一列（例如你自己）：顯示一個淡的破折號，欄位看起來才是完整的 */
+.cell-actions .actions-empty {
+    color: var(--text-muted);
 }
 
 .inline-select,
@@ -1662,9 +1683,11 @@ code {
 
 .seg-switch button:active { transform: translateY(1px); }
 
-/* 字級（F-5）：只改根字級，所有版面都用相對單位，所以整體一起縮放 */
-:root[data-font="s"] { font-size: 15px; }
-:root[data-font="l"] { font-size: 18.5px; }
+/* 字級（F-5）：只改根字級，所有版面都用相對單位，所以整體一起縮放。
+ * ★ v0.6.2：原本 A− 只比 A 小 1px（15／16），使用者回報「根本沒有改變」→
+ *   改成 14／16／19（−12.5%／+18.75%），按下去馬上看得出差別。 */
+:root[data-font="s"] { font-size: 14px; }
+:root[data-font="l"] { font-size: 19px; }
 
 /* 字級切換鈕自己也要「看得出來誰大誰小」（使用者指定：A− 要比 A 小）：
  * 三顆鈕排成 0.72rem < 0.85rem < 1rem 的階梯，光看按鈕就知道按下去會變大還是變小。 */
