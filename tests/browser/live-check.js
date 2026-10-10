@@ -59,6 +59,37 @@ function check(label, ok, detail) {
         /* 年級卡片只顯示年級（v0.5.0 起）：不應該出現任何書名（Book 5A 這種） */
         check('書架只看得到年級（沒有書名）', state.kinds.every((text) => !/Book\s*\w/i.test(text)), state.kinds);
 
+        /* 2b. 字級（v0.6.5：只剩 A／A+，移除縮小的 A−）＋ 年級卡尺寸必須跟著字級 */
+        const fontButtons = await browser.evaluate(`return Array.from(document.querySelectorAll('#fontSwitch [data-font-value]')).map((btn) => btn.dataset.fontValue);`);
+        check('字級切換只剩兩顆鈕（A／A+，沒有 A−）', fontButtons.length === 2 && fontButtons.join(',') === 'm,l', fontButtons);
+
+        const cardAt = async (value) => {
+            await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="${value}"]').click(); return true;`);
+            await sleep(400);
+            return browser.evaluate(`
+                const card = document.querySelector('#bookShelf .shelf-card');
+                if (!card) return null;
+                const r = card.getBoundingClientRect();
+                return {
+                    w: Math.round(r.width * 100) / 100,
+                    h: Math.round(r.height * 100) / 100,
+                    overflow: document.documentElement.scrollWidth - window.innerWidth
+                };
+            `);
+        };
+        const cardNormal = await cardAt('m');
+        const cardLarge = await cardAt('l');
+        await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="m"]').click(); return true;`);
+        await sleep(300);
+        if (cardNormal && cardLarge && cardNormal.w > 0) {
+            /* ★ 這一項就是 v0.6.5 補上的守門：以前只量文字與切換鈕，卡片寬度漏掉才會沒發現問題 */
+            check('年級卡的寬度跟著字級放大（A+ ≥ 1.10×A）', cardLarge.w >= cardNormal.w * 1.1, { normal: cardNormal, large: cardLarge });
+            check('年級卡的高度跟著字級放大（A+ ≥ 1.10×A）', cardLarge.h >= cardNormal.h * 1.1, { normal: cardNormal, large: cardLarge });
+            check('放大字級之後不會橫向溢出', cardLarge.overflow <= 2, cardLarge.overflow);
+        } else {
+            check('正式站目前沒有年級卡可量字級（略過卡片尺寸）', true);
+        }
+
         /* 3. 點第一個年級 → 目錄真的出現單元或明確空狀態 */
         if (state.shelfChildren > 0) {
             await browser.evaluate(`document.querySelector('#bookShelf [data-book-id]').click(); return true;`);

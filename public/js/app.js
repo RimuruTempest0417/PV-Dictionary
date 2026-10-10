@@ -147,7 +147,9 @@
     const FONT_KEY = 'pv-font';
     const PRINT_KEY = 'pv-print';
     const THEME_VALUES = ['auto', 'light', 'dark'];
-    const FONT_VALUES = ['s', 'm', 'l'];
+    /* v0.6.5（使用者指定）：只留 'm'（A，16px）與 'l'（A+，19px），**移除 's'（A−）**。
+     * 舊裝置記著的 'pv-font' = 's' 不在這份清單裡 → readSetting 會回預設 'm'，自動回到 A。 */
+    const FONT_VALUES = ['m', 'l'];
 
     function readSetting(key, allowed, fallback) {
         try {

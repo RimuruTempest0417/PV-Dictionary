@@ -985,7 +985,7 @@ async function main() {
             }
         }
 
-        console.log('\n【8e3】管理區也跟著字級縮放（v0.6.3：整個介面，不是只有字）');
+        console.log('\n【8e3】管理區也跟著字級放大（v0.6.3：整個介面，不是只有字；v0.6.5：只剩 A／A+ 兩段）');
         {
             /* 先確保帳號表格真的「看得見」有列（前面步驟可能切走了或剛重畫完）：
                getBoundingClientRect() 在隱藏時是 0，所以只等「有列」不夠，要等「有高度」。 */
@@ -994,7 +994,7 @@ async function main() {
                 await browser.waitFor(`(() => { const tr = document.querySelector('#usersTableBody tr'); return Boolean(tr) && tr.getBoundingClientRect().height > 0; })()`, { timeout: 8000 });
             } catch (err) { /* 真的看不到：下面就只檢查字級 */ }
             const rows = {};
-            for (const value of ['s', 'm', 'l']) {
+            for (const value of ['m', 'l']) {
                 await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="${value}"]').click(); return true;`);
                 await sleep(300);
                 rows[value] = await browser.evaluate(`
@@ -1008,17 +1008,17 @@ async function main() {
                     };
                 `);
             }
-            const scaled = (key) => rows.m[key] > 0 && rows.l[key] >= rows.m[key] * 1.1 && rows.s[key] <= rows.m[key] * 0.92;
+            const scaled = (key) => rows.m[key] > 0 && rows.l[key] >= rows.m[key] * 1.1;
             if (rows.m.rowHeight > 0) {
-                check('管理區帳號表格的列高跟著字級縮放', scaled('rowHeight'), JSON.stringify(rows));
+                check('管理區帳號表格的列高跟著字級放大', scaled('rowHeight'), JSON.stringify(rows));
             } else {
                 check('管理區帳號表格（這一段沒有列可量，只驗字級）', true);
             }
-            check('管理區帳號表格的字級跟著字級縮放', scaled('cellFont'), JSON.stringify(rows));
-            check('管理區在三種字級都沒有水平溢出',
-                ['s', 'm', 'l'].every((value) => rows[value].overflow <= 2),
-                JSON.stringify(['s', 'm', 'l'].map((value) => rows[value].overflow)));
-            /* 還原成預設（中） */
+            check('管理區帳號表格的字級跟著字級放大', scaled('cellFont'), JSON.stringify(rows));
+            check('管理區在兩種字級都沒有水平溢出',
+                ['m', 'l'].every((value) => rows[value].overflow <= 2),
+                JSON.stringify(['m', 'l'].map((value) => rows[value].overflow)));
+            /* 還原成預設（A） */
             await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="m"]').click(); return true;`);
             await sleep(200);
         }

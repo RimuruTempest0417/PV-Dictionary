@@ -504,33 +504,50 @@ async function main() {
         check('新增書本後直接進入它的目錄（接著就能新增單元）', true);
         check('書架上也出現新的年級（S2）', (await browser.evaluate(`return document.getElementById('bookShelf').textContent.includes('S2');`)) === true);
 
-        console.log('\n【10b-2】字級切換鈕是階梯：A− < A < A+（使用者指定）');
+        console.log('\n【10b-2】字級只有兩段：A（正常）／A+（放大）— v0.6.5 移除縮小的 A−（使用者指定）');
+        /* v0.6.5（使用者指定）：不再修 A−，而是**把 A− 整個移除**，只留 A（16px）與 A+（19px）。
+         * 為什麼：A− 的「整體頁面大小看起來不正常」根因是**書架卡片寬度跟不上字級** ——
+         * `.shelf` 是 repeat(auto-fill, minmax(10rem, 1fr))，字級只影響欄寬下限，欄寬由固定的
+         * 1080px 內容欄撐滿；14px 與 16px 都湊到 6 欄，所以 A− 的卡片反而比 A 略寬（163.66 vs 161.33），
+         * 只有高度縮小 → 看起來「寬而扁」。 */
+        const fontButtons = await browser.evaluate(`return Array.from(document.querySelectorAll('#fontSwitch [data-font-value]')).map((btn) => btn.dataset.fontValue);`);
+        check('字級切換只剩兩顆鈕：A 與 A+（沒有縮小的 A−）',
+            fontButtons.length === 2 && fontButtons.join(',') === 'm,l', JSON.stringify(fontButtons));
+
         const fontLadder = await browser.evaluate(`return Array.from(document.querySelectorAll('#fontSwitch [data-font-value]')).map((btn) => ({
             value: btn.dataset.fontValue,
             size: parseFloat(getComputedStyle(btn).fontSize)
         }));`);
         const sizeOf = (value) => (fontLadder.find((row) => row.value === value) || {}).size || 0;
-        check('A− 的字比 A 小（使用者指定）', sizeOf('s') < sizeOf('m'), JSON.stringify(fontLadder));
         check('A+ 的字比 A 大', sizeOf('l') > sizeOf('m'), JSON.stringify(fontLadder));
-        /* v0.6.2：原本 A− 只小 1px（15 vs 16）＝等於沒變（使用者回報）→ 改成要有明確幅度 */
-        check('A− 至少比 A 小 10%（幅度看得出來）', sizeOf('s') <= sizeOf('m') * 0.9, JSON.stringify(fontLadder));
+        /* v0.6.2：幅度要看得出來（原本 A− 只小 1px ＝ 使用者說「根本沒改變」） */
         check('A+ 至少比 A 大 15%（幅度看得出來）', sizeOf('l') >= sizeOf('m') * 1.15, JSON.stringify(fontLadder));
 
-        /* 真的按下去：根字級要跟著變（A− 變小、A+ 變大） */
+        /* 真的按下去：根字級要跟著變（A＝16px、A+＝19px） */
         const rootSizes = {};
-        for (const value of ['s', 'm', 'l']) {
+        for (const value of ['m', 'l']) {
             await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="${value}"]').click(); return true;`);
             await sleep(150);
             rootSizes[value] = await browser.evaluate(`return parseFloat(getComputedStyle(document.documentElement).fontSize);`);
         }
-        check('按下 A−／A／A+ 根字級真的變小→中→大',
-            rootSizes.s < rootSizes.m && rootSizes.m < rootSizes.l, JSON.stringify(rootSizes));
+        check('按下 A／A+ 根字級真的變大（16 → 19）',
+            rootSizes.m === 16 && rootSizes.l > rootSizes.m, JSON.stringify(rootSizes));
+        /* ★ v0.6.5：就算舊裝置記著 data-font="s"（以前選過 A−），也不可以跑出第三種字級 ——
+         *   CSS 已經沒有 :root[data-font="s"] 這條規則（app.js 的 FONT_VALUES 也會把它回落成 'm'）。 */
+        const staleFont = await browser.evaluate(`
+            document.documentElement.dataset.font = 's';
+            const size = parseFloat(getComputedStyle(document.documentElement).fontSize);
+            delete document.documentElement.dataset.font;
+            return size;
+        `);
+        check('移除的 A− 不會殘留成第三種字級（data-font="s" 只會是預設大小）',
+            staleFont === rootSizes.m, JSON.stringify({ staleFont, expected: rootSizes.m }));
 
         /* ★ v0.6.3：使用者說「不是這三個字的問題，是整個介面沒有按照這個大小變化」——
-         *   所以不能只量標題的字。這裡量的是**尺寸**：卡片、內容欄寬、頂欄高度。
+         *   所以不能只量標題的字。這裡量的是**尺寸**：切換鈕、內容欄寬、頂欄高度。
          *   真因：間距（--space-*）與各處 padding/height 原本是固定 px → 只有文字會變。 */
         const scaleSamples = {};
-        for (const value of ['s', 'm', 'l']) {
+        for (const value of ['m', 'l']) {
             await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="${value}"]').click(); return true;`);
             await sleep(250);
             scaleSamples[value] = await browser.evaluate(`
@@ -541,8 +558,6 @@ async function main() {
                     return { w: Math.round(r.width), h: Math.round(r.height) };
                 };
                 return {
-                    /* 不要量書架卡片：跑到這一段時書架可能是空的（前面的步驟會改動資料），
-                       量「一定在」的東西：字級切換鈕、內容欄、頂欄。 */
                     chip: box('#fontSwitch'),
                     page: box('.page'),
                     topbar: box('.topbar-inner'),
@@ -550,34 +565,54 @@ async function main() {
                 };
             `);
         }
-        const scalesOk = (pick) => {
+        const scaleOk = (pick) => {
             const base = pick(scaleSamples.m);
-            return base > 0 && pick(scaleSamples.l) >= base * 1.1 && pick(scaleSamples.s) <= base * 0.92;
+            return base > 0 && pick(scaleSamples.l) >= base * 1.1;
         };
-        check('整個介面跟著字級縮放：字級切換鈕的寬度', scalesOk((row) => row.chip && row.chip.w), JSON.stringify(scaleSamples));
-        check('整個介面跟著字級縮放：字級切換鈕的高度', scalesOk((row) => row.chip && row.chip.h), JSON.stringify(scaleSamples));
-        /* ★ v0.6.4：內容欄寬**不可以**跟著字級變（v0.6.3 用 rem 讓 A− 時整頁縮窄、
-         *   空間利用率變差，使用者回報）。字級只改介面元件大小，不改版面可用寬度。 */
-        const sameWidth = (row) => row.page && Math.abs(row.page.w - scaleSamples.m.page.w) <= 3;
+        check('整個介面跟著字級放大：字級切換鈕的寬度', scaleOk((row) => row.chip && row.chip.w), JSON.stringify(scaleSamples));
+        check('整個介面跟著字級放大：字級切換鈕的高度', scaleOk((row) => row.chip && row.chip.h), JSON.stringify(scaleSamples));
+        check('整個介面跟著字級放大：頂欄（.topbar-inner）高度', scaleOk((row) => row.topbar && row.topbar.h), JSON.stringify(scaleSamples));
+        /* ★ v0.6.4：內容欄寬**不可以**跟著字級變（v0.6.3 用 rem 讓整頁縮窄、空間利用率變差，
+         *   使用者回報）。字級只改介面元件大小，不改版面可用寬度。 */
         check('內容欄寬不隨字級改變（空間利用率不變）',
-            sameWidth(scaleSamples.s) && sameWidth(scaleSamples.l),
-            JSON.stringify(['s', 'm', 'l'].map((value) => (scaleSamples[value].page || {}).w)));
-        check('整個介面跟著字級縮放：頂欄（.topbar-inner）高度', scalesOk((row) => row.topbar && row.topbar.h), JSON.stringify(scaleSamples));
-        check('三種字級都沒有水平溢出（不會出現橫向捲軸）',
-            ['s', 'm', 'l'].every((value) => scaleSamples[value].overflow <= 2),
-            JSON.stringify(['s', 'm', 'l'].map((value) => scaleSamples[value].overflow)));
-        /* ★ v0.6.4：三個標籤自己要有大小階梯（使用者指定「A− 要比 A 小」），
-         *   這樣光看按鈕就知道哪個會變大、哪個會變小。 */
+            Boolean(scaleSamples.m.page && scaleSamples.l.page) && Math.abs(scaleSamples.l.page.w - scaleSamples.m.page.w) <= 3,
+            JSON.stringify(['m', 'l'].map((value) => (scaleSamples[value].page || {}).w)));
+        check('兩種字級都沒有水平溢出（不會出現橫向捲軸）',
+            ['m', 'l'].every((value) => scaleSamples[value].overflow <= 2),
+            JSON.stringify(['m', 'l'].map((value) => scaleSamples[value].overflow)));
+
+        /* ★★ v0.6.5 補上的守門：這個項目以前沒有量，所以「A− 的卡片寬而扁」才會漏掉。
+         *   年級卡（.shelf-card）的**寬與高**都要跟著字級放大（A+ ≥ 1.10×A）。
+         *   量之前要先把書架切到看得見（隱藏時 getBoundingClientRect() 是 0，會誤判成沒縮放）。 */
+        const cardSizes = {};
+        for (const value of ['m', 'l']) {
+            await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="${value}"]').click(); return true;`);
+            await browser.evaluate(`window.PDApp.showView('shelf'); return true;`);
+            await sleep(300);
+            cardSizes[value] = await browser.evaluate(`
+                const card = document.querySelector('#bookShelf .shelf-card');
+                if (!card) return null;
+                const r = card.getBoundingClientRect();
+                return { w: Math.round(r.width * 100) / 100, h: Math.round(r.height * 100) / 100 };
+            `);
+        }
+        const cardsUsable = Boolean(cardSizes.m && cardSizes.l) && cardSizes.m.w > 0;
+        check('年級卡的寬度跟著字級放大（A+ ≥ 1.10×A）',
+            cardsUsable && cardSizes.l.w >= cardSizes.m.w * 1.1, JSON.stringify(cardSizes));
+        check('年級卡的高度跟著字級放大（A+ ≥ 1.10×A）',
+            cardsUsable && cardSizes.l.h >= cardSizes.m.h * 1.1, JSON.stringify(cardSizes));
+
+        /* 標籤自己要有大小階梯（光看按鈕就知道按下去會變大） */
         const labelSizes = await browser.evaluate(`
             return Array.from(document.querySelectorAll('#fontSwitch button'))
                 .map((b) => Math.round(parseFloat(getComputedStyle(b).fontSize) * 100) / 100);
         `);
-        check('A−／A／A+ 標籤的字級有階梯（A− < A < A+）',
-            labelSizes.length === 3 && labelSizes[0] < labelSizes[1] && labelSizes[1] < labelSizes[2],
-            JSON.stringify(labelSizes));
-        /* 還原成預設（中） */
+        check('A／A+ 標籤的字級有階梯（A < A+）',
+            labelSizes.length === 2 && labelSizes[0] < labelSizes[1], JSON.stringify(labelSizes));
+        /* 還原成預設（A）並回到目錄（後面的段落假設在某個畫面） */
         await browser.evaluate(`document.querySelector('#fontSwitch [data-font-value="m"]').click(); return true;`);
-        await sleep(150);
+        await browser.evaluate(`window.PDApp.showView('units'); return true;`);
+        await sleep(200);
 
         console.log('\n【10c】年級制：新增年級 → 書架只出現年級（v0.5.0）');
         /* 建立年級（管理區只問年級） */
