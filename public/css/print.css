@@ -105,6 +105,15 @@ body {
     body[data-print-no-example] .example { display: none !important; }
 
     /* 列印一律用淺色（深色主題印出來會是整片黑） */
+    /* v0.13.0（B-9）學習單：中文留白（挖空）——
+     * 用 color: transparent 而不是 display: none，版面高度不變、每一列間距才會一致；
+     * 底下加一條線讓學生寫字。 */
+    body[data-print-blank-zh] .meaning-zh {
+        color: transparent !important;
+        border-bottom: 1px solid #999;
+        min-height: 1em;
+    }
+
     :root[data-theme="dark"] {
         color-scheme: light;
     }

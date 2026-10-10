@@ -995,6 +995,51 @@ async function main() {
         await browser.evaluate(`document.querySelector('#langSwitch button[data-lang="en"]').click(); return true;`);
         await browser.evaluate(`document.getElementById('guideCloseBtn').click(); return true;`);
 
+        /* v0.13.0（B-9／F-5）：新的列印選項與學生端控制要在畫面上真的存在
+         * （browser.evaluate 是把字串當函式主體，所以一定要有 explicit return） */
+        const b9 = await browser.evaluate(`return (() => {
+            const blank = document.getElementById('printBlankZh');
+            const alpha = document.getElementById('printAlpha');
+            const mine = document.getElementById('myListBtn');
+            const miss = document.getElementById('missingZhToggle');
+            const star = document.querySelector('#vocabList .star-btn');
+            return {
+                blank: Boolean(blank), alpha: Boolean(alpha), mine: Boolean(mine), miss: Boolean(miss),
+                star: Boolean(star),
+                starLabel: star ? star.textContent : '',
+                mineLabel: mine ? mine.textContent : ''
+            };
+        })();`);
+        check('B-9：列印多了「中文留白」與「字母順序」兩個選項', b9.blank === true && b9.alpha === true);
+        check('F-5：「我的清單」按鈕與「只看沒有中文解釋的字」控制都在', b9.mine === true && b9.miss === true);
+        check('F-5：每一列生字都有 ☆ 收藏鈕（未收藏時是空心）', b9.star === true && b9.starLabel.indexOf('☆') >= 0);
+        check('F-5：「我的清單」按鈕預設顯示未收藏的標籤', b9.mineLabel.indexOf('☆') >= 0);
+
+        /* 勾「中文留白」→ body 要有 data 標記（print.css 靠它把中文變成填空線） */
+        const blankApplied = await browser.evaluate(`return (() => {
+            const box = document.getElementById('printBlankZh');
+            box.checked = true;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+            const on = document.body.dataset.printBlankZh === '1';
+            box.checked = false;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+            return { on, off: document.body.dataset.printBlankZh === undefined };
+        })();`);
+        check('B-9：勾／取消「中文留白」會即時切換 body 標記', blankApplied.on === true && blankApplied.off === true);
+
+        /* 字母順序：勾了之後清單要照 a→z 排（用畫面上的生字驗證） */
+        const alphaSorted = await browser.evaluate(`return (() => {
+            const box = document.getElementById('printAlpha');
+            box.checked = true;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+            const words = [...document.querySelectorAll('#vocabList .headword')].map((n) => n.textContent.toLowerCase());
+            box.checked = false;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+            const sorted = words.every((word, index) => index === 0 || words[index - 1] <= word);
+            return { sorted, count: words.length };
+        })();`);
+        check('B-9：勾「字母順序」後清單照 a→z 排', alphaSorted.sorted === true && alphaSorted.count > 1, JSON.stringify(alphaSorted));
+
         const downloads = await browser.evaluate(`return window.__downloads || [];`);
         check('檢查過程沒有觸發任何下載', downloads.length === 0, JSON.stringify(downloads));
         const shot = await browser.screenshot(path.join(dir, 'should-not-exist.png'));

@@ -611,6 +611,15 @@ function createApp(options = {}) {
          *   - 看不到的身分（訪客問 pending）→ 回空清單，不透露別人的草稿（連查都不用查）
          * 不認識的值（例如 ?status=all）一律忽略，免得打錯字變成「這個單元沒有生字」的鬼故事。 */
         const canSeeStatus = !knownStatus || statuses === null || statuses.includes(wantedStatus);
+        /* v0.13.0（F-5）：學生端的兩個篩選（生字表是分頁的，篩選一定要在資料庫做才找得完所有頁）
+         *   missing_zh=1 → 只回沒有中文解釋的生字
+         *   ids=1,2,3    → 只回這些生字（「我的清單」；最多 200 個，避免超長網址） */
+        const missingZh = String(req.query.missing_zh || '') === '1';
+        const idsRaw = str(req.query.ids || '', 2000).trim();
+        const wantedIds = idsRaw
+            ? idsRaw.split(',').map((value) => Number.parseInt(value, 10))
+                .filter((value) => Number.isSafeInteger(value) && value > 0).slice(0, 200)
+            : null;
         let total = 0;
         let pageRows = [];
         if (canSeeStatus) {
@@ -620,7 +629,11 @@ function createApp(options = {}) {
                 status: knownStatus ? wantedStatus : '',
                 q: query,
                 page,
-                perPage
+                perPage,
+                missingZh,
+                /* 帶了 ids 但沒有一個合法（例如 ?ids=abc）→ 刻意送「不存在」的 id：
+                 * 回空清單才是誠實的，不能變成「整個單元」。 */
+                ids: wantedIds === null ? null : (wantedIds.length ? wantedIds : [-1])
             });
             pageRows = result.rows;
             total = result.total;
@@ -965,7 +978,11 @@ function createApp(options = {}) {
             ipa_us: str(body.ipa_us, LIMITS.ipa),
             ipa_uk: str(body.ipa_uk, LIMITS.ipa),
             part_of_speech: str(body.part_of_speech, LIMITS.pos),
-            zh_meaning: str(body.zh_meaning, LIMITS.zh),
+            /* v0.13.0（F-5）：「沒有中文解釋」統一用 NULL 表示（不是空字串）。
+             * 為什麼：PostgREST 不接受 or=(zh_meaning.is.null,zh_meaning.eq.) 這種寫法，
+             * 只有 NULL 才能用單一條件 zh_meaning=is.null 過濾（見 migrations/neon/2026-10-11-null-empty-meanings.sql）。
+             * 讀取端不受影響：publicEntry() 一律回 ''，前端拿到的東西完全一樣。 */
+            zh_meaning: str(body.zh_meaning, LIMITS.zh) || null,
             en_definition: str(body.en_definition, LIMITS.en),
             example_en: str(body.example_en, LIMITS.example),
             example_zh: str(body.example_zh, LIMITS.example)

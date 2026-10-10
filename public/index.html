@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Gary-Dictionary — an online English vocabulary dictionary: browse words by book and unit, with pronunciation, part of speech, Chinese and English meanings.">
-    <title>Gary-Dictionary v0.12.0</title>
-    <link rel="icon" href="/img/favicon.svg?v=0.12.0" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.12.0">
-    <link rel="stylesheet" href="/css/tokens.css?v=0.12.0">
-    <link rel="stylesheet" href="/css/app.css?v=0.12.0">
-    <link rel="stylesheet" href="/css/print.css?v=0.12.0" media="print">
-    <script src="/js/analytics.js?v=0.12.0"></script>
+    <title>Gary-Dictionary v0.13.0</title>
+    <link rel="icon" href="/img/favicon.svg?v=0.13.0" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/img/favicon.svg?v=0.13.0">
+    <link rel="stylesheet" href="/css/tokens.css?v=0.13.0">
+    <link rel="stylesheet" href="/css/app.css?v=0.13.0">
+    <link rel="stylesheet" href="/css/print.css?v=0.13.0" media="print">
+    <script src="/js/analytics.js?v=0.13.0"></script>
     <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
@@ -116,8 +116,14 @@
                 <div id="printOptions" class="print-options">
                     <label class="check-inline"><input id="printZh" type="checkbox" checked><span data-i18n="unit.printZh">中文解釋</span></label>
                     <label class="check-inline"><input id="printExample" type="checkbox" checked><span data-i18n="unit.printExample">例句</span></label>
+                    <!-- v0.13.0（B-9）學習單：中文留白（挖空）＋ 字母順序 -->
+                    <label class="check-inline"><input id="printBlankZh" type="checkbox"><span data-i18n="unit.printBlankZh">中文留白</span></label>
+                    <label class="check-inline"><input id="printAlpha" type="checkbox"><span data-i18n="unit.printAlpha">字母順序</span></label>
                 </div>
                 <button id="printBtn" class="btn btn-ghost" type="button" data-i18n="unit.print">🖨 Print</button>
+                <!-- v0.13.0（F-5）學生端：自己的清單與「只看沒有中文解釋的字」 -->
+                <button id="myListBtn" class="btn btn-ghost btn-small" type="button" aria-pressed="false"></button>
+                <label class="check-inline"><input id="missingZhToggle" type="checkbox"><span data-i18n="unit.onlyMissingZh">只看沒有中文解釋的字</span></label>
             </div>
         </div>
         <p id="unitHint" class="hint" hidden></p>
@@ -468,7 +474,7 @@
 </main>
 
 <footer class="footer">
-    <span>Gary-Dictionary <span id="versionLabel">v0.12.0</span></span>
+    <span>Gary-Dictionary <span id="versionLabel">v0.13.0</span></span>
     <span class="footer-sep">·</span>
     <span id="backendLabel" class="footer-muted"></span>
     <span class="footer-sep">·</span>
@@ -559,18 +565,18 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<script src="/js/errorlog.js?v=0.12.0"></script>
-<script src="/js/i18n.js?v=0.12.0"></script>
-<script src="/js/api.js?v=0.12.0"></script>
-<script src="/js/ui.js?v=0.12.0"></script>
-<script src="/js/audio.js?v=0.12.0"></script>
-<script src="/js/playlist.js?v=0.12.0"></script>
-<script src="/js/auth.js?v=0.12.0"></script>
-<script src="/js/vocab.js?v=0.12.0"></script>
-<script src="/js/xlsx.js?v=0.12.0"></script>
-<script src="/js/admin.js?v=0.12.0"></script>
-<script src="/js/users.js?v=0.12.0"></script>
-<script src="/js/guide.js?v=0.12.0"></script>
-<script src="/js/app.js?v=0.12.0"></script>
+<script src="/js/errorlog.js?v=0.13.0"></script>
+<script src="/js/i18n.js?v=0.13.0"></script>
+<script src="/js/api.js?v=0.13.0"></script>
+<script src="/js/ui.js?v=0.13.0"></script>
+<script src="/js/audio.js?v=0.13.0"></script>
+<script src="/js/playlist.js?v=0.13.0"></script>
+<script src="/js/auth.js?v=0.13.0"></script>
+<script src="/js/vocab.js?v=0.13.0"></script>
+<script src="/js/xlsx.js?v=0.13.0"></script>
+<script src="/js/admin.js?v=0.13.0"></script>
+<script src="/js/users.js?v=0.13.0"></script>
+<script src="/js/guide.js?v=0.13.0"></script>
+<script src="/js/app.js?v=0.13.0"></script>
 </body>
 </html>

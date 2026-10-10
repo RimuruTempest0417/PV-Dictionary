@@ -1011,12 +1011,29 @@ code {
         grid-template-columns: 1fr;
     }
 
+    /* v0.13.0：工具列多了列印學習單與學生端篩選（最多 6 個控制項），手機上一定要換行，
+     * 而且按鈕不可以為了塞進一行被壓成細條（守門測試會檢查高度 < 28px 的按鈕數＝0）。 */
     .unit-head-actions {
         width: 100%;
+        flex-wrap: wrap;
+        align-items: center;
+        row-gap: var(--space-2);
     }
 
     .unit-head-actions .btn {
-        flex: 1 1 auto;
+        flex: 0 0 auto;
+        min-height: 2rem;
+    }
+
+    /* 勾選類的選項（列印＋篩選）自己佔滿一行，字才不會擠成一團 */
+    .unit-head-actions .print-options,
+    .unit-head-actions .check-inline {
+        flex: 0 0 auto;
+    }
+
+    .unit-head-actions .print-options {
+        flex: 1 1 100%;
+        flex-wrap: wrap;
     }
 }
 
@@ -1688,19 +1705,53 @@ code {
 }
 
 .grade-row--empty {
-    color: var(--muted-foreground);
+    color: var(--text-muted);
     font-size: 0.9rem;
 }
 
-/* v0.12.0（B-8）：刪除的確認列（長在被刪的那一列下面；不用原生 confirm） */
+/* v0.13.0（B-8）：刪除的確認列（長在被刪的那一列下面；不用原生 confirm） */
 .grade-row--confirm,
 .unit-row--confirm {
     flex-wrap: wrap;
     gap: var(--space-2);
     border-style: dashed;
-    background: var(--background);
-    color: var(--muted-foreground);
+    background: var(--bg);
+    color: var(--text-muted);
     font-size: 0.9rem;
+}
+
+/* v0.13.0（F-5）：生字列上的 ★「我的清單」（存自己的瀏覽器，不用帳號）。
+ * 刻意放在最外層、不進 .vocab-actions —— 那是老師的編輯區，列印與窄螢幕都會被隱藏／擠掉。 */
+.star-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.05rem;
+    line-height: 1;
+    /* ★ 一定要給足點擊面積：手機守門測試會抓「高度 < 28px 的按鈕」，
+     *   純文字的 ☆ 只有 17px，會被判成「被壓成細條」。 */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.9rem;
+    min-height: 1.9rem;
+    padding: 0 var(--space-1);
+    color: var(--text-muted);
+}
+
+.star-btn:hover,
+.star-btn:focus-visible {
+    color: var(--accent);
+}
+
+.star-btn.is-on {
+    color: var(--accent);
+}
+
+/* 「我的清單」篩選開著時，按鈕要看得出是開的（aria-pressed 是真的） */
+#myListBtn[aria-pressed="true"] {
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
 .grade-name {
@@ -1709,7 +1760,7 @@ code {
 }
 
 .grade-meta {
-    color: var(--muted-foreground);
+    color: var(--text-muted);
     font-size: 0.85rem;
     flex: 1;
 }

@@ -240,15 +240,26 @@
         writeSetting(FONT_KEY, font);
     }
 
-    /* 列印時要包含什麼（B-5）：用 body 上的 data 標記，交給 print.css 隱藏 */
+    /* 列印時要包含什麼（B-5）＋ 學習單選項（B-9）：用 body 上的 data 標記，交給 print.css 隱藏
+     * v0.13.0（B-9）多了兩個學習單選項：中文留白（挖空，讓學生填）與字母順序。
+     * 四個選項都即時寫進 localStorage，下次回來還在。 */
     function applyPrintOptions(options) {
         const zh = options.zh !== false;
         const example = options.example !== false;
+        const blankZh = options.blankZh === true;
+        const alpha = options.alpha === true;
         if (zh) delete document.body.dataset.printNoZh;
         else document.body.dataset.printNoZh = '1';
         if (example) delete document.body.dataset.printNoExample;
         else document.body.dataset.printNoExample = '1';
+        if (blankZh) document.body.dataset.printBlankZh = '1';
+        else delete document.body.dataset.printBlankZh;
         writeSetting(PRINT_KEY, zh ? (example ? 'both' : 'zh') : (example ? 'example' : 'none'));
+        /* 學習單的兩個新選項用獨立的鍵（舊的 PRINT_KEY 是「四選一」的字串，塞不下新的維度） */
+        writeSetting('pd.printBlankZh', blankZh ? '1' : '0');
+        writeSetting('pd.printAlpha', alpha ? '1' : '0');
+        /* 字母順序：把目前的清單重畫一次（列印時會用到這個順序） */
+        if (typeof renderVocab === 'function' && window.PDState.currentUnitId) renderVocab();
     }
 
     function initAppearance() {
@@ -257,9 +268,29 @@
         const stored = readSetting(PRINT_KEY, ['both', 'zh', 'example', 'none'], 'both');
         const zhBox = document.getElementById('printZh');
         const exampleBox = document.getElementById('printExample');
+        const blankBox = document.getElementById('printBlankZh');
+        const alphaBox = document.getElementById('printAlpha');
         if (zhBox) zhBox.checked = stored === 'both' || stored === 'zh';
         if (exampleBox) exampleBox.checked = stored === 'both' || stored === 'example';
-        applyPrintOptions({ zh: zhBox ? zhBox.checked : true, example: exampleBox ? exampleBox.checked : true });
+        if (blankBox) blankBox.checked = readSetting('pd.printBlankZh', ['0', '1'], '0') === '1';
+        if (alphaBox) alphaBox.checked = readSetting('pd.printAlpha', ['0', '1'], '0') === '1';
+        applyPrintOptions({
+            zh: zhBox ? zhBox.checked : true,
+            example: exampleBox ? exampleBox.checked : true,
+            blankZh: blankBox ? blankBox.checked : false,
+            alpha: alphaBox ? alphaBox.checked : false
+        });
+        /* 學習單的兩個新選項自己監聽（舊的兩個維持原本的監聽器，兩邊都呼叫同一支 applyPrintOptions） */
+        for (const box of [blankBox, alphaBox]) {
+            if (box) {
+                box.addEventListener('change', () => applyPrintOptions({
+                    zh: document.getElementById('printZh').checked,
+                    example: document.getElementById('printExample').checked,
+                    blankZh: document.getElementById('printBlankZh').checked,
+                    alpha: document.getElementById('printAlpha').checked
+                }));
+            }
+        }
 
         for (const button of document.querySelectorAll('#themeSwitch [data-theme-value]')) {
             button.addEventListener('click', () => applyTheme(button.dataset.themeValue));
@@ -585,11 +616,22 @@
     }
 
     function renderVocab() {
+        const alphaBox = document.getElementById('printAlpha');
+        /* v0.13.0（F-5）：篩選結果是空的時候，要說清楚「為什麼空」——
+         * 沒收藏任何字、這個單元沒有缺中文的生字、還是搜尋不到。 */
+        const myListBtn = document.getElementById('myListBtn');
+        const missingBox = document.getElementById('missingZhToggle');
+        let emptyText;
+        if (myListBtn && myListBtn.getAttribute('aria-pressed') === 'true') emptyText = t('unit.myListEmpty');
+        else if (missingBox && missingBox.checked) emptyText = t('unit.onlyMissingZhEmpty');
         const result = window.PDVocab.render(state.entries, {
             canEdit: window.PDAuth.can('can_edit'),
             canPublish: window.PDAuth.can('can_publish'),
             canUploadAudio: window.PDAuth.can('can_upload_audio'),
             query: state.query,
+            /* B-9：勾了「字母順序」就照 a→z 排（列印學習單用） */
+            alphabetical: Boolean(alphaBox && alphaBox.checked),
+            emptyText,
             total: state.entries.length
         });
         if (state.query && result.shown !== result.total) {
@@ -637,12 +679,23 @@
         }
     }
 
-    /* D-1：組出單元生字表的分頁網址（搜尋字串也在這裡帶上） */
+    /* D-1：組出單元生字表的分頁網址（搜尋字串也在這裡帶上）
+     * v0.13.0（F-5）：再加上兩個學生端篩選 ——「只看沒有中文解釋的字」與「我的清單」。
+     * 為什麼要交給伺服器過濾：生字表是分頁的（一頁 60 筆），前端只看得到目前載入的那些，
+     * 在前端過濾會變成「明明有 5 個沒中文，卻只找到 2 個」。 */
     function unitPageUrl({ page = 1 } = {}) {
         const params = new URLSearchParams();
         params.set('page', String(page));
         const query = (state.query || '').trim();
         if (query) params.set('q', query);
+        const missing = document.getElementById('missingZhToggle');
+        if (missing && missing.checked) params.set('missing_zh', '1');
+        const myList = document.getElementById('myListBtn');
+        if (myList && myList.getAttribute('aria-pressed') === 'true') {
+            const ids = window.PDVocab.myList.ids().slice(0, 200);
+            /* 清單是空的也要送（送一個不存在的 id）→ 伺服器回空清單，而不是整個單元 */
+            params.set('ids', ids.length ? ids.join(',') : '0');
+        }
         return `/api/units/${state.currentUnitId}?${params.toString()}`;
     }
 
@@ -1106,14 +1159,79 @@
             if (!document.getElementById('usersBlock').hidden) window.PDUsers.refresh();
             toast(event.detail.lang === 'zh' ? t('toast.langChanged') : 'Language: English');
         });
-        document.getElementById('printBtn').addEventListener('click', () => {
+        /* v0.13.0（B-9）：列印前把整個單元載完（上限 PRINT_MAX），回傳載入後的筆數。
+         * 為什麼要這樣：生字表是分頁的，畫面只載入前幾頁時直接列印，學習單會缺字。
+         * 上限 1000：超大單元（例如 10,000 筆）會讓瀏覽器與資料庫都很吃力，寧可印一部分並告知。 */
+        const PRINT_MAX = 1000;
+        async function loadAllForPrint() {
+            let guard = 0;
+            while (state.entriesMeta && state.entriesMeta.has_more
+                && state.entries.length < PRINT_MAX && guard < 20) {
+                guard += 1;
+                const payload = await window.PDApi.get(unitPageUrl({ page: (state.entriesMeta.page || 1) + 1 }));
+                const seen = new Set(state.entries.map((entry) => String(entry.id)));
+                for (const entry of payload.entries || []) {
+                    if (!seen.has(String(entry.id))) state.entries.push(entry);
+                }
+                state.entriesMeta = payload.meta || Object.assign({}, state.entriesMeta, { has_more: false });
+                renderVocab();
+            }
+            if (state.entriesMeta && state.entriesMeta.has_more) toast(t('unit.printCapped', { n: PRINT_MAX }), 'error');
+            return state.entries.length;
+        }
+
+        document.getElementById('printBtn').addEventListener('click', async () => {
             const zhBox = document.getElementById('printZh');
             const exampleBox = document.getElementById('printExample');
+            const blankBox = document.getElementById('printBlankZh');
+            const alphaBox = document.getElementById('printAlpha');
             applyPrintOptions({
                 zh: zhBox ? zhBox.checked : true,
-                example: exampleBox ? exampleBox.checked : true
+                example: exampleBox ? exampleBox.checked : true,
+                blankZh: blankBox ? blankBox.checked : false,
+                alpha: alphaBox ? alphaBox.checked : false
             });
+            const button = document.getElementById('printBtn');
+            if (state.entriesMeta && state.entriesMeta.has_more) {
+                const original = button.textContent;
+                button.disabled = true;
+                button.textContent = t('unit.printLoading');
+                try {
+                    await loadAllForPrint();
+                } catch (err) {
+                    toast(errText(err), 'error');
+                } finally {
+                    button.disabled = false;
+                    button.textContent = original;
+                }
+            }
             window.print();
+        });
+
+        /* v0.13.0（F-5）：★ 我的清單 —— 按鈕顯示收藏數；開著時只看收藏的字。 */
+        function updateMyListButton() {
+            const button = document.getElementById('myListBtn');
+            if (!button) return;
+            const on = button.getAttribute('aria-pressed') === 'true';
+            button.textContent = on ? t('unit.myListCount', { n: window.PDVocab.myList.count() }) : t('unit.myList');
+            button.title = t('unit.myList');
+        }
+        updateMyListButton();
+        document.getElementById('myListBtn').addEventListener('click', (event) => {
+            const button = event.currentTarget;
+            const on = button.getAttribute('aria-pressed') !== 'true';
+            button.setAttribute('aria-pressed', on ? 'true' : 'false');
+            updateMyListButton();
+            if (state.currentUnitId) reloadUnit({ keepForm: true });
+        });
+        document.getElementById('missingZhToggle').addEventListener('change', () => {
+            if (state.currentUnitId) reloadUnit({ keepForm: true });
+        });
+        /* 取消收藏時：按鈕數字要更新；如果正開著「我的清單」，那一列要立刻消失 */
+        window.addEventListener('pd:mylist', () => {
+            updateMyListButton();
+            const button = document.getElementById('myListBtn');
+            if (button && button.getAttribute('aria-pressed') === 'true' && state.currentUnitId) reloadUnit({ keepForm: true });
         });
         document.getElementById('loginForm').addEventListener('submit', doLogin);
         document.getElementById('passwordForm').addEventListener('submit', submitPassword);

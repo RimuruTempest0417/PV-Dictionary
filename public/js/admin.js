@@ -1302,6 +1302,12 @@
             }
             if (button.dataset.action === 'delete-entry') deleteEntry(entryId, button);
             if (button.dataset.action === 'upload-audio') openAudioModal(entryId);
+            /* v0.13.0（F-5）：★ 我的清單（存自己的瀏覽器，不用帳號） */
+            if (button.dataset.action === 'star-entry') {
+                const on = window.PDVocab.myList.toggle(entryId);
+                window.PDVocab.refreshStar(entryId);
+                if (on) toast(window.PDI18n.t('myList.added', { word: (window.PDState.entries || []).find((e) => String(e.id) === String(entryId))?.headword || '' }));
+            }
         });
         for (const button of document.querySelectorAll('#pendingBatch [data-batch]')) {
             button.addEventListener('click', () => reviewBatch(button.dataset.batch));

@@ -1,9 +1,54 @@
 /* 生字清單的呈現與過濾
  * 只負責「畫出來」與「過濾」；資料的讀寫在 app.js／admin.js。
+ * v0.13.0（F-5）：多了「我的清單」——存在**自己的瀏覽器**（localStorage），不用帳號。
  */
 (function () {
     const { el, clear } = window.PDUI;
     const t = (key, vars) => window.PDI18n.t(key, vars);
+
+    /* ---------------- 我的清單（F-5，學生端） ----------------
+     * 為什麼存在瀏覽器：學生沒有帳號（也不用登入就能查生字），所以「我收藏的字」只存在他自己的裝置。
+     * 換裝置或清掉瀏覽器資料就會不見 —— 這是刻意的取捨（站內說明有寫）。
+     * 無痕模式可能禁止 localStorage：一律用 try/catch，壞掉時功能失效但網站照常運作。 */
+    const MY_LIST_KEY = 'pd.myList';
+
+    function loadMyList() {
+        try {
+            const raw = window.localStorage.getItem(MY_LIST_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return new Set(Array.isArray(parsed) ? parsed.map((id) => String(id)) : []);
+        } catch (error) {
+            return new Set();
+        }
+    }
+
+    let myList = loadMyList();
+
+    function saveMyList() {
+        try {
+            window.localStorage.setItem(MY_LIST_KEY, JSON.stringify([...myList]));
+        } catch (error) { /* 無痕模式／配額滿：功能失效，但不要讓網站壞掉 */ }
+    }
+
+    function myListIds() { return [...myList]; }
+    function myListHas(id) { return myList.has(String(id)); }
+    function myListCount() { return myList.size; }
+
+    function myListToggle(id) {
+        const key = String(id);
+        if (myList.has(key)) myList.delete(key);
+        else myList.add(key);
+        saveMyList();
+        /* app.js 聽這個事件：如果正開著「我的清單」篩選，取消收藏就要把那一列拿掉 */
+        window.dispatchEvent(new CustomEvent('pd:mylist', { detail: { id: key, count: myList.size, on: myList.has(key) } }));
+        return myList.has(key);
+    }
+
+    function myListClear() {
+        myList = new Set();
+        saveMyList();
+        window.dispatchEvent(new CustomEvent('pd:mylist', { detail: { id: null, count: 0, on: false } }));
+    }
 
     /* 審核狀態的文字隨語言變化，所以用函式而不是常數表 */
     function statusLabel(status) {
@@ -35,8 +80,25 @@
         ].some((value) => String(value || '').toLowerCase().includes(key)));
     }
 
+    function starButton(entry, starred) {
+        const on = starred(entry.id);
+        return el('button', {
+            class: `star-btn${on ? ' is-on' : ''}`,
+            text: on ? '★' : '☆',
+            attrs: {
+                type: 'button',
+                'data-action': 'star-entry',
+                'data-entry-id': entry.id,
+                'aria-pressed': on ? 'true' : 'false',
+                'aria-label': t('myList.toggle', { word: entry.headword }),
+                title: t('myList.toggle', { word: entry.headword })
+            }
+        });
+    }
+
     function entryCard(entry, options) {
         const opts = options || {};
+        const starred = opts.starred || myListHas;
         const speakBtn = el('button', {
             class: 'speak-btn',
             text: '🔊',
@@ -110,7 +172,9 @@
 
         const children = [speakBtn, main];
         if (actions.length) children.push(el('div', { class: 'vocab-actions' }, actions));
-        return el('li', { class: 'vocab-item', dataset: { entryId: entry.id } }, children);
+        /* ★ 在最外層（不放在 .vocab-actions：那是老師的編輯區，列印與窄螢幕都會被隱藏／擠掉） */
+        return el('li', { class: 'vocab-item', dataset: { entryId: entry.id } },
+            [starButton(entry, starred)].concat(children));
     }
 
     /* entries 已由呼叫端過濾；這裡只負責排序（已發佈在前、待審核在後） */
@@ -125,21 +189,42 @@
             || (a.id - b.id));
     }
 
+    /* 字母順序（B-9）：列印學習單用。生字不分大小寫、同字再照 id。 */
+    function sortAlphabetical(entries) {
+        return entries.slice().sort((a, b) => {
+            const left = String(a.headword || '').toLowerCase();
+            const right = String(b.headword || '').toLowerCase();
+            if (left !== right) return left < right ? -1 : 1;
+            return (a.id || 0) - (b.id || 0);
+        });
+    }
+
     function render(entries, options) {
         const opts = options || {};
         const list = document.getElementById('vocabList');
         const empty = document.getElementById('vocabEmpty');
         if (!list) return { shown: 0, total: 0 };
         clear(list);
-        const rows = sortForDisplay(filterEntries(entries, opts.query));
+        const filtered = filterEntries(entries, opts.query);
+        const rows = opts.alphabetical ? sortAlphabetical(filtered) : sortForDisplay(filtered);
         for (const entry of rows) list.appendChild(entryCard(entry, opts));
         if (empty) {
             empty.hidden = rows.length > 0;
             empty.textContent = rows.length === 0 && (opts.total || 0) > 0
                 ? t('unit.noMatch')
-                : t('unit.empty');
+                : (opts.emptyText || t('unit.empty'));
         }
         return { shown: rows.length, total: (opts.total !== undefined ? opts.total : entries.length) };
+    }
+
+    /* 只更新某一顆 ★（不重畫整份清單，捲動位置才不會跳掉） */
+    function refreshStar(entryId) {
+        const on = myListHas(entryId);
+        document.querySelectorAll(`.star-btn[data-entry-id="${entryId}"]`).forEach((button) => {
+            button.textContent = on ? '★' : '☆';
+            button.classList.toggle('is-on', on);
+            button.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
     }
 
     /* 播放一顆 🔊：正確反映「有老師錄音 / 用 TTS」兩種來源 */
@@ -168,5 +253,9 @@
         }
     }
 
-    window.PDVocab = { render, filterEntries, sortForDisplay, speakEntry, statusLabel };
+    window.PDVocab = {
+        render, filterEntries, sortForDisplay, sortAlphabetical, speakEntry, statusLabel, refreshStar,
+        /* F-5：我的清單 */
+        myList: { ids: myListIds, has: myListHas, count: myListCount, toggle: myListToggle, clear: myListClear }
+    };
 })();

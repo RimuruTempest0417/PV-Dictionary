@@ -85,6 +85,20 @@
             ids: ['playAllBtn', 'vocabList'],
             covers: ['playAllBtn']
         },
+        /* v0.13.0（B-9）老師：列印學習單 */
+        {
+            id: 'printWork', audience: 'teacher',
+            title: 'guide.print.title', steps: ['guide.print.s1', 'guide.print.s2', 'guide.print.s3'],
+            ids: ['printBtn', 'printZh', 'printExample', 'printBlankZh', 'printAlpha'],
+            covers: ['printBtn', 'printBlankZh', 'printAlpha']
+        },
+        /* v0.13.0（F-5）學生：我的清單與「只看沒有中文解釋的字」 */
+        {
+            id: 'myList', audience: 'student',
+            title: 'guide.myList.title', steps: ['guide.myList.s1', 'guide.myList.s2'],
+            ids: ['myListBtn', 'missingZhToggle'],
+            covers: ['myListBtn', 'missingZhToggle']
+        },
         {
             id: 'reviewBatch', audience: 'teacher',
             title: 'guide.reviewBatch.title', steps: ['guide.reviewBatch.s1', 'guide.reviewBatch.s2'],

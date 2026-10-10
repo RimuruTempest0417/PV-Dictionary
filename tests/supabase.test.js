@@ -630,7 +630,28 @@ test('視窗化資料層（D-11）：單元詳情頁只向資料庫要「這一�
     assert.equal(page.rows.every((row) => String(row.unit_id) === String(unitA.id)), true, '不可以混到別的單元');
     assert.deepEqual(page.rows.map((row) => row.headword), ['a3', 'a4'], '排序要照 sort_order');
 
-    const pageCalls = fake.calls.slice(callsBeforePage).filter((call) => call.table === 'dict_entries');
+    /* v0.13.0（F-5）：兩個學生端篩選要真的變成資料庫條件 —— 不能只在前端過濾，
+     * 否則「我的清單」與「只看沒有中文解釋的字」只找得到已載入的那一頁。 */
+    await store.runWithContext(context, async () => {
+        await store.listEntriesPage({ unitId: unitA.id, missingZh: true, page: 1, perPage: 2 });
+    });
+    const lastEntryCall = () => fake.calls.filter((call) => call.table === 'dict_entries').slice(-1)[0].url;
+    assert.ok(lastEntryCall().includes('zh_meaning=is.null'), `沒有中文的篩選要下推資料庫：${lastEntryCall()}`);
+
+    await store.runWithContext(context, async () => {
+        await store.listEntriesPage({ unitId: unitA.id, ids: [3, 4], page: 1, perPage: 2 });
+    });
+    assert.ok(lastEntryCall().includes('id=in.(3,4)'), `我的清單要用 id=in.(…)：${lastEntryCall()}`);
+
+    /* 沒給 ids（undefined）＝ 不篩選：網址裡不可以冒出 id=in. */
+    await store.runWithContext(context, async () => {
+        await store.listEntriesPage({ unitId: unitA.id, page: 1, perPage: 2 });
+    });
+    assert.ok(!lastEntryCall().includes('id=in.'), `沒帶 ids 時不該有清單條件：${lastEntryCall()}`);
+
+    /* （上面 v0.13.0 的兩個篩選測試也在同一區段呼叫了 listEntriesPage，所以這裡只取第一次：
+     *   一次 listEntriesPage 只打一次資料庫 —— 這才是這條斷言的用意） */
+    const pageCalls = fake.calls.slice(callsBeforePage).filter((call) => call.table === 'dict_entries').slice(0, 1);
     assert.equal(pageCalls.length, 1, '一頁只打一次資料庫');
     assert.match(String(pageCalls[0].url || ''), /limit=2/, '要用 limit（資料庫端分頁）');
     assert.match(String(pageCalls[0].url || ''), /offset=2/, '要用 offset');
