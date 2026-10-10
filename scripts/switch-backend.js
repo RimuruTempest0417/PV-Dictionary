@@ -152,6 +152,34 @@ function switchTo(target) {
     process.exit(1);
 }
 
+/* v0.10.0：JWT 輪替（演練或正式）—— 重新簽一張並寫回 .env。
+ * ★ 重要：換 token ≠ 撤銷舊 token —— 同一個簽章金鑰簽出來的 token 在到期前都還有有效。
+ *   要「立刻撤銷舊 token」必須換簽章金鑰並更新 Neon 的 JWKS（步驟見 docs/搬家到Neon.md）。 */
+function rotateJwt() {
+    const { lines, map } = readEnv();
+    const url = map.get(KEY_URL) || '';
+    if (!/neon\.tech/.test(url)) {
+        console.error('✖ 目前 .env 不是指向 Neon，沒有 JWT 可以輪替（先 --status 看看）');
+        process.exit(1);
+    }
+    const backup = backupEnv();
+    const audience = map.get('NEON_JWT_AUDIENCE') || 'gary-dictionary';
+    const token = execFileSync('node', [path.join(ROOT, 'scripts', 'neon-jwt.js'), '--quiet', `--aud=${audience}`], {
+        encoding: 'utf8', cwd: ROOT
+    }).trim();
+    if (!token || token.split('.').length !== 3) {
+        console.error('✖ 簽不出 JWT（先跑 node scripts/neon-jwt.js --make-keys 產生金鑰）');
+        process.exit(1);
+    }
+    setVar(lines, KEY_TOKEN, token);
+    writeEnv(lines);
+    const info = jwtInfo(token);
+    console.log(`✔ 已重新簽發 JWT：role=${info.role}、aud=${audience}、還有 ${info.days} 天到期`);
+    console.log(`  更換前的 .env 已備份為 ${backup}`);
+    console.log('  同步到 Vercel：node scripts/vercel-env.js --push-all --deploy');
+    console.log('  ★ 舊 token 到期前仍然有效；要立刻撤銷得換簽章金鑰（docs/搬家到Neon.md）');
+}
+
 function rollback() {
     const dir = ROOT;
     const candidates = fs.readdirSync(dir).filter((name) => name.startsWith('.env.bak-')).sort();
@@ -171,9 +199,10 @@ const arg = (name) => {
 };
 
 if (process.argv.includes('--status')) status();
+else if (process.argv.includes('--rotate-jwt')) rotateJwt();
 else if (arg('to')) switchTo(arg('to'));
 else if (process.argv.includes('--rollback')) rollback();
 else {
-    console.log('用法：node scripts/switch-backend.js [--status | --to=neon | --to=supabase | --rollback]');
+    console.log('用法：node scripts/switch-backend.js [--status | --to=neon | --to=supabase | --rotate-jwt | --rollback]');
     process.exit(1);
 }
