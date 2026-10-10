@@ -629,29 +629,60 @@ async function main() {
             gradeForm.code && gradeForm.name && gradeForm.grade, JSON.stringify(gradeForm));
         check('封面面板與封面分頁都移除（v0.5.0）', gradeForm.coverPanel && gradeForm.coverTab, JSON.stringify(gradeForm));
 
+        /* ★ 修正（2026-10-10）：這裡以前填的是【9-10】剛建過的 'S2' → 伺服器回 409 DUPLICATE_GRADE，
+         *   而下面的斷言只檢查「資料庫有 S2」（本來就有）→ 假通過（建立年級的路徑其實沒被驗到）。
+         *   現在改用全新的 'S3'，並明確驗「先前沒有 → 現在只有一筆」。 */
+        const gradesBefore = store.listBooks({ includeUnpublished: true }).map((b) => b.grade);
         await browser.evaluate(`
-            document.getElementById('fBookGrade').value = 'S2';
+            document.getElementById('fBookGrade').value = 'S3';
             document.getElementById('bookForm').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
             return true;
         `);
         /* demo-check 沒有 waitForStore（那是 users-check 的輔助函式）→ 自己等 */
         for (let i = 0; i < 40; i += 1) {
-            if (store.listBooks({ includeUnpublished: true }).some((b) => b.grade === 'S2')) break;
+            if (store.listBooks({ includeUnpublished: true }).some((b) => b.grade === 'S3')) break;
             await sleep(100);
         }
-        check('建立年級之後資料庫真的有一筆', store.listBooks({ includeUnpublished: true }).some((b) => b.grade === 'S2'));
+        const gradesAfter = store.listBooks({ includeUnpublished: true }).map((b) => b.grade);
+        check('建立年級之後資料庫真的多了一筆（S3；先前不存在，而且只有一筆）',
+            !gradesBefore.includes('S3') && gradesAfter.filter((grade) => grade === 'S3').length === 1,
+            JSON.stringify({ before: gradesBefore, after: gradesAfter }));
 
-        /* 書架：兩個年級、沒有書名、沒有封面圖 */
+        /* 同一個年級再建一次：要顯示錯誤，而且不能多一筆（不是靜默失敗）。
+         * ★ 先等應用程式把「建立成功」的收尾跑完（它會 showPanel(null) 並跳進新年級的目錄）：
+         *   太早按「新增年級」，表單會被它後面的 showPanel(null) 蓋掉（第一次寫就踩到這個競態）。 */
+        await browser.waitFor(`document.getElementById('unitsView').hidden === false && document.getElementById('unitsTitle').textContent.includes('S3')`, { timeout: 8000 });
+        await browser.evaluate(`document.getElementById('newBookBtn').click(); return true;`);
+        await browser.waitFor(`document.getElementById('bookForm').hidden === false`, { timeout: 8000 });
+        await browser.evaluate(`
+            document.getElementById('bookMsg').textContent = '';   /* 先清乾淨，免得讀到上一則訊息 */
+            document.getElementById('fBookGrade').value = 'S3';
+            document.getElementById('bookForm').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            return true;
+        `);
+        await sleep(700);
+        const dupCreate = await browser.evaluate(`return {
+            text: document.getElementById('bookMsg').textContent.trim(),
+            className: document.getElementById('bookMsg').className
+        };`);
+        /* 語言無關的斷言：訊息非空 + 表單訊息是「錯誤」樣式（is-error），不是成功訊息 */
+        check('重複建立同一個年級會顯示錯誤（不是靜默失敗、也不是成功訊息）',
+            dupCreate.text.length > 0 && dupCreate.className.includes('is-error'),
+            JSON.stringify(dupCreate));
+        check('重複建立被擋時沒有多出一筆（S3 仍然只有一筆）',
+            store.listBooks({ includeUnpublished: true }).filter((b) => b.grade === 'S3').length === 1);
+
+        /* 書架：三個年級、沒有書名、沒有封面圖 */
         await browser.evaluate(`document.getElementById('adminToggleBtn').click(); return true;`);
         await browser.evaluate(`document.getElementById('unitsBackBtn').click(); return true;`);
-        await browser.waitFor(`document.querySelectorAll('#bookShelf [data-book-id]').length >= 2`, { timeout: 8000 });
+        await browser.waitFor(`document.querySelectorAll('#bookShelf [data-book-id]').length >= 3`, { timeout: 8000 });
         const shelfAfter = await browser.evaluate(`return {
             grades: Array.from(document.querySelectorAll('#bookShelf [data-book-id]')).map((b) => b.textContent.trim()),
             buttons: document.querySelectorAll('#bookShelf [data-book-id]').length,
             imgs: document.querySelectorAll('#bookShelf img').length
         };`);
-        check('書架看得到兩個年級（S1／S2）',
-            shelfAfter.grades.some((t) => t.includes('S1')) && shelfAfter.grades.some((t) => t.includes('S2')),
+        check('書架看得到三個年級（S1／S2／S3）',
+            ['S1', 'S2', 'S3'].every((grade) => shelfAfter.grades.some((t) => t.includes(grade))),
             JSON.stringify(shelfAfter.grades));
         check('書架沒有書名、沒有封面圖（v0.5.0）',
             shelfAfter.imgs === 0 && shelfAfter.grades.every((t) => !t.includes('Book ')), JSON.stringify(shelfAfter));
