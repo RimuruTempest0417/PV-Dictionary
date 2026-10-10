@@ -44,8 +44,8 @@
 |---|---|---|
 | 語法 | `npm run check:syntax` | 72/72 通過 |
 | 單元／API／守門 | `npm test` | 159 通過 / 0 失敗 |
-| 真 Chrome（本機） | `npm run check:browser` | NUMBER_BROWSER |
-| 正式站真瀏覽器 | `npm run check:live-browser` | NUMBER_LIVECHECK |
-| 線上驗收 ／ 健康檢查 | `live-verify` ／ `uptime` | NUMBER_LIVEVERIFY ／ NUMBER_UPTIME |
+| 真 Chrome（本機） | `npm run check:browser` | **323 項全綠**（demo 114 ＋ empty 33 ＋ lang 40 ＋ users 136） |
+| 正式站真瀏覽器 | `npm run check:live-browser` | 16 通過 / 0 失敗 |
+| 線上驗收 ／ 健康檢查 | `live-verify` ／ `uptime` | 26 通過 / 0 失敗 / 1 略過 ／ 全部正常（版本 0.6.4） |
 
 > 截圖照你的規矩：我照你的視窗尺寸（1512×949）在 A−／A／A+ 各截一張親眼確認，**看完已刪除**。
