@@ -92,6 +92,21 @@ function fakeSupabase() {
             if (fn === 'dict_db_size') {
                 return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify(flags.dbSize) };
             }
+            if (fn === 'dict_unit_audio_counts') {
+                /* v0.11.0（D-11）：每個單元「有老師錄音的生字數」= count(distinct entry_id)，
+                 * 且只算 source='teacher'（與 lib/store/*.js 的 findTeacherAudio 同一個判準）。 */
+                const withTeacherAudio = new Set(db.dict_audio
+                    .filter((row) => row.source === 'teacher')
+                    .map((row) => String(row.entry_id)));
+                const bucket = new Map();
+                for (const row of db.dict_entries) {
+                    if (!withTeacherAudio.has(String(row.id))) continue;
+                    const key = String(row.unit_id);
+                    bucket.set(key, (bucket.get(key) || 0) + 1);
+                }
+                const rows = Array.from(bucket.entries()).map(([unit_id, n]) => ({ unit_id: Number(unit_id), n }));
+                return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify(rows) };
+            }
             return { ok: false, status: 404, text: async () => JSON.stringify({ message: `unknown rpc ${fn}`, code: 'PGRST202' }) };
         }
         const table = tableOf(parsed.pathname);
@@ -99,7 +114,7 @@ function fakeSupabase() {
         const wanted = idFilter && idFilter.startsWith('eq.') ? idFilter.slice(3) : null;
         const select = parsed.searchParams.get('select');
         const body = init.body ? JSON.parse(init.body) : null;
-        calls.push({ method, table, wanted, body, headers: init.headers, select });
+        calls.push({ method, table, wanted, body, headers: init.headers, select, url: String(url) });
 
         if (!db[table]) throw new Error(`假 PostgREST 沒有這張表：${table}`);
         if (flags.failWrites && method !== 'GET') {
@@ -128,6 +143,26 @@ function fakeSupabase() {
             let matched = wanted ? db[table].filter((r) => String(r.id) === String(wanted)) : db[table].slice();
             for (const filter of inFilters) {
                 matched = matched.filter((row) => filter.ids.includes(String(row[filter.key])));
+            }
+            /* v0.11.0（D-11）：單元頁改成「資料庫端分頁」，所以假 PostgREST 要看得懂一般欄位的
+             * eq.（unit_id=eq.1、status=eq.pending）與 or=(…ilike.*搜尋字*…) —— 不然它會忽略
+             * 這些篩選、把整張表回給測試，測試就會「假裝通過」。 */
+            for (const [key, value] of parsed.searchParams.entries()) {
+                if (['select', 'order', 'limit', 'offset', 'or'].includes(key)) continue;
+                if (!value.startsWith('eq.')) continue;
+                const expected = decodeURIComponent(value.slice(3));
+                matched = matched.filter((row) => String(row[key]) === expected);
+            }
+            const orFilter = parsed.searchParams.get('or');
+            if (orFilter) {
+                const clauses = orFilter.replace(/^\(/, '').replace(/\)$/, '').split(',')
+                    .map((clause) => clause.trim()).filter(Boolean);
+                matched = matched.filter((row) => clauses.some((clause) => {
+                    const [column, pattern] = clause.split('.ilike.');
+                    if (pattern === undefined) return false;
+                    const needle = decodeURIComponent(pattern.replace(/\*/g, '')).toLowerCase();
+                    return String(row[column] || '').toLowerCase().includes(needle);
+                }));
             }
             /* Ordering matters: the windowed store picks the next id with order=id.desc&limit=1,
              * and the real PostgREST sorts. Without sorting here the fake returns row #1 and the
@@ -534,20 +569,23 @@ test('v0.6.1：HAS_UPDATED_AT 與 schema 清單一致（欄位有無的唯一來
  * v0.6.1（D-1b）視窗化資料層
  * ============================================================ */
 
-test('視窗化資料層：看一個單元不會把整張生字表抓下來，而且沒載入的範圍會大聲失敗', async () => {
+test('視窗化資料層（D-11）：單元詳情頁只向資料庫要「這一頁」，不再搬整個單元的生字', async () => {
     const fake = fakeSupabase();
-    /* 先用 full 模式把資料準備好（模擬資料庫已經有兩本、兩個單元、各 3 個生字） */
+    /* 先用 full 模式把資料準備好：兩個單元，A 有 5 個生字（其中 2 個有老師錄音） */
     const seedStore = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k', hydrateTtlMs: 0 });
     await seedStore.hydrate({ full: true });
     const book = seedStore.createBook({ code: 'B', name: 'B', grade: 'S1', sort_order: 1, is_published: true });
     const unitA = seedStore.createUnit({ book_id: book.id, unit_no: 1, title: 'A', sort_order: 1, is_published: true });
     const unitB = seedStore.createUnit({ book_id: book.id, unit_no: 2, title: 'B', sort_order: 2, is_published: true });
-    for (const [unit, tag] of [[unitA, 'a'], [unitB, 'b']]) {
-        for (let i = 1; i <= 3; i += 1) {
-            seedStore.createEntry({
+    for (const [unit, tag, count] of [[unitA, 'a', 5], [unitB, 'b', 3]]) {
+        for (let i = 1; i <= count; i += 1) {
+            const entry = seedStore.createEntry({
                 unit_id: unit.id, headword: `${tag}${i}`, headword_norm: `${tag}${i}`,
                 status: 'published', sort_order: i, created_by: 'seed'
             });
+            if (tag === 'a' && i <= 2) {
+                seedStore.createAudio({ entry_id: entry.id, source: 'teacher', mime: 'audio/webm', bytes: 10, data: 'AA' });
+            }
         }
     }
     await seedStore.flush();
@@ -556,32 +594,68 @@ test('視窗化資料層：看一個單元不會把整張生字表抓下來，�
     const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k', hydrateTtlMs: 0 });
     const context = store.attach();
     await store.hydrate({ full: false });
+    const callsBeforePrefetch = fake.calls.length;
     await store.runWithContext(context, async () => {
         await store.prefetch({ method: 'GET', path: `/units/${unitA.id}`, query: {}, body: {} });
     });
 
-    const callsBefore = fake.calls.length;
-    let rows = [];
+    /* ★ D-11 的關鍵：單元詳情頁的 prefetch「連一次生字都不抓」（以前是整個單元，
+     *   一萬個生字時要 2,575 ms）—— 生字改成下面 listEntriesPage() 按頁要。 */
+    const prefetchCalls = fake.calls.slice(callsBeforePrefetch);
+    assert.equal(prefetchCalls.filter((call) => call.table === 'dict_entries').length, 0,
+        '單元詳情頁不可以再抓整個單元的生字（那正是規模天花板）');
+    assert.equal(prefetchCalls.filter((call) => call.table === 'rpc:dict_unit_audio_counts').length, 1,
+        '錄音數改用資料庫聚合（dict_unit_audio_counts）');
+
+    /* 沒有載入的生字 → 舊介面 listEntries() 要「大聲失敗」，不能靜默回空 */
     let missing = null;
     store.runWithContext(context, () => {
-        rows = store.listEntries({ unitId: unitA.id });
         try {
-            store.listEntries({ unitId: unitB.id });          /* 沒有載入的單元 → 應該拋錯 */
+            store.listEntries({ unitId: unitA.id });
         } catch (err) {
             missing = err;
         }
     });
-
-    assert.equal(rows.length, 3, '單元 A 的 3 個生字要看得到');
-    assert.equal(rows.every((row) => String(row.unit_id) === String(unitA.id)), true, '不可以混到別的單元');
-    assert.ok(missing, '沒有載入的範圍要拋錯，不能靜默回空');
+    assert.ok(missing, '沒載入的範圍要拋錯，不能靜默回空');
     assert.equal(missing.code, 'STORE_WINDOW_MISSING');
 
-    /* 關鍵：這一段沒有再打任何資料庫（不含整表查詢），而且抓的是單元範圍 */
-    const windowCalls = fake.calls.slice(callsBefore);
-    assert.equal(windowCalls.filter((call) => call.table === 'dict_entries').length, 0, '讀取時不應該再打資料庫');
-    assert.equal(store.planFor({ method: 'GET', path: `/units/${unitA.id}` }).entryUnits.has(String(unitA.id)), true);
-    assert.equal(store.planFor({ method: 'GET', path: `/units/${unitA.id}` }).entryUnits.size, 1, '只抓被指定的那一個單元');
+    /* 要生字就呼叫 listEntriesPage()：一次只拿一頁，total 來自資料庫的 count */
+    const callsBeforePage = fake.calls.length;
+    let page = null;
+    await store.runWithContext(context, async () => {
+        page = await store.listEntriesPage({ unitId: unitA.id, page: 2, perPage: 2 });
+    });
+    assert.equal(page.rows.length, 2, '第二頁要有 2 筆（per_page=2）');
+    assert.equal(page.total, 5, 'total 是符合條件的總筆數，不是這一頁的數量');
+    assert.equal(page.rows.every((row) => String(row.unit_id) === String(unitA.id)), true, '不可以混到別的單元');
+    assert.deepEqual(page.rows.map((row) => row.headword), ['a3', 'a4'], '排序要照 sort_order');
+
+    const pageCalls = fake.calls.slice(callsBeforePage).filter((call) => call.table === 'dict_entries');
+    assert.equal(pageCalls.length, 1, '一頁只打一次資料庫');
+    assert.match(String(pageCalls[0].url || ''), /limit=2/, '要用 limit（資料庫端分頁）');
+    assert.match(String(pageCalls[0].url || ''), /offset=2/, '要用 offset');
+    assert.equal(String((pageCalls[0].headers || {}).Prefer || ''), 'count=exact', '要 Prefer: count=exact');
+    assert.match(String(pageCalls[0].url || ''), /unit_id=eq\./, '要在資料庫端就限定單元');
+
+    /* 搜尋也下推到資料庫（or=…ilike…），不是在 JS 過濾 */
+    let found = null;
+    await store.runWithContext(context, async () => {
+        found = await store.listEntriesPage({ unitId: unitA.id, q: 'a3', page: 1, perPage: 10 });
+    });
+    assert.equal(found.rows.length, 1);
+    assert.equal(found.rows[0].headword, 'a3');
+    assert.equal(found.total, 1, 'total 也要反映搜尋結果');
+
+    /* 錄音數（D-3 的每單元上限）走聚合數字：A 有 2 個生字有老師錄音 */
+    store.runWithContext(context, () => {
+        assert.equal(store.countUnitAudio(unitA.id), 2, '錄音數要來自資料庫聚合');
+    });
+
+    /* 相對地：需要整個單元的路由（新增生字要檢查重複與排序）照舊載入整個單元 */
+    assert.equal(store.planFor({ method: 'POST', path: `/units/${unitA.id}/entries` }).entryUnits.has(String(unitA.id)), true,
+        '新增生字的路由仍需要整個單元');
+    assert.equal(store.planFor({ method: 'GET', path: `/units/${unitA.id}` }).entryUnits.size, 0,
+        '單元詳情頁不載入整個單元');
     assert.equal(store.planFor({ method: 'GET', path: '/admin/stats' }).counts, true, '統計頁只抓計數');
 
     fake.restore();

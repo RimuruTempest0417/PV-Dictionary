@@ -61,13 +61,11 @@ const ENTRY_PAGE_SIZE = 60;
 const ENTRY_PAGE_MAX = 200;
 
 /* 生字搜尋：一個字串比對生字、中文解釋、英文解釋與詞性（全部轉小寫） */
-function matchesEntryQuery(entry, query) {
-    if (!query) return true;
-    const haystack = [entry.headword, entry.zh_meaning, entry.en_definition, entry.part_of_speech, entry.ipa_us]
-        .map((value) => String(value || '').toLowerCase())
-        .join(' ');
-    return haystack.includes(query);
-}
+/* 搜尋比對的實作現在在資料層（v0.11.0／D-11 把搜尋下推到資料庫，路由不再抓整個單元來過濾）：
+ *   - PostgREST 模式：lib/store/supabase.js 的 searchFilter() → `or=(…ilike.*q*…)`
+ *   - 本機 JSON 模式：lib/store/json.js 的 listEntriesPage() → JS 過濾
+ * 兩邊用的是同一組欄位、同一種比對（不分大小寫）：headword／zh_meaning／en_definition／
+ * part_of_speech／ipa_us。改欄位時兩邊都要改（tests/api.test.js 的搜尋測試會抓到不一致）。 */
 
 /* 書本封面（老師用手機拍封面後上傳）：只收圖片，2MB 以內 */
 const COVER_MIME_WHITELIST = ['image/jpeg', 'image/png', 'image/webp'];
@@ -196,7 +194,7 @@ function unitView(unit, store, { includeHidden = true } = {}) {
         is_published: unit.is_published !== false,
         updated_at: unit.updated_at || null,
         /* D-3：這個單元已有幾段老師錄音（上限見 AUDIO_MAX_PER_UNIT） */
-        audio_count: store.listEntries({ unitId: unit.id }).filter((e) => store.findTeacherAudio(e.id)).length,
+        audio_count: store.countUnitAudio(unit.id),
         audio_limit: AUDIO_MAX_PER_UNIT,
         entry_count: store.countEntries(unit.id, includeHidden ? null : PUBLISHED_ONLY),
         published_count: store.countEntries(unit.id, PUBLISHED_ONLY),
@@ -576,7 +574,7 @@ function createApp(options = {}) {
         res.json({ book: publicBook(book), units });
     });
 
-    app.get('/api/units/:id', (req, res) => {
+    app.get('/api/units/:id', async (req, res) => {
         setReadCache(req, res);
         const unit = store.getUnit(req.params.id);
         if (!unit) return res.status(404).json({ error: msg('UNIT_NOT_FOUND'), code: 'UNIT_NOT_FOUND' });
@@ -602,19 +600,33 @@ function createApp(options = {}) {
             : ENTRY_PAGE_SIZE;
         const query = str(req.query.q || '', 60).trim().toLowerCase();
         const wantedStatus = str(req.query.status || '', 20);
-        let rows = store.listEntries({ unitId: unit.id, statuses });
-        if (wantedStatus && ENTRY_STATUSES.includes(wantedStatus)) {
-            /* 認識的狀態就照它過濾：
-             *   - 看得到這個狀態的身分 → 只回那些（例如老師抓 status=pending 的待審核佇列）
-             *   - 看不到的身分（訪客問 pending）→ 回空清單，不透露別人的草稿
-             * 不認識的值（例如 ?status=all）一律忽略，免得打錯字變成「這個單元沒有生字」的鬼故事。 */
-            const canSeeStatus = statuses === null || statuses.includes(wantedStatus);
-            rows = canSeeStatus ? rows.filter((entry) => entry.status === wantedStatus) : [];
+        /* ★ D-11（v0.11.0）：改成「向資料庫要這一頁」。
+         *   以前是 store.listEntries(整個單元) → 在 JS 過濾 → 切片：一個單元 10,000 個生字時
+         *   要 2,575 ms、24 條併發有 1,077/1,096 個請求回 503（實測，見規劃書 D-11 與
+         *   docs/研究-Neon搬家評估.md）。現在 limit／offset／搜尋／狀態全在資料庫端做完，
+         *   只把「這一頁」搬進伺服器記憶體 —— 大單元也維持百毫秒級。 */
+        const knownStatus = wantedStatus && ENTRY_STATUSES.includes(wantedStatus);
+        /* 認識的狀態就照它過濾：
+         *   - 看得到這個狀態的身分 → 只回那些（例如老師抓 status=pending 的待審核佇列）
+         *   - 看不到的身分（訪客問 pending）→ 回空清單，不透露別人的草稿（連查都不用查）
+         * 不認識的值（例如 ?status=all）一律忽略，免得打錯字變成「這個單元沒有生字」的鬼故事。 */
+        const canSeeStatus = !knownStatus || statuses === null || statuses.includes(wantedStatus);
+        let total = 0;
+        let pageRows = [];
+        if (canSeeStatus) {
+            const result = await store.listEntriesPage({
+                unitId: unit.id,
+                statuses,
+                status: knownStatus ? wantedStatus : '',
+                q: query,
+                page,
+                perPage
+            });
+            pageRows = result.rows;
+            total = result.total;
         }
-        if (query) rows = rows.filter((entry) => matchesEntryQuery(entry, query));
-        const total = rows.length;
         const start = (page - 1) * perPage;
-        const entries = rows.slice(start, start + perPage)
+        const entries = pageRows
             .map((entry) => publicEntry(entry, store, { includeStatus: includeHidden || viewerCanEdit }));
         res.json({
             /* ★ 用 unitView（單一來源）才不會漏欄位：updated_at（樂觀鎖）與 audio_count／audio_limit（D-3） */
@@ -755,8 +767,10 @@ function createApp(options = {}) {
         const scoped = Roles.grantsFor(req.user, grants());
         return res.json({
             user: publicUser(req.user),
-            /* ★ 從 lib/capabilities.js 產生（唯一來源）：新增能力時不會再忘了補前端 */
-            permissions: Capabilities.permissionsFor(req.user),
+            /* ★ 從 lib/capabilities.js 產生（唯一來源）：新增能力時不會再忘了補前端
+             * ★ D-10：把這個人的授權一起帶進去 —— 被授權的人（例如被授權的學生）也算有 can_edit，
+             *   否則前端拿不到按鈕、後端卻編得動（兩邊說法不一致）。 */
+            permissions: Capabilities.permissionsFor(req.user, { grants: scoped }),
             grants: scoped
         });
     });

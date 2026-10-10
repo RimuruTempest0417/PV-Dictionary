@@ -33,6 +33,41 @@ const DRY = process.argv.includes('--dry-run');
 const KEEP = Number(arg('keep', 30));
 const APP_VERSION = require(path.join(ROOT, 'package.json')).version;
 
+/* 逐字記錄到**專案內**的 logs/backup.log（使用者 2026-10-10 指定）。
+ * ★ 為什麼不是讓 launchd 直接寫：launchd 在 ~/Documents 開檔會被 macOS TCC 擋掉，
+ *   整個 job 連啟動都失敗（實測 last exit code = 78: EX_CONFIG、job state = spawn failed）；
+ *   只有拿到「完全取硬碟存取權」的 node 寫得進去 → 所以由這裡自己寫。
+ *   plist 的 StandardOutPath 就只是技術後備（放在 ~/Library/Logs），正常情況用不到。
+ * logs/*.log 已被 .gitignore 的 *.log 排除，不會進版控。
+ * 寫不進去（例如唯讀環境）也不能讓備份失敗：只把 tee 關掉。 */
+const LOG_DIR = path.join(ROOT, 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'backup.log');
+const LOG_MAX = 512 * 1024;
+const stamp = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
+let logReady = false;
+try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    if (fs.existsSync(LOG_FILE) && fs.statSync(LOG_FILE).size > LOG_MAX) {
+        fs.renameSync(LOG_FILE, `${LOG_FILE}.1`);   /* 太大就輪替一份，避免無限長大 */
+    }
+    logReady = true;
+} catch (error) {
+    process.stderr.write(`（寫不了 ${LOG_FILE}：${error.message}；改為只印在標準輸出）\n`);
+}
+function tee(stream, parts) {
+    const line = parts.map((p) => (typeof p === 'string' ? p : String(p))).join(' ');
+    stream.write(`${line}\n`);
+    if (!logReady) return;
+    try {
+        fs.appendFileSync(LOG_FILE, `[${stamp()}] ${line}\n`);
+    } catch (error) {
+        logReady = false;
+    }
+}
+console.log = (...parts) => tee(process.stdout, parts);
+console.error = (...parts) => tee(process.stderr, parts);
+console.log(`===== 備份開始 ${stamp()}（app ${APP_VERSION}${DRY ? '，--dry-run' : ''}）=====`);
+
 function git(args, options = {}) {
     return execFileSync('git', args, Object.assign({ encoding: 'utf8', cwd: options.cwd || ROOT, stdio: options.stdio || 'pipe' }, options.extra || {}));
 }

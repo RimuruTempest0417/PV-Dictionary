@@ -172,3 +172,57 @@ test('權限對照表（C-2）：每一列指的 UI 元素與能力判斷都真�
     }
     assert.deepEqual(missing, [], missing.join('\n'));
 });
+
+/* ★ D-10（v0.11.0）：把「被授權的人」也算進能力，前後端不再各說一套。
+ *
+ * 修之前：後端 Roles.canEditUnit 認授權（被授權的學生編得動），但 Capabilities.check 只看角色
+ *   → /api/auth/me 回 can_edit:false → 前端把新增／修改按鈕藏起來（README 寫的卻是「被授權的人可以加入生字」）。
+ * 這裡從頭到尾走一遍真實流程：沒授權 → 有授權 → 打 API 真的編得動，確認三邊一致。 */
+test('權限對照表（C-2）／D-10：被授權的學生，能力說可以、後端也真的編得動', async (t) => {
+    const app = startServer(t);
+    const student = app.store.listUsers().find((user) => user.username === LOGIN_AS.student);
+    const adminCookie = await cookieFor(app.base, 'admin');
+    const studentCookie = await cookieFor(app.base, 'student');
+    const me = async () => (await fetch(`${app.base}/api/auth/me`, { headers: { Cookie: studentCookie } })).json();
+
+    /* (1) 還沒有授權：能力是 false（前端不顯示按鈕） */
+    const before = await me();
+    assert.equal(before.permissions.can_edit, false, '沒被授權的學生不該有 can_edit');
+    assert.equal(before.grants.length, 0, '不該有授權列');
+
+    /* (2) 管理員建立「這個單元可編輯」的授權（走真實 API，預設 can_edit=true） */
+    const created = await fetch(`${app.base}/api/admin/grants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify({ user_id: student.id, unit_id: app.ids.unit.id })
+    });
+    assert.equal(created.status, 201, '管理員要能建立授權');
+
+    /* (3) 有了授權：能力要變成 true（這就是 D-10 修的點） */
+    const after = await me();
+    assert.equal(after.permissions.can_edit, true, '被授權的學生要有 can_edit（前端才會顯示按鈕）');
+    assert.equal(after.grants.length, 1, '/api/auth/me 要同時回授權內容');
+
+    /* (4) 而且真的編得動（後端本來就允許；現在能力與 UI 也一致了） */
+    const post = await fetch(`${app.base}/api/units/${app.ids.unit.id}/entries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: studentCookie },
+        body: JSON.stringify({ headword: 'granted-word', zh_meaning: '被授權新增的字' })
+    });
+    assert.equal(post.status, 201, '被授權的學生要能新增生字');
+    const body = await post.json();
+    assert.equal(body.entry.status, 'pending', '不能直接發佈的人，新增一律先進待審核');
+
+    /* (5) 單元頁也要回 can_edit:true（前端據此顯示編輯 UI） */
+    const unitRes = await (await fetch(`${app.base}/api/units/${app.ids.unit.id}?per_page=50`, { headers: { Cookie: studentCookie } })).json();
+    assert.equal(unitRes.can_edit, true, '單元頁的 can_edit 要跟 /api/auth/me 說的一致');
+    assert.ok(unitRes.entries.some((entry) => entry.headword === 'granted-word' && entry.status === 'pending'),
+        '被授權者要能看到自己送出的待審核生字');
+
+    /* (6) 相對地：can_publish 不會因為「有授權列」就變 true（它要明確 true 才算，與 canPublishUnit 同規則） */
+    const publishCheck = Capabilities.permissionsFor(
+        { id: student.id, role: 'student' },
+        { grants: [{ user_id: student.id, unit_id: app.ids.unit.id, can_edit: true, can_publish: false }] }
+    );
+    assert.equal(publishCheck.can_publish, false, 'can_edit 授權不該順便給 can_publish');
+});

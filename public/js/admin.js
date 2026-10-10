@@ -5,6 +5,10 @@
     const { el, clear, toast, setFormMessage, formatDateTime } = window.PDUI;
     const api = window.PDApi;
     const t = (key, vars) => window.PDI18n.t(key, vars);
+    /* ★ 一定要在這裡自己定義：errText 原本只定義在 app.js 的 IIFE 裡（不是全域），
+     *   admin.js 的錯誤路徑每次都會丟 ReferenceError（正式站日誌 UNHANDLED_REJECTION），
+     *   導致「真正的錯誤訊息」被蓋掉。tests/frontend-scope.test.js 會守門。 */
+    const errText = (err) => window.PDI18n.errorMessage(err);
 
     let pendingCleanup = false;    /* 清理稽核紀錄的兩段式確認（第一次只預覽） */
 

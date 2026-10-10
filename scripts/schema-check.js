@@ -102,8 +102,8 @@ async function main() {
      * （我們的 service role 金鑰只能讀寫資料，不能改 schema）。沒建立時 PostgREST 回 404 PGRST202，
      * 症狀是「生字數整條失敗」與「容量百分比變成不知道」—— 要在這裡一眼看出來。 */
     console.log('③ 線上資料庫函式（v0.7.0 新增）');
-    for (const fn of ['dict_entry_counts', 'dict_db_size']) {
-        const payload = fn === 'dict_entry_counts' ? '{"unit_ids": null}' : '{}';
+    for (const fn of ['dict_entry_counts', 'dict_db_size', 'dict_unit_audio_counts']) {
+        const payload = fn === 'dict_db_size' ? '{}' : '{"unit_ids": null}';
         const res = await fetch(`${url}/rest/v1/rpc/${fn}`, {
             method: 'POST',
             headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },

@@ -3,7 +3,7 @@
 線上英文生字字典：學生**點年級 → 選單元 → 看生字表**（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.10.1（本機 Demo ＋ 線上版已上線；資料庫在 Neon）**
+- 目前版本：**v0.11.0（本機 Demo ＋ 線上版已上線；資料庫在 Neon）**
 - 規劃書（**待完成的事都在這**）：`docs/規劃書-待完成.md`｜決策與各版結果：`docs/規劃書-v0.0.1.md`｜部署：`docs/deploy-vercel.md`
 - 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie、介面預設英文可切中文
 - 資料層：**Neon（PostgreSQL）的 Data API**（PostgREST 相容）—— v0.10.0 從 Supabase 搬過去，**程式碼沒有改**
@@ -268,13 +268,16 @@ guest(訪客) < student(學生) < class_rep(科代表) < teacher(老師) < admin
 ```bash
 npm run check:syntax   # 所有 JS 語法檢查 + server.js 模組載入檢查
 npm run check:schema   # 程式要用的欄位 vs migrations/*.sql（不用網路）
-npm test               # 183 項：角色權限矩陣、資料層（JSON 與 Supabase）、schema 守門、路由快照與覆蓋、版本一致、i18n、
+npm test               # 186 項：角色權限矩陣（含「被授權的人也算有能力」）＋資料層（JSON 與 PostgREST／Neon）、
+                       #   schema 守門、路由快照與覆蓋、版本一致、i18n、前端跨檔誤用守門、視窗化資料層（含 D-11）、
                        #        說明頁分頁守門、權限對照表、.xlsx、連續播放、修改年級／樂觀鎖／錄音上限／生字表分頁、API 端到端
 npm run check:browser  # 四支真 Chrome 檢查（劇本 118 ＋ 空白起步 33 ＋ 語言切換 42 ＋ 帳號管理 136 ＝ 329 項）
 npm run check:live-browser  # 打正式站的真瀏覽器「訪客視角」檢查（16 項；不寫截圖、不下載、不登入）
 npm run perf:entries   # D-1 效能實測：一個單元塞 3000 個生字，量分頁省下多少（預設 3000）
 npm run check:deps     # 依賴套件弱點掃描（需要網路；--all 才含開發依賴）
 npm run uptime         # 線上健康檢查（版本／資料庫／公開讀取／首頁），失敗 exit 1
+npm run monitor        # 同上，但失敗會發 macOS 通知；launchd 每天 08:30 自動跑（D-8）
+                       #   逐字紀錄：logs/uptime.log（備份的是 logs/backup.log）
 npm run triage         # 巡檢錯誤日誌（唯讀，依出現次數分組）
 npm run usage          # 各表筆數與用量提醒
 npm run cleanup:logs   # 清理舊日誌（預設只預覽，--apply 才真的刪）
