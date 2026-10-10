@@ -79,6 +79,25 @@ async function main() {
              * 「監控說一切正常，其實根本沒量到容量」。 */
             record('資料庫容量（量不到，其餘照常）', true, usage ? String(usage.reason || 'unknown') : 'health 沒有回 usage');
         }
+
+        /* v0.10.0：搬到 Neon 後，後端的「金鑰」是我們自己簽的 JWT（帶到期日）。
+         * 過期就整個網站讀不到資料，所以要在到期前就先叫 —— 剩不到 30 天算失敗。
+         * 不是 JWT（例如原本 Supabase 的 service key）就跳過，不會誤報。 */
+        const token = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '');
+        const parts = token.split('.');
+        let exp = null;
+        if (parts.length === 3) {
+            try {
+                const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+                exp = Number(payload.exp) || null;
+            } catch (error) { exp = null; }
+        }
+        if (exp) {
+            const daysLeft = Math.floor((exp * 1000 - Date.now()) / 86400000);
+            record('資料庫金鑰效期（Neon JWT）', daysLeft > 30,
+                `還有 ${daysLeft} 天到期（${new Date(exp * 1000).toISOString().slice(0, 10)}）` +
+                (daysLeft <= 30 ? '（要重簽：node scripts/neon-jwt.js → 更新 .env → node scripts/vercel-env.js --push-all --deploy）' : ''));
+        }
     } catch (err) {
         record('健康端點（含資料庫）', false, err.name === 'AbortError' ? '逾時' : err.message);
     }

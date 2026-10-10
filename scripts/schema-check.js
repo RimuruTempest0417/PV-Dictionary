@@ -13,7 +13,7 @@
 require('dotenv').config();
 
 const path = require('path');
-const { EXPECTED_COLUMNS, compareWithMigrations, compareWithLive } = require('../lib/schema');
+const { EXPECTED_COLUMNS, compareWithMigrations, compareWithLive, probeLiveColumns } = require('../lib/schema');
 
 const MIGRATIONS_DIR = path.resolve(__dirname, '..', 'migrations');
 const OFFLINE = process.argv.includes('--offline');
@@ -48,7 +48,7 @@ async function main() {
         return;
     }
 
-    console.log('② 線上 Supabase 實際 schema vs 程式要用的欄位');
+    console.log('② 線上實際 schema vs 程式要用的欄位');
     const url = String(process.env.SUPABASE_URL || '').replace(/\/+$/, '');
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key) {
@@ -56,15 +56,22 @@ async function main() {
         process.exitCode = fail ? 1 : 0;
         return;
     }
-    const res = await fetch(`${url}/rest/v1/`, {
+    /* v0.10.0：Supabase 有 OpenAPI 規格（`/rest/v1/` ＋ Accept: application/openapi+json）；
+     * Neon 的 Data API 沒有（回 404）→ 退回「實際查欄位」的探測法（見 lib/schema.js 的 probeLiveColumns）。 */
+    let spec = null;
+    let source = 'openapi';
+    const openapi = await fetch(`${url}/rest/v1/`, {
         headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/openapi+json' }
-    });
-    if (!res.ok) {
-        console.log(`   ✖ 讀不到線上 schema：HTTP ${res.status}`);
-        process.exitCode = 1;
-        return;
+    }).catch(() => null);
+    if (openapi && openapi.ok) {
+        const parsed = await openapi.json().catch(() => null);
+        if (parsed && parsed.definitions && Object.keys(parsed.definitions).length) spec = parsed;
     }
-    const spec = await res.json();
+    if (!spec) {
+        source = 'probe';
+        spec = { definitions: await probeLiveColumns({ url, key }) };
+        console.log('   （這個後端沒有 OpenAPI 規格 → 改用探測法：逐表查程式要用的欄位）');
+    }
     const live = compareWithLive(spec.definitions || {});
     if (live.missing.length) {
         fail += 1;

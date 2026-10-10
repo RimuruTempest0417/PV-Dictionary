@@ -462,10 +462,15 @@ function createApp(options = {}) {
         /* 診斷資訊：只吐不含機密的東西（主機代號、金鑰角色／專案 ref、最後一次錯誤），
          * 用來分辨「連錯專案」「金鑰種類不對」「資料庫真的空的」這三種情況。 */
         const db = typeof store.diagnostics === 'function' ? store.diagnostics() : null;
+        /* v0.10.0：同一個 PostgREST 相容 adapter 可能指向 Supabase 或 Neon ——
+         * 頁尾標籤要顯示真正的服務，不然搬家後還寫 Supabase 會誤導人（與 i18n 的 backend.* 對應）。 */
+        const backendKind = store.backend === 'supabase' && /neon\.tech/.test(String(process.env.SUPABASE_URL || ''))
+            ? 'neon' : store.backend;
         res.json({
             version: PACKAGE.version,
             backend: store.backend,
-            backend_label: DATA_BACKEND_LABEL[store.backend] || store.backend,
+            backend_kind: backendKind,
+            backend_label: DATA_BACKEND_LABEL[backendKind] || store.backend,
             data_file: store.backend === 'json' ? store.dataFile : null,
             schema_ready: store.backend === 'supabase' ? Boolean(db && db.hydrate_ok) : true,
             jwt_secret_configured: Boolean(process.env.JWT_SECRET) && !/^REPLACE_ME/.test(String(process.env.JWT_SECRET)),

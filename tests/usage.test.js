@@ -12,9 +12,9 @@ const path = require('node:path');
 const { DB_QUOTA_BYTES, DB_QUOTA_MB, DB_USAGE_WARN_PERCENT, usagePercent, usageState, humanBytes } = require('../lib/limits');
 const { createJsonStore } = require('../lib/store/json');
 
-test('D-6：配額與門檻是使用者指定的數字（500MB／70%）', () => {
-    assert.equal(DB_QUOTA_MB, 500);
-    assert.equal(DB_QUOTA_BYTES, 500 * 1024 * 1024);
+test('D-6：配額與門檻是使用者指定的數字（1GB／70%；v0.10.0 搬到 Neon 後從 500MB 改成 1GB）', () => {
+    assert.equal(DB_QUOTA_MB, 1024);
+    assert.equal(DB_QUOTA_BYTES, 1024 * 1024 * 1024);
     assert.equal(DB_USAGE_WARN_PERCENT, 70);
 });
 

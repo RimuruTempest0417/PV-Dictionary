@@ -49,6 +49,7 @@ function check(label, ok, detail) {
             shelfHidden: document.getElementById('bookShelf').hidden,
             loaderHidden: document.getElementById('appLoader') ? document.getElementById('appLoader').hidden : true,
             version: document.getElementById('versionLabel') ? document.getElementById('versionLabel').textContent : '',
+            backendLabel: document.getElementById('backendLabel') ? document.getElementById('backendLabel').textContent : '',
             title: document.title,
             kinds: Array.from(document.querySelectorAll('#bookShelf [data-book-id]')).map((node) => node.textContent.trim())
         };`);
@@ -56,6 +57,13 @@ function check(label, ok, detail) {
         check('載入骨架已經收起（不是卡在載入中）', state.loaderHidden === true);
         check('頁面標題是 Gary-Dictionary', /Gary-Dictionary/.test(state.title), state.title);
         check('版本標籤與線上版本一致（不是舊快取）', /^v\d+\.\d+\.\d+$/.test(state.version), state.version);
+        /* v0.10.0：頁尾要顯示**真正的**資料庫名稱（搬到 Neon 之後不可以還寫 Supabase）。
+         * 以 /api/health 的 backend_label 為準：取括號前的名字（Neon／Supabase／本機 JSON），
+         * 頁尾文字必須包含它，兩邊不一致就是標籤沒跟上後端。 */
+        const healthLabel = await browser.evaluate(`return fetch('/api/health').then((r) => r.json()).then((d) => d.backend_label || '').catch(() => '');`);
+        const sourceName = String(healthLabel || '').split(/[（(]/)[0].trim();
+        check('頁尾的資料庫名稱與 /api/health 一致', Boolean(sourceName) && state.backendLabel.includes(sourceName),
+            `${state.backendLabel}｜health=${healthLabel}`);
         /* 年級卡片只顯示年級（v0.5.0 起）：不應該出現任何書名（Book 5A 這種） */
         check('書架只看得到年級（沒有書名）', state.kinds.every((text) => !/Book\s*\w/i.test(text)), state.kinds);
 

@@ -55,7 +55,7 @@
         try {
             const info = await api.get('/api/health');
             state.health = info;
-            const key = `backend.${info.backend}`;
+            const key = `backend.${info.backend_kind || info.backend}`;
             const label = window.PDI18n.has(key) ? t(key) : (info.backend_label || info.backend);
             document.getElementById('backendLabel').textContent = t('app.footerSource', { name: label });
         } catch (err) {

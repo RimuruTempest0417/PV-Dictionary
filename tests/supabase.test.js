@@ -668,13 +668,13 @@ test('v0.7.0（D-6）：/health 回真實資料庫大小與百分比；函式不
     const ok = store.runWithContext(context, () => store.dbUsage());
     assert.equal(ok.available, true);
     assert.equal(ok.bytes, 12345678);
-    assert.equal(ok.percent, 2.4);
+    assert.equal(ok.percent, 1.1);          /* 12,345,678 bytes ÷ 1024MB（v0.10.0 起配額改成 Neon 的 1GB） */
     assert.equal(ok.warn, false);
     assert.equal(ok.warn_percent, 70, '門檻來自 lib/limits.js（使用者指定的 70%）');
     assert.match(String(ok.source), /dict_db_size/);
 
     /* ② 剛好 70%：要算超標（門檻是 ≥，留時間清資料） */
-    fake.flags.dbSize = Math.round(500 * 1024 * 1024 * 0.7);
+    fake.flags.dbSize = Math.round(1024 * 1024 * 1024 * 0.7);
     await store.runWithContext(context, () => store.prefetch({ method: 'GET', path: '/health', query: {}, body: {} }));
     const hot = store.runWithContext(context, () => store.dbUsage());
     assert.equal(hot.percent, 70);
