@@ -68,7 +68,27 @@ async function supabaseUsage() {
     const counts = {};
     for (const table of TABLES) counts[table] = await countOf(`dict_${table}`);
     const errorRows = await countOf('dict_error_logs');
-    return { backend: 'supabase', project: String(process.env.SUPABASE_URL || '').replace(/^https?:\/\//, '').split('.')[0], counts, error_log_rows: errorRows };
+
+    /* D-6（v0.7.0）：資料庫真正的大小 —— 呼叫 v0.7.0 建的 `dict_db_size()`（PostgREST RPC）。
+     * ★ 拿不到就誠實說「不知道」（available:false ＋ 原因），**不要回 0**（那會讓人以為很空）。 */
+    const { usageState } = require('../lib/limits');
+    let usage = usageState(null, { reason: 'dict_db_size() 沒有回數字（函式還沒建立？）' });
+    try {
+        const sizeRes = await fetch(`${url}/rest/v1/rpc/dict_db_size`, {
+            method: 'POST',
+            headers: Object.assign({}, headers, { 'Content-Type': 'application/json' }),
+            body: '{}'
+        });
+        const sizeText = await sizeRes.text();
+        const sizeValue = Number(sizeText);
+        usage = (sizeRes.ok && Number.isFinite(sizeValue))
+            ? usageState(sizeValue, { source: 'dict_db_size()' })
+            : usageState(null, { reason: `dict_db_size() → HTTP ${sizeRes.status}${sizeText ? `：${String(sizeText).slice(0, 80)}` : ''}` });
+    } catch (err) {
+        usage = usageState(null, { reason: `呼叫 dict_db_size() 失敗：${err.message}` });
+    }
+
+    return { backend: 'supabase', project: String(process.env.SUPABASE_URL || '').replace(/^https?:\/\//, '').split('.')[0], counts, error_log_rows: errorRows, usage };
 }
 
 async function main() {
@@ -84,13 +104,27 @@ async function main() {
         console.log(`\n錯誤日誌：${usage.error_log_rows} 筆`);
         if (usage.store_human) console.log(`本機資料檔：${usage.store_human}（錯誤日誌檔 ${usage.error_human}）`);
     }
+    /* D-6：資料庫容量（真實大小 vs 免費方案配額）—— 與 server 同一組數字（lib/limits.js） */
+    if (usage.usage && !AS_JSON) {
+        const u = usage.usage;
+        console.log(u.available
+            ? `資料庫用量：${u.human} / ${u.quota_human}（${u.percent}%）｜警告門檻 ${u.warn_percent}%`
+            : `資料庫用量：⚠ 量不到（${u.reason}）`);
+    }
+
     const warns = [];
+    /* ★ D-6：資料庫用量到門檻（預設 70%）要提醒 —— 而且排程要看得出來（exit code 不是 0） */
+    if (usage.usage && usage.usage.available && usage.usage.warn) {
+        warns.push(`資料庫用量已達 ${usage.usage.percent}%（門檻 ${usage.usage.warn_percent}%）→ 先跑 npm run cleanup:logs（清稽核／錯誤日誌），或刪沒用到的錄音；要換方案看 docs/研究-備份與資料庫替代方案.md`);
+    }
     if ((usage.counts.audit_logs || 0) > AUDIT_WARN) warns.push(`稽核紀錄 ${usage.counts.audit_logs} 筆（超過 ${AUDIT_WARN}）→ 建議跑 npm run cleanup:logs`);
     if (usage.error_log_rows > ERROR_WARN) warns.push(`錯誤日誌 ${usage.error_log_rows} 筆（超過 ${ERROR_WARN}）→ 建議跑 npm run cleanup:logs`);
     if (warns.length) {
         console.log('\n⚠ 要處理：');
         for (const warn of warns) console.log(`  - ${warn}`);
-        process.exitCode = 0;
+        /* ★ v0.7.0（D-6）修正：以前這裡是 `exitCode = 0` —— 有警告卻回成功，
+         *   等於排程／監控永遠看不到（那正是這一項要解的問題）。現在有警告就回 1。 */
+        process.exitCode = 1;
     } else {
         console.log('\n✔ 用量正常（沒有超過提醒門檻）');
     }

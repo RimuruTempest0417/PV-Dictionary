@@ -246,6 +246,27 @@ async function main() {
         await sleep(300);
         const overflow = await browser.evaluate(`return document.documentElement.scrollWidth - window.innerWidth;`);
         check('手機版（402px）切換語言後也沒有橫向溢出', overflow <= 1, `溢出 ${overflow}px`);
+
+        /* ★ v0.7.0：說明頁最下方的角色權限表在手機上曾經把**整頁**撐出橫向捲軸
+         *   （英文欄標題較長：7 欄最少約 500px，面板只有約 332px）。判準是
+         *   「表格必須待在一個會自己橫向捲動的框裡」——英文版表格天生比面板寬，那不是錯誤。 */
+        await browser.evaluate(`document.getElementById('guideBtn').click(); return true;`);
+        await sleep(600);
+        const guideMobile = await browser.evaluate(`return (() => {
+            const tables = Array.from(document.querySelectorAll('#guidePanel table'));
+            return {
+                lang: document.documentElement.lang,
+                tables: tables.length,
+                boxed: tables.length > 0 && tables.every((t) => t.parentElement
+                    && ['auto', 'scroll'].includes(getComputedStyle(t.parentElement).overflowX)),
+                pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+            };
+        })();`);
+        check('說明頁的表格放在可橫向捲動的框裡（v0.7.0）',
+            guideMobile.tables > 0 && guideMobile.boxed, guideMobile);
+        check('開著說明頁時手機寬度也不會橫向溢出（v0.7.0）', guideMobile.pageOverflow <= 1, guideMobile);
+        await browser.evaluate(`document.getElementById('guideBtn').click(); return true;`);
+        await sleep(200);
         await browser.setViewport(1280, 950, false);
 
         const shot = await browser.screenshot(path.join(app.dir, 'should-not-exist.png'));

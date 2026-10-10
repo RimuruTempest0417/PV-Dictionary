@@ -1059,6 +1059,24 @@
             list.appendChild(statsLine('users.title', `${data.users.active}／${data.users.total} · ${data.users.two_factor}`));
             list.appendChild(statsLine('grants.title', data.grants.total));
             list.appendChild(statsLine('audit.title', `${data.recent.total}（7d）`));
+            /* D-6（v0.7.0）：資料庫容量（真實大小 → 百分比）。到了門檻（預設 70%）要用警告色
+             * 並寫清楚「要做什麼」——這一項存在的目的就是讓人不靠記憶也看得到容量。 */
+            if (data.usage) {
+                const u = data.usage;
+                const text = u.available
+                    ? `${u.human} / ${u.quota_human}（${u.percent}%）`
+                    : t('stats.usageUnknown');
+                list.appendChild(el('li', {
+                    class: 'audit-item',
+                    dataset: { tone: u.warn ? 'remove' : 'create', action: 'usage' }
+                }, [
+                    el('div', { class: 'audit-main' }, [
+                        el('span', { class: 'audit-chip', text: t('stats.usage') }),
+                        el('span', { text }),
+                        u.warn ? el('span', { class: 'cell-hint', text: t('stats.usageWarn', { percent: u.warn_percent }) }) : null
+                    ].filter(Boolean))
+                ]));
+            }
             for (const unit of data.per_unit.slice(0, 30)) {
                 unitsBox.appendChild(el('li', { class: 'audit-item', dataset: { tone: unit.published ? 'create' : 'update', action: 'unit' } }, [
                     el('div', { class: 'audit-main' }, [

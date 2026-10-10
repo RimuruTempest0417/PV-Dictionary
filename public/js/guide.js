@@ -164,12 +164,18 @@
                 }
                 table.appendChild(row);
             }
-            box.appendChild(table);
+            /* v0.7.0：表格外面要包一層可橫向捲動的框。
+             * 為什麼：英文版的角色名稱（Site manager／Class rep…）比較長，7 欄的「最小寬度」約 500px，
+             * 而手機上的說明面板只有約 332px → 表格會撐破面板、再撐出**整頁的橫向捲軸**
+             * （iOS 上整頁左右滑很難用，而且會蓋掉操作）。包一層讓表格在自己的框裡滑就好。 */
+            const wrap = document.createElement('div');
+            wrap.className = 'guide-table-wrap';
+            wrap.appendChild(table);
+            box.appendChild(wrap);
         } catch (err) {
             box.textContent = '⚠️ ' + (err.message || String(err));
         }
     }
-
     function render() {
         const box = document.getElementById('guideSections');
         if (!box) return;

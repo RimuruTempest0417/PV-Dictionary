@@ -50,6 +50,8 @@ const AUDIO_MAX_DURATION_MS = 60 * 1000;
  * 這裡選擇「維持存在資料庫」（不導入 Storage，避免為了容量付費升級），
  * 但把上限與用量明確顯示給老師看（錄音視窗與單元統計）。 */
 const AUDIO_MAX_PER_UNIT = 60;
+/* D-6（v0.7.0）：容量與警告門檻的**唯一來源**在 lib/limits.js（server 與腳本共用同一組數字）。 */
+const { usageState } = require('./lib/limits');
 
 /* D-1（v0.6.0）：生字表的伺服器端分頁。
  * 為什麼：一個單元有幾百個生字時，整包一次送出去會讓手機忙很久（而且大部分用不到）。
@@ -468,7 +470,13 @@ function createApp(options = {}) {
             schema_ready: store.backend === 'supabase' ? Boolean(db && db.hydrate_ok) : true,
             jwt_secret_configured: Boolean(process.env.JWT_SECRET) && !/^REPLACE_ME/.test(String(process.env.JWT_SECRET)),
             counts: store.tableCounts(),
-            db
+            db,
+            /* D-6（v0.7.0）：資料庫用量百分比（門檻 70%）。
+             * ★ 抓不到（dict_db_size() 還沒建立、權限沒開）時回 `available:false` ——
+             *   誠實說「不知道」，不假裝是 0%（那會讓監控以為很空）。 */
+            usage: typeof store.dbUsage === 'function'
+                ? store.dbUsage()
+                : usageState(null, { reason: '這個資料層沒有提供用量' })
         });
     });
 
@@ -1850,6 +1858,11 @@ function createApp(options = {}) {
         }));
         const emptyUnits = perUnit.filter((unit) => unit.published === 0 && unit.pending === 0);
         return res.json({
+            /* D-6（v0.7.0）：資料庫用量（bytes／百分比／門檻）—— 概況頁顯示「用了幾 %」，
+             * 到了門檻（預設 70%）前端標紅並提示要清什麼。 */
+            usage: typeof store.dbUsage === 'function'
+                ? store.dbUsage()
+                : usageState(null, { reason: '這個資料層沒有提供用量' }),
             books: { total: books.length, published: books.filter((book) => book.is_published !== false).length },
             units: { total: units.length, published: publishedUnits.length, empty: emptyUnits.length },
             entries: { total: entryTotals.total, published: entryTotals.published, pending: entryTotals.pending },

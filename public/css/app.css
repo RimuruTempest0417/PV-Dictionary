@@ -1629,6 +1629,14 @@ code {
 .guide-steps li { margin-bottom: 0.3rem; }
 
 .guide-table { border-collapse: collapse; font-size: 0.9rem; }
+/* v0.7.0：說明頁最下方的角色權限表在手機上會溢出（英文欄標題較長，7 欄最少約 500px，
+ * 面板只有約 332px）→ 以前會把**整頁**撐出橫向捲軸。現在外面包一層框，讓表格自己橫向捲動，
+ * 頁面不再溢出（guard：live-check 會在 390px 開 Help 面板斷言沒有橫向溢出）。 */
+.guide-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
 .guide-table th,
 .guide-table td { border: 1px solid var(--border); padding: 0.3rem 0.55rem; text-align: center; }
 .guide-table th:first-child { text-align: left; }

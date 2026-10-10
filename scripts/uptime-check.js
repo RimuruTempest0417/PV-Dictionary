@@ -67,6 +67,18 @@ async function main() {
         const dbOk = body && body.db ? body.db.ok !== false : true;
         record('健康端點（含資料庫）', health.status === 200 && body && body.schema_ready === true && dbOk,
             `${health.status}｜${health.ms}ms｜schema_ready=${body ? body.schema_ready : '?'}｜db=${body && body.db ? (body.db.ok === false ? 'fail' : 'ok') : 'n/a'}`);
+
+        /* D-6（v0.7.0）：資料庫容量。門檻（70%）由 lib/limits.js 決定，server 也在用同一組。
+         * ★ 超過門檻 → 這一項算失敗（exit code 1），監控就會叫你。 */
+        const usage = body && body.usage ? body.usage : null;
+        if (usage && usage.available) {
+            record('資料庫容量', !usage.warn,
+                `${usage.human} / ${usage.quota_human}｜${usage.percent}%｜門檻 ${usage.warn_percent}%${usage.warn ? '（要處理：先 npm run cleanup:logs）' : ''}`);
+        } else {
+            /* 量不到（例如 dict_db_size() 還沒建立）不算失敗，但一定要看得到 —— 否則會變成
+             * 「監控說一切正常，其實根本沒量到容量」。 */
+            record('資料庫容量（量不到，其餘照常）', true, usage ? String(usage.reason || 'unknown') : 'health 沒有回 usage');
+        }
     } catch (err) {
         record('健康端點（含資料庫）', false, err.name === 'AbortError' ? '逾時' : err.message);
     }

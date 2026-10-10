@@ -135,6 +135,42 @@ function check(label, ok, detail) {
         };`);
         check('手機寬度不會橫向溢出', mobile.scrollWidth <= mobile.clientWidth + 1, mobile);
 
+        /* 4b. v0.7.0：Help 面板的表格在手機寬度也不可以撐出橫向捲軸。
+         * 為什麼要有這一項：英文版的欄標題（Site manager／Class rep…）比較長，7 欄的「最小寬度」
+         * 約 500px，而手機上的說明面板只有約 332px —— 以前會把整頁撐出約 140px 的橫向捲軸
+         * （使用者 2026-10-10 回報「英語版 Help 最下方的表格是不是突出」）。
+         * 舊的檢查只在書架畫面量，沒有開 Help 面板，所以一直沒看到。 */
+        await browser.evaluate(`document.getElementById('guideBtn').click(); return true;`);
+        await sleep(700);
+        const guideMobile = await browser.evaluate(`return (() => {
+            const dev = document.documentElement;
+            const tables = Array.from(document.querySelectorAll('#guidePanel table'));
+            /* ★ 判準不是「表格比容器窄」（英文版一定比容器寬，那就是它的天性），
+             *   而是「表格必須待在一個可以自己橫向捲動的框裡」→ 才不會把整頁撐開。 */
+            const rows = tables.map((t) => {
+                const parent = t.parentElement;
+                return {
+                    tableW: Math.round(t.getBoundingClientRect().width),
+                    boxW: parent ? parent.clientWidth : null,
+                    boxScrolls: parent ? ['auto', 'scroll'].includes(getComputedStyle(parent).overflowX) : false
+                };
+            });
+            return {
+                lang: document.documentElement.lang,
+                open: document.getElementById('guidePanel').hidden === false,
+                tables: tables.length,
+                rows,
+                pageOverflow: dev.scrollWidth - dev.clientWidth
+            };
+        })();`);
+        check('手機上開 Help 面板不會讓整頁橫向溢出（v0.7.0 修）', guideMobile.pageOverflow <= 1, guideMobile);
+        if (guideMobile.tables > 0) {
+            check('角色權限表待在可橫向捲動的框裡（不撐破面板）',
+                guideMobile.rows.every((row) => row.boxScrolls), guideMobile.rows);
+        }
+        await browser.evaluate(`document.getElementById('guideBtn').click(); return true;`);
+        await sleep(300);
+
         /* 5. 縮放 200%（無障礙）也不可以橫向溢出 */
         await browser.evaluate && await browser.evaluate(`document.documentElement.style.zoom = ''; return true;`);
         const zoomed = await browser.evaluate(`return { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth };`);

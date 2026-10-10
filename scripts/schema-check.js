@@ -74,6 +74,30 @@ async function main() {
         console.log(`   ✔ 線上 ${Object.keys(EXPECTED_COLUMNS).length} 張表的欄位都齊（${Object.keys(spec.definitions || {}).filter((t) => t.startsWith('dict_')).length} 張 dict_ 表）`);
     }
 
+    /* ③ v0.7.0（D-1c／D-6）：資料庫函式有沒有建立。
+     * 為什麼要檢查：這兩個函式是 v0.7.0 新加的，而且**只能由使用者自己在 Supabase SQL Editor 執行**
+     * （我們的 service role 金鑰只能讀寫資料，不能改 schema）。沒建立時 PostgREST 回 404 PGRST202，
+     * 症狀是「生字數整條失敗」與「容量百分比變成不知道」—— 要在這裡一眼看出來。 */
+    console.log('③ 線上資料庫函式（v0.7.0 新增）');
+    for (const fn of ['dict_entry_counts', 'dict_db_size']) {
+        const payload = fn === 'dict_entry_counts' ? '{"unit_ids": null}' : '{}';
+        const res = await fetch(`${url}/rest/v1/rpc/${fn}`, {
+            method: 'POST',
+            headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+            body: payload
+        });
+        const text = (await res.text()).slice(0, 140);
+        if (res.ok) {
+            console.log(`   ✔ ${fn}() 存在`);
+        } else if (res.status === 404 || /PGRST202/.test(text)) {
+            fail += 1;
+            console.log(`   ✖ ${fn}() 不存在（PGRST202）→ 請到 Supabase SQL Editor 執行 v0.7.0 的建立語句（見 docs/規劃書-待完成.md 的 Roadmap）`);
+        } else {
+            fail += 1;
+            console.log(`   ✖ ${fn}() 呼叫失敗：HTTP ${res.status}${text ? `：${text}` : ''}`);
+        }
+    }
+
     console.log(`\n===== schema 檢查：${fail ? '失敗' : '通過'} =====`);
     process.exitCode = fail ? 1 : 0;
 }

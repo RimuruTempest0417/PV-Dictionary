@@ -21,7 +21,7 @@ function fakeSupabase() {
     const db = {};
     for (const name of TABLES) db[name] = [];
     const calls = [];
-    const flags = { failWrites: false, failMessage: '' };
+    const flags = { failWrites: false, failMessage: '', failRpc: false, dbSize: 12345678 };
     const originalFetch = global.fetch;
 
     function tableOf(pathname) {
@@ -59,6 +59,41 @@ function fakeSupabase() {
         /* 只攔 Supabase 的請求；測試自己打本機 server 的 fetch 要放行 */
         if (parsed.hostname !== 'example.supabase.co') return originalFetch(url, init);
         const method = init.method || 'GET';
+        /* ★ v0.7.0（D-1c／D-6）：PostgREST 的函式呼叫 —— POST /rest/v1/rpc/<函式名>。
+         *   真實 PostgREST 找不到函式時回 404 + PGRST202（schema cache 裡沒有），這裡照樣模擬，
+         *   否則「函式沒建好」這種線上才會爆的錯在本機永遠看不到。 */
+        const rpcHit = /\/rest\/v1\/rpc\/([A-Za-z_][A-Za-z0-9_]*)$/.exec(parsed.pathname);
+        if (rpcHit) {
+            const fn = rpcHit[1];
+            const args = init.body ? JSON.parse(init.body) : null;
+            calls.push({ method, table: `rpc:${fn}`, rpc: fn, body: args, headers: init.headers });
+            if (flags.failRpc) {
+                return {
+                    ok: false,
+                    status: 404,
+                    text: async () => JSON.stringify({
+                        message: `Could not find the function public.${fn} in the schema cache`,
+                        code: 'PGRST202'
+                    })
+                };
+            }
+            if (fn === 'dict_entry_counts') {
+                const bucket = new Map();
+                for (const row of db.dict_entries) {
+                    const key = `${row.unit_id}|${row.status}`;
+                    bucket.set(key, (bucket.get(key) || 0) + 1);
+                }
+                const rows = Array.from(bucket.entries()).map(([key, n]) => {
+                    const [unit_id, status] = key.split('|');
+                    return { unit_id: Number(unit_id), status, n };
+                });
+                return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify(rows) };
+            }
+            if (fn === 'dict_db_size') {
+                return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify(flags.dbSize) };
+            }
+            return { ok: false, status: 404, text: async () => JSON.stringify({ message: `unknown rpc ${fn}`, code: 'PGRST202' }) };
+        }
         const table = tableOf(parsed.pathname);
         const idFilter = parsed.searchParams.get('id');
         const wanted = idFilter && idFilter.startsWith('eq.') ? idFilter.slice(3) : null;
@@ -582,4 +617,76 @@ test('視窗化資料層：統計與書架用計數，不需要生字內容', as
     /* 生字內容沒被搬進來：manifest 裡的生字工作集是空的 */
     assert.equal(context.entries.length, 0, '只看書架不應該把生字搬進記憶體');
     fake.restore();
+});
+
+
+/* ============================================================
+ * v0.7.0：D-1c（資料庫聚合）與 D-6（容量月檢）
+ * ============================================================ */
+
+test('v0.7.0（D-1c）：生字數改走資料庫聚合，不再抓 unit_id,status 回來自己算', async (t) => {
+    const fake = withFake(t);
+    /* 先用 full 模式把資料準備好：一個單元、一個已發佈、一個待審核 */
+    const seed = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k', hydrateTtlMs: 0 });
+    await seed.hydrate({ full: true });
+    const book = seed.createBook({ grade: 'S1', sort_order: 1, is_published: true });
+    const unit = seed.createUnit({ book_id: book.id, unit_no: 1, title: 'U1', sort_order: 1, is_published: true });
+    seed.createEntry({ unit_id: unit.id, headword: 'apple', headword_norm: 'apple', status: 'published', sort_order: 1, created_by: 't' });
+    seed.createEntry({ unit_id: unit.id, headword: 'banana', headword_norm: 'banana', status: 'pending', sort_order: 2, created_by: 't' });
+    await seed.flush();
+
+    const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k', hydrateTtlMs: 0 });
+    const context = store.attach();
+    await store.hydrate({ full: false });
+    fake.calls.length = 0;
+    await store.runWithContext(context, () => store.prefetch({ method: 'GET', path: '/admin/stats', query: {}, body: {} }));
+
+    const rpcCalls = fake.calls.filter((call) => call.rpc === 'dict_entry_counts');
+    assert.equal(rpcCalls.length, 1, '生字數要用 rpc 呼叫 dict_entry_counts()');
+    assert.equal(rpcCalls[0].method, 'POST', 'PostgREST 的函式呼叫是 POST /rest/v1/rpc/<函式>');
+    /* ★ 這一條就是 D-1c 的目的：不再搬「每列兩個欄位」回來自己 bucket */
+    const legacy = fake.calls.filter((call) => String(call.select || '').includes('unit_id,status'));
+    assert.deepEqual(legacy, [], '不可以再抓 unit_id,status 回來自己算（那正是要省掉的搬運量）');
+
+    /* 回傳形狀與以前一樣 → countEntries()／countAllEntries() 不用改 */
+    store.runWithContext(context, () => {
+        assert.equal(store.countAllEntries().total, 2);
+        assert.equal(store.countEntries(unit.id, ['published']), 1);
+        assert.equal(store.countEntries(unit.id, ['pending']), 1);
+    });
+});
+
+test('v0.7.0（D-6）：/health 回真實資料庫大小與百分比；函式不存在時誠實說「不知道」', async (t) => {
+    const fake = withFake(t);
+    const store = createSupabaseStore({ url: 'https://example.supabase.co', key: 'k', hydrateTtlMs: 0 });
+    const context = store.attach();
+    await store.hydrate({ full: false });
+
+    /* ① 正常：約 11.77MB → 2.4%，不警告 */
+    fake.flags.dbSize = 12345678;
+    await store.runWithContext(context, () => store.prefetch({ method: 'GET', path: '/health', query: {}, body: {} }));
+    const ok = store.runWithContext(context, () => store.dbUsage());
+    assert.equal(ok.available, true);
+    assert.equal(ok.bytes, 12345678);
+    assert.equal(ok.percent, 2.4);
+    assert.equal(ok.warn, false);
+    assert.equal(ok.warn_percent, 70, '門檻來自 lib/limits.js（使用者指定的 70%）');
+    assert.match(String(ok.source), /dict_db_size/);
+
+    /* ② 剛好 70%：要算超標（門檻是 ≥，留時間清資料） */
+    fake.flags.dbSize = Math.round(500 * 1024 * 1024 * 0.7);
+    await store.runWithContext(context, () => store.prefetch({ method: 'GET', path: '/health', query: {}, body: {} }));
+    const hot = store.runWithContext(context, () => store.dbUsage());
+    assert.equal(hot.percent, 70);
+    assert.equal(hot.warn, true);
+
+    /* ③ 函式還沒建立（PostgREST 回 PGRST202）：available:false＋原因，不可以回 0 */
+    fake.flags.failRpc = true;
+    await store.runWithContext(context, () => store.prefetch({ method: 'GET', path: '/health', query: {}, body: {} }));
+    const unknown = store.runWithContext(context, () => store.dbUsage());
+    assert.equal(unknown.available, false);
+    assert.equal(unknown.bytes, null);
+    assert.equal(unknown.percent, null);
+    assert.match(String(unknown.reason), /PGRST202|schema cache/);
+    fake.flags.failRpc = false;
 });
