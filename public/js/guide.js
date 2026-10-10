@@ -52,6 +52,14 @@
             capability: 'can_manage_content'
         },
         {
+            /* v0.12.0（B-8）：刪除年級／單元 */
+            id: 'deleteContent', audience: 'teacher',
+            covers: ['newUnitBtn', 'newBookBtn'],
+            title: 'guide.delete.title', steps: ['guide.delete.s1', 'guide.delete.s2', 'guide.delete.s3'],
+            ids: ['gradeList', 'unitList'],
+            capability: 'can_manage_content'
+        },
+        {
             id: 'accounts', audience: 'admin',
             covers: ['navUsersBtn', 'navGrantsBtn'],
             title: 'guide.accounts.title', steps: ['guide.accounts.s1', 'guide.accounts.s2', 'guide.accounts.s3'],

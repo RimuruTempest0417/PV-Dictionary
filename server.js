@@ -1545,6 +1545,89 @@ function createApp(options = {}) {
     app.post('/api/units/:id/publish', requireRole('teacher'), (req, res) => setUnitPublished(req, res, true));
     app.post('/api/units/:id/unpublish', requireRole('teacher'), (req, res) => setUnitPublished(req, res, false));
 
+    /* ---------------- 刪除年級／單元（v0.12.0／B-8，使用者指定） ----------------
+     * 規則：
+     *   - 需要 `can_manage_content`（老師以上 → 這裡用 requireRole('teacher')）。
+     *   - **裡面還有東西時只有 web_manager 能刪**：生字與錄音是老師的心血，不能隨手清掉。
+     *   - **兩段式**：先打 `.../delete-preview` 看「會刪掉幾個單元／生字／錄音」，
+     *     確認後帶 `?confirm=1` 才真的刪；沒帶就拿 409 與同一份數字（前端忘了問也刪不掉）。
+     *   - 稽核各留一筆（BOOK_DELETE／UNIT_DELETE）。
+     *   - 刪除走 store 的 `deleteUnitDeep()`／`deleteBookDeep()`（分批刪，避免大單元把資料庫記憶體打爆）。 */
+    function deletionAllowed(req, res, counts) {
+        const hasContent = counts.entries > 0 || counts.units > 0 || counts.audio > 0;
+        if (!hasContent) return true;                                    /* 空的：老師以上就能刪 */
+        if (Roles.roleOf(req.user) === 'web_manager') return true;       /* 有內容：只有網站管理員 */
+        res.status(403).json({
+            error: msg('DELETE_NEEDS_SITE_MANAGER'),
+            code: 'DELETE_NEEDS_SITE_MANAGER',
+            details: counts
+        });
+        return false;
+    }
+    const needsSiteManager = (req, counts) => (counts.entries > 0 || counts.units > 0 || counts.audio > 0)
+        && Roles.roleOf(req.user) !== 'web_manager';
+
+    app.get('/api/units/:id/delete-preview', requireRole('teacher'), async (req, res) => {
+        const unit = store.getUnit(req.params.id);
+        if (!unit) return res.status(404).json({ error: msg('UNIT_NOT_FOUND'), code: 'UNIT_NOT_FOUND' });
+        const counts = await store.countsForUnit(unit.id);
+        return res.json({
+            target: { kind: 'unit', id: unit.id, unit_no: unit.unit_no, title: unit.title || '' },
+            counts,
+            requires_site_manager: needsSiteManager(req, counts)
+        });
+    });
+
+    app.delete('/api/units/:id', requireRole('teacher'), async (req, res) => {
+        const unit = store.getUnit(req.params.id);
+        if (!unit) return res.status(404).json({ error: msg('UNIT_NOT_FOUND'), code: 'UNIT_NOT_FOUND' });
+        const counts = await store.countsForUnit(unit.id);
+        if (!deletionAllowed(req, res, counts)) return undefined;
+        if (String(req.query.confirm || '') !== '1') {
+            return res.status(409).json({ error: msg('DELETE_CONFIRM_REQUIRED'), code: 'DELETE_CONFIRM_REQUIRED', details: counts });
+        }
+        const result = await store.deleteUnitDeep(unit.id);
+        const book = store.getBook(unit.book_id);
+        logAudit(store, {
+            user: req.user,
+            action: 'UNIT_DELETE',
+            targetId: unit.id,
+            details: `${book ? book.grade : ''} U${unit.unit_no}：${unit.title || ''}（連帶刪掉生字 ${counts.entries}、錄音 ${counts.audio}）`,
+            ip: req.ip
+        });
+        return res.json({ ok: true, deleted: result });
+    });
+
+    app.get('/api/books/:id/delete-preview', requireRole('teacher'), async (req, res) => {
+        const book = store.getBook(req.params.id);
+        if (!book) return res.status(404).json({ error: msg('BOOK_NOT_FOUND'), code: 'BOOK_NOT_FOUND' });
+        const counts = await store.countsForBook(book.id);
+        return res.json({
+            target: { kind: 'book', id: book.id, grade: book.grade },
+            counts,
+            requires_site_manager: needsSiteManager(req, counts)
+        });
+    });
+
+    app.delete('/api/books/:id', requireRole('teacher'), async (req, res) => {
+        const book = store.getBook(req.params.id);
+        if (!book) return res.status(404).json({ error: msg('BOOK_NOT_FOUND'), code: 'BOOK_NOT_FOUND' });
+        const counts = await store.countsForBook(book.id);
+        if (!deletionAllowed(req, res, counts)) return undefined;
+        if (String(req.query.confirm || '') !== '1') {
+            return res.status(409).json({ error: msg('DELETE_CONFIRM_REQUIRED'), code: 'DELETE_CONFIRM_REQUIRED', details: counts });
+        }
+        const result = await store.deleteBookDeep(book.id);
+        logAudit(store, {
+            user: req.user,
+            action: 'BOOK_DELETE',
+            targetId: book.id,
+            details: `年級 ${book.grade}（連帶刪掉單元 ${counts.units}、生字 ${counts.entries}、錄音 ${counts.audio}）`,
+            ip: req.ip
+        });
+        return res.json({ ok: true, deleted: result });
+    });
+
     /* ================= 管理：使用者、授權、稽核 ================= */
     app.get('/api/admin/users', requireRole('admin'), (req, res) => {
         const users = store.listUsers().map((user) => Object.assign(publicUser(user), {

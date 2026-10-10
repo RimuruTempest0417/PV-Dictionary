@@ -35,6 +35,10 @@
         "PATCH /api/units/:id",
         "POST /api/units/:id/publish",
         "POST /api/units/:id/unpublish",
+        "GET /api/units/:id/delete-preview",
+        "DELETE /api/units/:id",
+        "GET /api/books/:id/delete-preview",
+        "DELETE /api/books/:id",
         "GET /api/admin/users",
         "POST /api/admin/users",
         "POST /api/admin/users/logout-all",
@@ -53,7 +57,7 @@
         "PATCH /api/admin/error-logs/:id"
     ],
     "counts": {
-        "routes": 51,
-        "layers": 60
+        "routes": 55,
+        "layers": 64
     }
 }

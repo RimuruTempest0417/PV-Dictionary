@@ -142,7 +142,10 @@ function switchTo(target) {
         const url = map.get('SUPABASE_URL_SUPABASE');
         const token = map.get('SUPABASE_SERVICE_ROLE_KEY_SUPABASE');
         if (!url || !token) {
-            console.error('✖ .env 沒有存下 Supabase 的那一組（SUPABASE_URL_SUPABASE／…_KEY_SUPABASE）');
+            console.error('✖ 找不到 Supabase 的那一組（SUPABASE_URL_SUPABASE／…_KEY_SUPABASE）。');
+            console.error('   ★ v0.12.0：使用者在 2026-10-10 決定刪掉 Supabase 專案，所以 .env 的那兩行已註解、');
+            console.error('     這個回滾選項**已停用**。現在的資料庫是 Neon（Data API），回滾請改用備份還原：');
+            console.error('     npm run restore（備份在私有 repo gary-dictionary-backup，見 docs/備份與還原.md）。');
             process.exit(1);
         }
         setVar(lines, KEY_URL, url);

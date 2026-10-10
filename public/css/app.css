@@ -1692,6 +1692,17 @@ code {
     font-size: 0.9rem;
 }
 
+/* v0.12.0（B-8）：刪除的確認列（長在被刪的那一列下面；不用原生 confirm） */
+.grade-row--confirm,
+.unit-row--confirm {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    border-style: dashed;
+    background: var(--background);
+    color: var(--muted-foreground);
+    font-size: 0.9rem;
+}
+
 .grade-name {
     font-weight: 600;
     min-width: 3.5rem;

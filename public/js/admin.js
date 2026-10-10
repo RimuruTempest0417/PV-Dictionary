@@ -468,8 +468,72 @@
                         title: t('bookEdit.edit')
                     }
                 }));
+                /* v0.12.0（B-8）：刪除年級（兩段式；有內容時只有網站管理員刪得掉 —— 後端會擋） */
+                row.appendChild(el('button', {
+                    class: 'btn btn-ghost btn-icon',
+                    type: 'button',
+                    text: '🗑',
+                    attrs: {
+                        'data-action': 'delete-grade',
+                        'data-book-id': book.id,
+                        'aria-label': t('delete.book'),
+                        title: t('delete.book')
+                    }
+                }));
             }
             list.appendChild(row);
+        }
+    }
+
+    /* ---------------- 刪除年級（v0.12.0／B-8，使用者指定） ----------------
+     * 兩段式（不用原生 confirm）：第一次點 🗑 先打 delete-preview 看「會連帶刪掉多少」，
+     * 在那一列下面長出確認列；第二次點「確定刪除」才真的刪（帶 ?confirm=1）。
+     * 有內容（單元／生字／錄音）時只有網站管理員能刪：前端先講清楚，後端也會再擋一次。 */
+    let pendingDeleteRow = null;
+
+    function clearDeleteConfirm() {
+        if (pendingDeleteRow) pendingDeleteRow.remove();
+        pendingDeleteRow = null;
+    }
+
+    async function askDeleteBook(bookId, row) {
+        clearDeleteConfirm();
+        const book = (window.PDState.books || []).find((b) => String(b.id) === String(bookId));
+        try {
+            const preview = await api.get(`/api/books/${bookId}/delete-preview`);
+            const counts = preview.counts || {};
+            const line = el('li', { class: 'grade-row grade-row--confirm' });
+            line.appendChild(el('span', {
+                class: 'grade-meta',
+                text: t('delete.bookPreview', {
+                    units: counts.units || 0, entries: counts.entries || 0, audio: counts.audio || 0
+                })
+            }));
+            if (preview.requires_site_manager) {
+                line.appendChild(el('span', { class: 'grade-meta', text: t('delete.ownerOnly') }));
+            }
+            const confirmBtn = el('button', { class: 'btn btn-danger btn-small', type: 'button', text: t('delete.confirm') });
+            confirmBtn.addEventListener('click', async () => {
+                confirmBtn.disabled = true;
+                try {
+                    await api.del(`/api/books/${bookId}?confirm=1`);
+                    clearDeleteConfirm();
+                    toast(`${t('delete.done')}：${book ? book.grade : ''}`);
+                    await window.PDApp.reloadBooks();
+                    renderGradeList();
+                } catch (err) {
+                    confirmBtn.disabled = false;
+                    toast(window.PDI18n.errorMessage(err), 'error');
+                }
+            });
+            const cancelBtn = el('button', { class: 'btn btn-ghost btn-small', type: 'button', text: t('delete.cancel') });
+            cancelBtn.addEventListener('click', clearDeleteConfirm);
+            line.appendChild(confirmBtn);
+            line.appendChild(cancelBtn);
+            row.after(line);
+            pendingDeleteRow = line;
+        } catch (err) {
+            toast(window.PDI18n.errorMessage(err), 'error');
         }
     }
 
@@ -1168,8 +1232,14 @@
             setFormMessage(document.getElementById('gradeEditMsg'), '');
         });
         document.getElementById('gradeList').addEventListener('click', (event) => {
-            const button = event.target.closest('[data-action="edit-grade"]');
-            if (button) openGradeEdit(button.dataset.bookId);
+            const edit = event.target.closest('[data-action="edit-grade"]');
+            if (edit) {
+                openGradeEdit(edit.dataset.bookId);
+                return;
+            }
+            /* v0.12.0（B-8）：刪除年級（兩段式，確認列長在那一列下面） */
+            const remove = event.target.closest('[data-action="delete-grade"]');
+            if (remove) askDeleteBook(remove.dataset.bookId, remove.closest('.grade-row'));
         });
         document.getElementById('newEntryBtn').addEventListener('click', () => openEntryForm(null));
         document.getElementById('newUnitBtn').addEventListener('click', () => {

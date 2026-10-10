@@ -3,11 +3,13 @@
 線上英文生字字典：學生**點年級 → 選單元 → 看生字表**（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.11.1（本機 Demo ＋ 線上版已上線；資料庫在 Neon）**
+- 目前版本：**v0.12.0（本機 Demo ＋ 線上版已上線；資料庫在 Neon）**
 - 規劃書（**待完成的事都在這**）：`docs/規劃書-待完成.md`｜決策與各版結果：`docs/規劃書-v0.0.1.md`｜部署：`docs/deploy-vercel.md`
+- **發版流程（含「每次更新都要檢查錯誤記錄」）**：`docs/發版流程.md`
 - 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie、介面預設英文可切中文
 - 資料層：**Neon（PostgreSQL）的 Data API**（PostgREST 相容）—— v0.10.0 從 Supabase 搬過去，**程式碼沒有改**
-  （同一個 adapter 換端點與金鑰而已）。切換與回滾：`node scripts/switch-backend.js --status｜--to=neon｜--to=supabase｜--rollback`
+  （同一個 adapter 換端點與金鑰而已）。切換與回滾：`node scripts/switch-backend.js --status｜--to=neon｜--rollback`
+  ｜★ **`--to=supabase` 已停用**（使用者 2026-10-10 決定刪掉 Supabase 專案；要回滾請用 `npm run restore` 還原備份）
 - 線上：**已上線** https://gary-dictionary-mylearning.vercel.app （Vercel `gary-dictionary` ＋ Neon；環境變數已設好）
 
 ---

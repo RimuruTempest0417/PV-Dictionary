@@ -89,6 +89,58 @@
         }
     }
 
+    /* ---------------- 刪除單元（v0.12.0／B-8，使用者指定） ----------------
+     * 兩段式（不用原生 confirm）：第一次點 🗑 先看「會連帶刪掉幾個生字／幾段錄音」，
+     * 第二次點「確定刪除」才真的刪。有生字或錄音時只有網站管理員刪得掉
+     * （後端會回 403 DELETE_NEEDS_SITE_MANAGER，前端只是先講清楚）。 */
+    let pendingUnitDeleteRow = null;
+
+    function clearUnitDeleteConfirm() {
+        if (pendingUnitDeleteRow) pendingUnitDeleteRow.remove();
+        pendingUnitDeleteRow = null;
+    }
+
+    async function askDeleteUnit(unitId, row) {
+        clearUnitDeleteConfirm();
+        const unit = (state.units || []).find((item) => String(item.id) === String(unitId));
+        try {
+            const preview = await window.PDApi.get(`/api/units/${unitId}/delete-preview`);
+            const counts = preview.counts || {};
+            const line = el('li', { class: 'unit-row unit-row--confirm' });
+            line.appendChild(el('span', {
+                class: 'unit-row-count',
+                text: t('delete.unitPreview', { entries: counts.entries || 0, audio: counts.audio || 0 })
+            }));
+            if (preview.requires_site_manager) {
+                line.appendChild(el('span', { class: 'unit-row-count', text: t('delete.ownerOnly') }));
+            }
+            const confirmBtn = el('button', { class: 'btn btn-danger btn-small', type: 'button', text: t('delete.confirm') });
+            confirmBtn.addEventListener('click', async () => {
+                confirmBtn.disabled = true;
+                try {
+                    await window.PDApi.del(`/api/units/${unitId}?confirm=1`);
+                    clearUnitDeleteConfirm();
+                    toast(`${t('delete.done')}：Unit ${unit ? unit.unit_no : ''}`);
+                    const wasSelected = String(state.currentUnitId) === String(unitId);
+                    if (state.currentBookId) await reloadUnits(state.currentBookId);
+                    /* 刪掉的正好是正在看的那個單元 → 改看第一個（不然生字區會找不到東西） */
+                    if (wasSelected && state.units.length) await selectUnit(state.units[0].id);
+                } catch (err) {
+                    confirmBtn.disabled = false;
+                    toast(errText(err), 'error');
+                }
+            });
+            const cancelBtn = el('button', { class: 'btn btn-ghost btn-small', type: 'button', text: t('delete.cancel') });
+            cancelBtn.addEventListener('click', clearUnitDeleteConfirm);
+            line.appendChild(confirmBtn);
+            line.appendChild(cancelBtn);
+            row.after(line);
+            pendingUnitDeleteRow = line;
+        } catch (err) {
+            toast(errText(err), 'error');
+        }
+    }
+
     /* 調整書本順序（B-4）：書架卡片上的 ↑↓（只有能管理教材的人看得到） */
     async function moveBook(bookId, direction) {
         try {
@@ -479,6 +531,13 @@
                         text: '✏️',
                         attrs: { type: 'button', 'data-action': 'edit-unit', title: t('unit.editTitle'), 'aria-label': t('unit.editTitle') },
                         on: { click: () => window.PDAdmin.openUnitEdit(unit.id) }
+                    }),
+                    /* v0.12.0（B-8）：刪除單元（兩段式；裡面還有生字時只有網站管理員刪得掉 —— 後端會擋） */
+                    el('button', {
+                        class: 'unit-row-edit',
+                        text: '🗑',
+                        attrs: { type: 'button', 'data-action': 'delete-unit', title: t('delete.unit'), 'aria-label': t('delete.unit') },
+                        on: { click: () => askDeleteUnit(unit.id, row) }
                     }),
                     el('button', {
                         class: 'unit-row-edit',

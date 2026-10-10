@@ -226,3 +226,50 @@ test('權限對照表（C-2）／D-10：被授權的學生，能力說可以、�
     );
     assert.equal(publishCheck.can_publish, false, 'can_edit 授權不該順便給 can_publish');
 });
+
+/* ★ B-8（v0.12.0）：刪除年級／單元 —— 兩段式確認，而且「裡面還有東西」時只有網站管理員刪得掉。
+ * 這是刻意設計的保護：生字與錄音是老師的心血，不能讓任何一個老師隨手清掉。 */
+test('權限對照表（C-2）／B-8：刪除單元／年級 —— 兩段式確認、有內容只有網站管理員', async (t) => {
+    const app = startServer(t);
+    const teacher = await cookieFor(app.base, 'teacher');
+    const owner = await cookieFor(app.base, 'web_manager');
+    const unitId = app.ids.unit.id;        /* 這個單元裡有生字（campus 等）與一筆老師錄音 */
+
+    /* (1) 預覽：看得見「會連帶刪掉多少」，並明講需不需要網站管理員 */
+    const preview = await (await fetch(`${app.base}/api/units/${unitId}/delete-preview`, { headers: { Cookie: teacher } })).json();
+    assert.ok(preview.counts.entries >= 3, '預覽要回報連帶刪掉的生字數');
+    assert.equal(preview.counts.audio, 1, '預覽要回報連帶刪掉的錄音數');
+    assert.equal(preview.requires_site_manager, true, '裡面有東西 → 需要網站管理員');
+
+    /* (2) 老師（有 can_manage_content）想直接刪掉有內容的單元 → 403，連帶 confirm 也不行 */
+    const denied = await fetch(`${app.base}/api/units/${unitId}?confirm=1`, { method: 'DELETE', headers: { Cookie: teacher } });
+    assert.equal(denied.status, 403, '有生字的單元老師不能刪');
+    assert.ok(app.store.getUnit(unitId), '被拒絕時不可以刪掉任何東西');
+
+    /* (3) 網站管理員但沒有帶 confirm → 409（兩段式），資料還在 */
+    const needsConfirm = await fetch(`${app.base}/api/units/${unitId}`, { method: 'DELETE', headers: { Cookie: owner } });
+    assert.equal(needsConfirm.status, 409, '沒有確認過就不能刪');
+    assert.ok(app.store.getUnit(unitId), '沒確認之前不可以刪');
+
+    /* (4) 網站管理員帶 confirm → 真的刪掉（生字與錄音一起） */
+    const done = await fetch(`${app.base}/api/units/${unitId}?confirm=1`, { method: 'DELETE', headers: { Cookie: owner } });
+    assert.equal(done.status, 200, '網站管理員要能刪掉有內容的單元');
+    assert.equal(app.store.getUnit(unitId), null, '單元要真的消失');
+    assert.deepEqual(app.store.listEntries({ unitId }), [], '生字要一起刪掉');
+    assert.deepEqual(app.store.listAudio({ entryId: app.ids.entry.id }), [], '錄音要一起刪掉');
+
+    /* (5) 稽核要留一筆（誰在什麼時候刪了什麼、連帶刪掉多少） */
+    const logsRaw = app.store.listAuditLogs({});
+    const logs = Array.isArray(logsRaw) ? logsRaw : (logsRaw.items || logsRaw.rows || []);
+    const audit = logs.filter((row) => row.action === 'UNIT_DELETE');
+    assert.equal(audit.length, 1, '刪除要留稽核紀錄');
+    assert.match(audit[0].details, /生字 \d+/, '稽核要寫出連帶刪掉幾個生字');
+
+    /* (6) 空年級：老師就能刪（不需要網站管理員） */
+    const emptyBook = app.store.createBook({ code: 'EMPTY9', name: 'Empty 9', grade: 'S9', sort_order: 9, is_published: true });
+    const emptyPreview = await (await fetch(`${app.base}/api/books/${emptyBook.id}/delete-preview`, { headers: { Cookie: teacher } })).json();
+    assert.equal(emptyPreview.requires_site_manager, false, '空的年級老師就能刪');
+    const emptyDelete = await fetch(`${app.base}/api/books/${emptyBook.id}?confirm=1`, { method: 'DELETE', headers: { Cookie: teacher } });
+    assert.equal(emptyDelete.status, 200, '空的年級老師要刪得掉');
+    assert.equal(app.store.getBook(emptyBook.id), null, '年級要真的消失');
+});

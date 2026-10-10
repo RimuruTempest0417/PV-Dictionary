@@ -1,6 +1,6 @@
 {
     "name": "gary-dictionary",
-    "version": "0.11.1",
+    "version": "0.12.0",
     "description": "Gary-Dictionary — 線上英文生字字典（Express 5 + Neon Data API／PostgREST 相容）",
     "main": "server.js",
     "type": "commonjs",
@@ -18,6 +18,8 @@
         "routes:snapshot": "node scripts/route-inventory.js --write",
         "uptime": "node scripts/uptime-check.js",
         "monitor": "node scripts/monitor.js",
+        "quarterly": "node scripts/quarterly-review.js",
+        "release:check": "node scripts/release-check.js",
         "triage": "node scripts/triage.js",
         "usage": "node scripts/db-usage.js",
         "cleanup:logs": "node scripts/cleanup-logs.js",
