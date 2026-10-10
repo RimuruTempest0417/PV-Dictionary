@@ -3,7 +3,7 @@
 線上英文生字字典：學生**點書本封面 → 選單元 → 看生字表**（生字、讀音、詞性、中文解釋、英文解釋）→ 點 🔊 聽讀音。
 生字由老師／科代表／網頁管理員／被授權的人加入；科代表的新增要老師核准。
 
-- 目前版本：**v0.7.0（本機 Demo ＋ 線上版已上線）**
+- 目前版本：**v0.9.0（本機 Demo ＋ 線上版已上線；備份與還原 A-2 完成）**
 - 規劃書（**待完成的事都在這**）：`docs/規劃書-待完成.md`｜決策與各版結果：`docs/規劃書-v0.0.1.md`｜部署：`docs/deploy-vercel.md`
 - 技術：Node.js + Express 5、原生 HTML/CSS/JS（無建置流程）、JWT 放 HttpOnly cookie、介面預設英文可切中文
 - 線上：**已上線** https://gary-dictionary-mylearning.vercel.app （Vercel `gary-dictionary` ＋ Supabase；環境變數已設好）
@@ -156,6 +156,10 @@ Supabase 專案：`pv-dictionary`（ref `hckozqluooeobvyltcyf`，region `ap-sout
   詳見 `docs/監控與錯誤追查.md`。
 - **稽核匯出與清理**（v0.4.4）：「🧾 稽核紀錄」可以依目前篩選條件**匯出 CSV**（帶 UTF-8 BOM，Excel 直接開；
   以 `= + - @` 開頭的值會補單引號防公式注入），也可以**清理舊紀錄**（第一次按只預覽，第二次才真的刪；保留天數下限 30 天）。
+- **備份與還原**（v0.9.0，A-2）：`npm run backup` 把整個資料庫匯出成 `.jsonl` ＋ `manifest.json`
+  （含每個檔案的 sha256）推到**私有** GitHub repo（保留最近 30 份，只讀不動正式站）；
+  `npm run restore` 可檢查或還原（沒有 `--confirm` 只檢查、不寫入）。
+  演練過把正式站備份還原到 Neon 空庫、8 張表筆數全對；詳見 `docs/備份與還原.md`。
 - **資料層視窗化**（v0.6.1，D-1b）：Supabase 只抓「這一條請求需要的」生字／音檔／稽核切片；
   存取沒被載入的範圍會**大聲失敗**（STORE_WINDOW_MISSING），不會靜默回空資料。書架／統計只抓兩個小欄位算數字。
 - **修改年級**（v0.6.0）：管理區「📗 新增年級」下方列出所有年級，每一列有 ✏️ 可以改名；
